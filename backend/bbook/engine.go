@@ -8,17 +8,41 @@ import (
 	"time"
 )
 
-// Account represents an RTX trading account
+// Account represents a trading account
 type Account struct {
-	ID            int64   `json:"id"`
-	AccountNumber string  `json:"accountNumber"`
-	UserID        string  `json:"userId"`
-	Currency      string  `json:"currency"`
-	Balance       float64 `json:"balance"`
-	Leverage      int     `json:"leverage"`
-	MarginMode    string  `json:"marginMode"` // HEDGING/NETTING
-	Status        string  `json:"status"`
-	IsDemo        bool    `json:"isDemo"`
+	ID            int64           `json:"id"`
+	AccountNumber string          `json:"accountNumber"`
+	UserID        string          `json:"userId"`
+	Username      string          `json:"username"` // New: Admin-assigned username
+	Password      string          `json:"password"` // New: Admin-assigned password
+	Balance       float64         `json:"balance"`
+	Equity        float64         `json:"equity"`
+	Margin        float64         `json:"margin"`
+	FreeMargin    float64         `json:"freeMargin"`
+	MarginLevel   float64         `json:"marginLevel"`
+	Leverage      float64         `json:"leverage"`
+	MarginMode    string          `json:"marginMode"` // HEDGING or NETTING
+	Currency      string          `json:"currency"`
+	Status        string          `json:"status"` // ACTIVE, DISABLED
+	IsDemo        bool            `json:"isDemo"`
+	CreatedAt     int64           `json:"createdAt"`
+	Positions     []*Position     `json:"-"` // Internal use only
+	Orders        []*Order        `json:"-"`
+}
+
+// UpdatePassword updates an account's password
+func (e *Engine) UpdatePassword(accountID int64, newPassword string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	account, ok := e.accounts[accountID]
+	if !ok {
+		return errors.New("account not found")
+	}
+
+	account.Password = newPassword
+	log.Printf("[B-Book] Password updated for account %s", account.AccountNumber)
+	return nil
 }
 
 // Position represents an open position
@@ -88,7 +112,7 @@ type AccountSummary struct {
 	FreeMargin    float64 `json:"freeMargin"`
 	MarginLevel   float64 `json:"marginLevel"` // Percentage
 	UnrealizedPnL float64 `json:"unrealizedPnL"`
-	Leverage      int     `json:"leverage"`
+	Leverage      float64 `json:"leverage"`
 	MarginMode    string  `json:"marginMode"`
 	OpenPositions int     `json:"openPositions"`
 }
@@ -193,15 +217,23 @@ func (e *Engine) GetLedger() *Ledger {
 }
 
 // CreateAccount creates a new RTX account
-func (e *Engine) CreateAccount(userID string, isDemo bool) *Account {
+func (e *Engine) CreateAccount(userID, username, password string, isDemo bool) *Account {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	id := int64(len(e.accounts) + 1)
+	
+	// If no username provided, default to Account Number or UserID
+	if username == "" {
+		username = fmt.Sprintf("RTX-%06d", id)
+	}
+
 	account := &Account{
 		ID:            id,
 		AccountNumber: fmt.Sprintf("RTX-%06d", id),
 		UserID:        userID,
+		Username:      username,
+		Password:      password,
 		Currency:      "USD",
 		Balance:       0,
 		Leverage:      100,
@@ -211,7 +243,7 @@ func (e *Engine) CreateAccount(userID string, isDemo bool) *Account {
 	}
 
 	e.accounts[id] = account
-	log.Printf("[B-Book] Created account %s for user %s", account.AccountNumber, userID)
+	log.Printf("[B-Book] Created account %s (User: %s, Username: %s)", account.AccountNumber, userID, username)
 	return account
 }
 
@@ -619,21 +651,21 @@ func (e *Engine) UpdatePositionPrices() {
 }
 
 // calculateMargin calculates required margin for a trade
-func (e *Engine) calculateMargin(symbol string, volume, price float64, leverage int) float64 {
+func (e *Engine) calculateMargin(symbol string, volume, price float64, leverage float64) float64 {
 	spec, ok := e.symbols[symbol]
 	if !ok {
-		return volume * price * 1000 / float64(leverage) // Fallback
+		return volume * price * 1000 / leverage // Fallback
 	}
 
 	// Margin = (Volume * ContractSize * Price) / Leverage
 	notional := volume * spec.ContractSize * price
-	return notional / float64(leverage)
+	return notional / leverage
 }
 
 // calculatePositionMargin calculates margin for an existing position
-func (e *Engine) calculatePositionMargin(pos *Position, spec *SymbolSpec, leverage int) float64 {
+func (e *Engine) calculatePositionMargin(pos *Position, spec *SymbolSpec, leverage float64) float64 {
 	notional := pos.Volume * spec.ContractSize * pos.OpenPrice
-	return notional / float64(leverage)
+	return notional / leverage
 }
 
 // calculatePnL calculates P/L for a position

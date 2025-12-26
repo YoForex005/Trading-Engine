@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import {
   Users, Settings, BarChart3, Shield, Activity, ArrowUpDown, Wallet,
   AlertTriangle, CheckCircle, XCircle, RefreshCw, Plus, DollarSign,
-  ArrowDownCircle, ArrowUpCircle, Edit2, Eye, Search, Filter
+  ArrowDownCircle, ArrowUpCircle, Edit2, Eye, Search, Filter, Lock
 } from 'lucide-react';
 
 interface Account {
@@ -187,17 +187,10 @@ function AccountsView({ accounts, onSelect, onAction, selected, onRefresh }: {
     a.userId?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleCreateAccount = async () => {
-    try {
-      await fetch('http://localhost:8080/api/account/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: `user-${Date.now()}`, isDemo: true })
-      });
-      onRefresh();
-    } catch (err) {
-      console.error('Failed to create account:', err);
-    }
+  const handleCreateAccount = () => {
+    // Open modal instead of direct fetch
+    onAction('create');
+    onSelect({ id: 0, accountNumber: 'NEW', balance: 0, leverage: 100 } as any); // Dummy account for modal
   };
 
   return (
@@ -285,6 +278,12 @@ function AccountsView({ accounts, onSelect, onAction, selected, onRefresh }: {
                     >
                       <Edit2 size={16} />
                     </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onSelect(account); onAction('reset-password'); }}
+                      className="p-1.5 hover:bg-yellow-500/20 rounded text-yellow-400" title="Reset Password"
+                    >
+                      <Lock size={16} />
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -323,9 +322,9 @@ function LedgerView({ ledger }: { ledger: LedgerEntry[] }) {
               <td className="p-3">#{entry.accountId}</td>
               <td className="p-3">
                 <span className={`px-2 py-0.5 rounded text-xs ${entry.type === 'DEPOSIT' ? 'bg-emerald-500/20 text-emerald-400' :
-                    entry.type === 'WITHDRAW' ? 'bg-red-500/20 text-red-400' :
-                      entry.type === 'REALIZED_PNL' ? 'bg-blue-500/20 text-blue-400' :
-                        'bg-zinc-700 text-zinc-400'
+                  entry.type === 'WITHDRAW' ? 'bg-red-500/20 text-red-400' :
+                    entry.type === 'REALIZED_PNL' ? 'bg-blue-500/20 text-blue-400' :
+                      'bg-zinc-700 text-zinc-400'
                   }`}>
                   {entry.type}
                 </span>
@@ -370,6 +369,13 @@ function Modal({ type, account, onClose, onSuccess }: { type: string, account: A
         // TODO: Implement leverage update
         endpoint = '/admin/adjust';
         body = { ...body, amount: 0, description: `Leverage changed to 1:${leverage}` };
+      } else if (type === 'create') {
+        endpoint = '/api/account/create';
+        // Reuse description as username and reference as password for simplicity
+        body = { userId: `user-${Date.now()}`, username: description, password: reference, isDemo: true };
+      } else if (type === 'reset-password') {
+        endpoint = '/admin/reset-password';
+        body = { accountId: account.id, newPassword: reference };
       }
 
       const res = await fetch(`http://localhost:8080${endpoint}`, {
@@ -399,6 +405,8 @@ function Modal({ type, account, onClose, onSuccess }: { type: string, account: A
           {type === 'deposit' && <><ArrowDownCircle className="text-emerald-400" /> Deposit Funds</>}
           {type === 'withdraw' && <><ArrowUpCircle className="text-red-400" /> Withdraw Funds</>}
           {type === 'edit' && <><Edit2 className="text-blue-400" /> Edit Account</>}
+          {type === 'create' && <><Plus className="text-emerald-400" /> Create New Account</>}
+          {type === 'reset-password' && <><Lock className="text-yellow-400" /> Reset Password</>}
         </h3>
 
         <div className="mb-4 p-3 bg-zinc-800 rounded-lg">
@@ -455,6 +463,32 @@ function Modal({ type, account, onClose, onSuccess }: { type: string, account: A
           </div>
         )}
 
+        {/* New Account Fields */}
+        {type === 'create' && (
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm text-zinc-400 mb-1 block">Username (Optional)</label>
+              <input
+                type="text"
+                value={description} // Reuse description as username state for simplicity or add new state
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Client Name or ID"
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-zinc-400 mb-1 block">Password</label>
+              <input
+                type="password"
+                value={reference} // Reuse reference as password state
+                onChange={(e) => setReference(e.target.value)}
+                placeholder="Secret Password"
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg"
+              />
+            </div>
+          </div>
+        )}
+
         {type === 'edit' && (
           <div className="space-y-4">
             <div>
@@ -473,6 +507,21 @@ function Modal({ type, account, onClose, onSuccess }: { type: string, account: A
           </div>
         )}
 
+        {type === 'reset-password' && (
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm text-zinc-400 mb-1 block">New Password</label>
+              <input
+                type="password"
+                value={reference} // Reuse reference as password state
+                onChange={(e) => setReference(e.target.value)}
+                placeholder="New Secret Password"
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg"
+              />
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-2 mt-6">
           <button
             onClick={onClose}
@@ -484,8 +533,8 @@ function Modal({ type, account, onClose, onSuccess }: { type: string, account: A
             onClick={handleSubmit}
             disabled={loading || ((type === 'deposit' || type === 'withdraw') && !amount)}
             className={`flex-1 px-4 py-2 rounded-lg transition-colors ${type === 'deposit' ? 'bg-emerald-600 hover:bg-emerald-500' :
-                type === 'withdraw' ? 'bg-red-600 hover:bg-red-500' :
-                  'bg-blue-600 hover:bg-blue-500'
+              type === 'withdraw' ? 'bg-red-600 hover:bg-red-500' :
+                'bg-blue-600 hover:bg-blue-500'
               } disabled:opacity-50`}
           >
             {loading ? 'Processing...' : 'Confirm'}

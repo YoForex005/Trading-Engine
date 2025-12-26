@@ -635,8 +635,10 @@ func (h *APIHandler) HandleCreateAccount(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		UserID string `json:"userId"`
-		IsDemo bool   `json:"isDemo"`
+		UserID   string `json:"userId"` // Optional: Client User ID
+		Username string `json:"username,omitempty"` // Admin-assigned username
+		Password string `json:"password,omitempty"` // Admin-assigned password
+		IsDemo   bool   `json:"isDemo"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -648,8 +650,41 @@ func (h *APIHandler) HandleCreateAccount(w http.ResponseWriter, r *http.Request)
 		req.UserID = "default"
 	}
 
-	account := h.engine.CreateAccount(req.UserID, req.IsDemo)
+	account := h.engine.CreateAccount(req.UserID, req.Username, req.Password, req.IsDemo)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(account)
+}
+
+// HandleAdminResetPassword resets an account password
+func (h *APIHandler) HandleAdminResetPassword(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var req struct {
+		AccountID   int64  `json:"accountId"`
+		NewPassword string `json:"newPassword"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.NewPassword == "" {
+		http.Error(w, "New Password cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	err := h.engine.UpdatePassword(req.AccountID, req.NewPassword)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }

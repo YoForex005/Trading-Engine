@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/epic1st/rtx/backend/api"
+	"github.com/epic1st/rtx/backend/auth"
 	"github.com/epic1st/rtx/backend/bbook"
 	"github.com/epic1st/rtx/backend/tickstore"
 	"github.com/epic1st/rtx/backend/ws"
@@ -54,16 +55,20 @@ func main() {
 	// Initialize P/L engine
 	pnlEngine := bbook.NewPnLEngine(bbookEngine)
 
-	// Create demo account with configured balance
-	demoAccount := bbookEngine.CreateAccount("demo-user", true)
-	bbookEngine.GetLedger().SetBalance(demoAccount.ID, brokerConfig.DefaultBalance)
-	demoAccount.Balance = brokerConfig.DefaultBalance
-	log.Printf("[B-Book] Demo account created: %s with $%.2f", demoAccount.AccountNumber, brokerConfig.DefaultBalance)
-
 	// Create B-Book API handlers
 	bbookAPI := bbook.NewAPIHandler(bbookEngine, pnlEngine)
 
-	server := api.NewServer()
+	// Create Auth Service
+	authService := auth.NewService(bbookEngine)
+	
+	// Initialize HTTP server with dependencies
+	server := api.NewServer(authService, bbookAPI)
+
+	// Create demo account with configured balance
+	demoAccount := bbookEngine.CreateAccount("demo-user", "Demo User", "password", true)
+	bbookEngine.GetLedger().SetBalance(demoAccount.ID, brokerConfig.DefaultBalance)
+	demoAccount.Balance = brokerConfig.DefaultBalance
+	log.Printf("[B-Book] Demo account created: %s with $%.2f", demoAccount.AccountNumber, brokerConfig.DefaultBalance)
 	hub := ws.NewHub()
 
 	// Set tick store on hub for storing incoming ticks
@@ -208,14 +213,14 @@ func main() {
 	http.HandleFunc("/api/positions/modify", bbookAPI.HandleModifyPosition)
 
 	// ===== ADMIN ENDPOINTS =====
-	// For deposit/withdraw/adjust (Super Admin)
-
+	// For deposit/withdraw/adjust (Super	// Admin Endpoints
 	http.HandleFunc("/admin/accounts", bbookAPI.HandleAdminGetAccounts)
 	http.HandleFunc("/admin/deposit", bbookAPI.HandleAdminDeposit)
 	http.HandleFunc("/admin/withdraw", bbookAPI.HandleAdminWithdraw)
 	http.HandleFunc("/admin/adjust", bbookAPI.HandleAdminAdjust)
 	http.HandleFunc("/admin/bonus", bbookAPI.HandleAdminBonus)
 	http.HandleFunc("/admin/ledger", bbookAPI.HandleAdminGetLedgerAll)
+	http.HandleFunc("/admin/reset-password", bbookAPI.HandleAdminResetPassword)
 
 	// Execution Mode Toggle (A-Book vs B-Book)
 	http.HandleFunc("/admin/execution-mode", func(w http.ResponseWriter, r *http.Request) {

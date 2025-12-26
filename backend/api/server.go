@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/epic1st/rtx/backend/auth"
+	"github.com/epic1st/rtx/backend/bbook"
 	"github.com/epic1st/rtx/backend/fix"
 	"github.com/epic1st/rtx/backend/oms"
 	"github.com/epic1st/rtx/backend/orders"
@@ -19,6 +20,7 @@ import (
 
 type Server struct {
 	authService     *auth.Service
+	bbookAPI        *bbook.APIHandler
 	omsService      *oms.Service
 	riskEngine      *risk.Engine
 	smartRouter     *router.SmartRouter
@@ -31,9 +33,10 @@ type Server struct {
 	riskCalculator  *risk.RiskCalculator
 }
 
-func NewServer() *Server {
+func NewServer(authService *auth.Service, bbookAPI *bbook.APIHandler) *Server {
 	return &Server{
-		authService:     auth.NewService(),
+		authService:     authService,
+		bbookAPI:        bbookAPI,
 		omsService:      oms.NewService(),
 		riskEngine:      risk.NewEngine(),
 		smartRouter:     router.NewSmartRouter(),
