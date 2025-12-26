@@ -1,0 +1,1294 @@
+openapi: 3.0.3
+info:
+  title: RTX Trading Engine API
+  description: |
+    Complete API documentation for RTX Trading Engine.
+    
+    ## Overview
+    - **B-Book Trading**: Internal execution with RTX balance (NOT broker)
+    - **Admin Panel**: Deposit, withdraw, adjust balances
+    - **Market Data**: Real-time prices and historical data
+    - **Legacy APIs**: OANDA passthrough (deprecated)
+    
+    ## Authentication
+    Most endpoints require JWT authentication via Bearer token.
+  version: 3.0.0
+  contact:
+    name: RTX Support
+    email: support@rtx.com
+
+servers:
+  - url: http://localhost:8080
+    description: Development Server
+
+tags:
+  - name: Auth
+    description: Authentication endpoints
+  - name: B-Book Trading
+    description: RTX internal trading (balance from RTX, not broker)
+  - name: B-Book Positions
+    description: Position management (internal ledger)
+  - name: B-Book Orders
+    description: Order management (internal execution)
+  - name: Admin - Accounts
+    description: SuperAdmin account management
+  - name: Admin - Ledger
+    description: SuperAdmin deposit, withdraw, adjust
+  - name: Market Data
+    description: Real-time and historical price data
+  - name: Risk Calculator
+    description: Lot sizing and margin calculations
+  - name: Legacy - OANDA
+    description: OANDA passthrough (deprecated - use B-Book APIs)
+
+paths:
+  # ===== AUTH =====
+  /login:
+    post:
+      tags: [Auth]
+      summary: User login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  example: trader@rtx.com
+                password:
+                  type: string
+                  example: password123
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Invalid credentials
+
+  /health:
+    get:
+      tags: [Auth]
+      summary: Health check
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: OK
+
+  # ===== B-BOOK TRADING =====
+  /api/account/summary:
+    get:
+      tags: [B-Book Trading]
+      summary: Get RTX account summary
+      description: Returns balance, equity, margin from RTX internal ledger (NOT broker)
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Account summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountSummary'
+        '404':
+          description: Account not found
+
+  /api/account/create:
+    post:
+      tags: [B-Book Trading]
+      summary: Create new RTX account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+                  example: user-123
+                isDemo:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+
+  # ===== B-BOOK POSITIONS =====
+  /api/positions:
+    get:
+      tags: [B-Book Positions]
+      summary: Get open positions
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: List of open positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Position'
+
+  /api/positions/close:
+    post:
+      tags: [B-Book Positions]
+      summary: Close a position
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [positionId]
+              properties:
+                positionId:
+                  type: integer
+                  example: 1
+                volume:
+                  type: number
+                  description: Partial close volume (0 = close all)
+                  example: 0.05
+      responses:
+        '200':
+          description: Position closed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  trade:
+                    $ref: '#/components/schemas/Trade'
+
+  /api/positions/close-bulk:
+    post:
+      tags: [B-Book Positions]
+      summary: Bulk close positions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                accountId:
+                  type: integer
+                  default: 1
+                type:
+                  type: string
+                  enum: [ALL, WINNERS, LOSERS]
+                  description: Close positions by type
+                symbol:
+                  type: string
+                  description: Optional - filter by symbol
+      responses:
+        '200':
+          description: Positions closed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  closedCount:
+                    type: integer
+                  errors:
+                    type: array
+                    items:
+                      type: string
+
+  /api/positions/modify:
+    post:
+      tags: [B-Book Positions]
+      summary: Modify SL/TP for a position
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [positionId]
+              properties:
+                positionId:
+                  type: integer
+                sl:
+                  type: number
+                  description: New Stop Loss
+                tp:
+                  type: number
+                  description: New Take Profit
+      responses:
+        '200':
+          description: Position modified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  position:
+                    $ref: '#/components/schemas/Position'
+
+  # ===== B-BOOK ORDERS =====
+  /api/orders:
+    get:
+      tags: [B-Book Orders]
+      summary: Get orders
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, FILLED, CANCELLED, REJECTED]
+      responses:
+        '200':
+          description: List of orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+
+  /api/orders/market:
+    post:
+      tags: [B-Book Orders]
+      summary: Place market order (B-Book execution)
+      description: Executes order internally using RTX balance. Does NOT route to broker.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, side, volume]
+              properties:
+                accountId:
+                  type: integer
+                  default: 1
+                symbol:
+                  type: string
+                  example: EURUSD
+                side:
+                  type: string
+                  enum: [BUY, SELL]
+                volume:
+                  type: number
+                  example: 0.1
+                sl:
+                  type: number
+                  description: Stop Loss price
+                tp:
+                  type: number
+                  description: Take Profit price
+      responses:
+        '200':
+          description: Order executed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  position:
+                    $ref: '#/components/schemas/Position'
+        '400':
+          description: Order rejected (insufficient margin, invalid symbol, etc.)
+
+  /api/trades:
+    get:
+      tags: [B-Book Orders]
+      summary: Get trade history
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Trade history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Trade'
+
+  /api/ledger:
+    get:
+      tags: [B-Book Orders]
+      summary: Get transaction ledger
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Ledger entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerEntry'
+
+  # ===== ADMIN - ACCOUNTS =====
+  /admin/accounts:
+    get:
+      tags: [Admin - Accounts]
+      summary: List all accounts (SuperAdmin)
+      responses:
+        '200':
+          description: All accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Account'
+
+  # ===== ADMIN - LEDGER =====
+  /admin/deposit:
+    post:
+      tags: [Admin - Ledger]
+      summary: Deposit funds to account
+      description: Add funds via Bank, Crypto, Card, or Manual
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountId, amount]
+              properties:
+                accountId:
+                  type: integer
+                  example: 1
+                amount:
+                  type: number
+                  example: 1000
+                method:
+                  type: string
+                  enum: [BANK, CRYPTO, CARD, MANUAL]
+                  default: MANUAL
+                reference:
+                  type: string
+                  description: External reference (bank txn ID, crypto hash)
+                  example: "0x123abc..."
+                description:
+                  type: string
+                  example: "Crypto deposit from BTC wallet"
+                adminId:
+                  type: string
+                  example: "admin-001"
+      responses:
+        '200':
+          description: Deposit successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  entry:
+                    $ref: '#/components/schemas/LedgerEntry'
+                  newBalance:
+                    type: number
+
+  /admin/withdraw:
+    post:
+      tags: [Admin - Ledger]
+      summary: Withdraw funds from account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountId, amount]
+              properties:
+                accountId:
+                  type: integer
+                amount:
+                  type: number
+                method:
+                  type: string
+                  enum: [BANK, CRYPTO]
+                reference:
+                  type: string
+                description:
+                  type: string
+                adminId:
+                  type: string
+      responses:
+        '200':
+          description: Withdrawal successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  entry:
+                    $ref: '#/components/schemas/LedgerEntry'
+                  newBalance:
+                    type: number
+        '400':
+          description: Insufficient balance
+
+  /admin/adjust:
+    post:
+      tags: [Admin - Ledger]
+      summary: Manual balance adjustment
+      description: Can be positive or negative
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountId, amount, description]
+              properties:
+                accountId:
+                  type: integer
+                amount:
+                  type: number
+                  description: Positive for credit, negative for debit
+                  example: -50
+                description:
+                  type: string
+                  example: "Fee refund"
+                adminId:
+                  type: string
+      responses:
+        '200':
+          description: Adjustment applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  entry:
+                    $ref: '#/components/schemas/LedgerEntry'
+                  newBalance:
+                    type: number
+
+  /admin/bonus:
+    post:
+      tags: [Admin - Ledger]
+      summary: Add bonus to account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountId, amount]
+              properties:
+                accountId:
+                  type: integer
+                amount:
+                  type: number
+                  example: 100
+                description:
+                  type: string
+                  example: "Welcome bonus"
+                adminId:
+                  type: string
+      responses:
+        '200':
+          description: Bonus added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  entry:
+                    $ref: '#/components/schemas/LedgerEntry'
+                  newBalance:
+                    type: number
+
+  /admin/ledger:
+    get:
+      tags: [Admin - Ledger]
+      summary: View all ledger entries (SuperAdmin)
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 500
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [DEPOSIT, WITHDRAW, REALIZED_PNL, COMMISSION, SWAP, ADJUSTMENT, BONUS]
+      responses:
+        '200':
+          description: All ledger entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerEntry'
+
+  # ===== MARKET DATA =====
+  /ticks:
+    get:
+      tags: [Market Data]
+      summary: Get historical tick data
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+            example: EURUSD
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Tick data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tick'
+
+  /ohlc:
+    get:
+      tags: [Market Data]
+      summary: Get OHLC candle data
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: timeframe
+          in: query
+          schema:
+            type: string
+            enum: [1m, 5m, 15m, 30m, 1h, 4h, 1d]
+            default: 1m
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 500
+      responses:
+        '200':
+          description: OHLC data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OHLC'
+
+  # ===== RISK CALCULATOR =====
+  /risk/calculate-lot:
+    get:
+      tags: [Risk Calculator]
+      summary: Calculate lot size from risk percentage
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: riskPercent
+          in: query
+          required: true
+          schema:
+            type: number
+            example: 1
+        - name: slPips
+          in: query
+          required: true
+          schema:
+            type: number
+            example: 20
+      responses:
+        '200':
+          description: Calculated lot size
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  riskPercent:
+                    type: number
+                  riskAmount:
+                    type: number
+                  slPips:
+                    type: number
+                  pipValue:
+                    type: number
+                  lotSize:
+                    type: number
+                  units:
+                    type: integer
+
+  /risk/margin-preview:
+    get:
+      tags: [Risk Calculator]
+      summary: Preview margin requirements
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: volume
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: side
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [BUY, SELL]
+      responses:
+        '200':
+          description: Margin preview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  symbol:
+                    type: string
+                  volume:
+                    type: number
+                  side:
+                    type: string
+                  requiredMargin:
+                    type: number
+                  freeMarginAfter:
+                    type: number
+                  marginLevel:
+                    type: number
+                  canTrade:
+                    type: boolean
+
+  # ===== LEGACY OANDA =====
+  /order:
+    post:
+      tags: [Legacy - OANDA]
+      summary: Place market order via OANDA (deprecated)
+      deprecated: true
+      description: Use /api/orders/market instead for B-Book execution
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                symbol:
+                  type: string
+                side:
+                  type: string
+                volume:
+                  type: number
+      responses:
+        '200':
+          description: Order placed
+
+  /order/limit:
+    post:
+      tags: [Legacy - OANDA]
+      summary: Place limit order
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                symbol:
+                  type: string
+                side:
+                  type: string
+                volume:
+                  type: number
+                price:
+                  type: number
+      responses:
+        '200':
+          description: Order placed
+
+  /order/stop:
+    post:
+      tags: [Legacy - OANDA]
+      summary: Place stop order
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                symbol:
+                  type: string
+                side:
+                  type: string
+                volume:
+                  type: number
+                triggerPrice:
+                  type: number
+      responses:
+        '200':
+          description: Order placed
+
+  /order/stop-limit:
+    post:
+      tags: [Legacy - OANDA]
+      summary: Place stop-limit order
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                symbol:
+                  type: string
+                side:
+                  type: string
+                volume:
+                  type: number
+                triggerPrice:
+                  type: number
+                limitPrice:
+                  type: number
+      responses:
+        '200':
+          description: Order placed
+
+  /orders/pending:
+    get:
+      tags: [Legacy - OANDA]
+      summary: Get pending orders
+      responses:
+        '200':
+          description: Pending orders
+
+  /order/cancel:
+    post:
+      tags: [Legacy - OANDA]
+      summary: Cancel pending order
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                orderId:
+                  type: string
+      responses:
+        '200':
+          description: Order cancelled
+
+  /account:
+    get:
+      tags: [Legacy - OANDA]
+      summary: Get OANDA account (deprecated)
+      deprecated: true
+      description: Use /api/account/summary for RTX balance
+      responses:
+        '200':
+          description: OANDA account info
+
+  /account/info:
+    get:
+      tags: [Legacy - OANDA]
+      summary: Get OANDA account info (deprecated)
+      deprecated: true
+      responses:
+        '200':
+          description: OANDA account info
+
+  /positions:
+    get:
+      tags: [Legacy - OANDA]
+      summary: Get OANDA positions (deprecated)
+      deprecated: true
+      description: Use /api/positions for RTX positions
+      responses:
+        '200':
+          description: OANDA positions
+
+  /position/close:
+    post:
+      tags: [Legacy - OANDA]
+      summary: Close OANDA position
+      deprecated: true
+      responses:
+        '200':
+          description: Position closed
+
+  /position/partial-close:
+    post:
+      tags: [Legacy - OANDA]
+      summary: Partial close position
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                positionId:
+                  type: string
+                volume:
+                  type: number
+      responses:
+        '200':
+          description: Position partially closed
+
+  /position/close-all:
+    post:
+      tags: [Legacy - OANDA]
+      summary: Close all positions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                symbol:
+                  type: string
+                  description: Optional - close only for this symbol
+      responses:
+        '200':
+          description: Positions closed
+
+  /position/modify:
+    post:
+      tags: [Legacy - OANDA]
+      summary: Modify SL/TP
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                positionId:
+                  type: string
+                sl:
+                  type: number
+                tp:
+                  type: number
+      responses:
+        '200':
+          description: Position modified
+
+  /position/breakeven:
+    post:
+      tags: [Legacy - OANDA]
+      summary: Set position to breakeven
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                positionId:
+                  type: string
+      responses:
+        '200':
+          description: Breakeven set
+
+  /position/trailing-stop:
+    post:
+      tags: [Legacy - OANDA]
+      summary: Set trailing stop
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                positionId:
+                  type: string
+                distance:
+                  type: number
+                type:
+                  type: string
+                  enum: [FIXED, STEP, ATR]
+      responses:
+        '200':
+          description: Trailing stop set
+
+  /admin/routes:
+    get:
+      tags: [Legacy - OANDA]
+      summary: Get LP routing rules
+      responses:
+        '200':
+          description: Routing rules
+
+  /admin/lp-status:
+    get:
+      tags: [Legacy - OANDA]
+      summary: Get LP connection status
+      responses:
+        '200':
+          description: LP status
+
+  # ===== WEBSOCKET =====
+  /ws:
+    get:
+      tags: [Market Data]
+      summary: WebSocket for real-time prices
+      description: |
+        Connect via WebSocket to receive real-time price updates.
+        
+        **Message Format:**
+        ```json
+        {
+          "type": "tick",
+          "symbol": "EURUSD",
+          "bid": 1.0850,
+          "ask": 1.0852,
+          "spread": 0.00020,
+          "timestamp": 1703620000000
+        }
+        ```
+      responses:
+        '101':
+          description: WebSocket upgrade
+
+  /ws/account:
+    get:
+      tags: [B-Book Trading]
+      summary: WebSocket for account updates
+      description: |
+        Real-time account equity, margin, and P/L updates.
+        
+        **Message Format:**
+        ```json
+        {
+          "accountId": 1,
+          "balance": 5000,
+          "equity": 4998.50,
+          "margin": 117.73,
+          "freeMargin": 4880.77,
+          "unrealizedPnL": -1.50
+        }
+        ```
+      responses:
+        '101':
+          description: WebSocket upgrade
+
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          type: string
+          enum: [TRADER, ADMIN, SUPER_ADMIN]
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: integer
+        accountNumber:
+          type: string
+          example: RTX-000001
+        userId:
+          type: string
+        currency:
+          type: string
+          default: USD
+        balance:
+          type: number
+        leverage:
+          type: integer
+          default: 100
+        marginMode:
+          type: string
+          enum: [HEDGING, NETTING]
+        status:
+          type: string
+          enum: [ACTIVE, SUSPENDED, CLOSED]
+        isDemo:
+          type: boolean
+
+    AccountSummary:
+      type: object
+      properties:
+        accountId:
+          type: integer
+        accountNumber:
+          type: string
+        currency:
+          type: string
+        balance:
+          type: number
+          description: Account balance (realized P/L only)
+        equity:
+          type: number
+          description: Balance + Unrealized P/L
+        margin:
+          type: number
+          description: Used margin
+        freeMargin:
+          type: number
+          description: Equity - Margin
+        marginLevel:
+          type: number
+          description: (Equity / Margin) * 100
+        unrealizedPnL:
+          type: number
+          description: Total floating P/L
+        leverage:
+          type: integer
+        marginMode:
+          type: string
+        openPositions:
+          type: integer
+
+    Position:
+      type: object
+      properties:
+        id:
+          type: integer
+        accountId:
+          type: integer
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [BUY, SELL]
+        volume:
+          type: number
+        openPrice:
+          type: number
+        currentPrice:
+          type: number
+        openTime:
+          type: string
+          format: date-time
+        sl:
+          type: number
+        tp:
+          type: number
+        swap:
+          type: number
+        commission:
+          type: number
+        unrealizedPnL:
+          type: number
+        status:
+          type: string
+          enum: [OPEN, CLOSED]
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: integer
+        accountId:
+          type: integer
+        symbol:
+          type: string
+        type:
+          type: string
+          enum: [MARKET, LIMIT, STOP, STOP_LIMIT]
+        side:
+          type: string
+          enum: [BUY, SELL]
+        volume:
+          type: number
+        price:
+          type: number
+        triggerPrice:
+          type: number
+        sl:
+          type: number
+        tp:
+          type: number
+        status:
+          type: string
+          enum: [PENDING, FILLED, CANCELLED, REJECTED, EXPIRED]
+        filledPrice:
+          type: number
+        filledAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    Trade:
+      type: object
+      properties:
+        id:
+          type: integer
+        orderId:
+          type: integer
+        positionId:
+          type: integer
+        accountId:
+          type: integer
+        symbol:
+          type: string
+        side:
+          type: string
+        volume:
+          type: number
+        price:
+          type: number
+        realizedPnL:
+          type: number
+        commission:
+          type: number
+        executedAt:
+          type: string
+          format: date-time
+
+    LedgerEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        accountId:
+          type: integer
+        type:
+          type: string
+          enum: [DEPOSIT, WITHDRAW, REALIZED_PNL, COMMISSION, SWAP, ADJUSTMENT, BONUS]
+        amount:
+          type: number
+          description: Positive for credit, negative for debit
+        balanceAfter:
+          type: number
+        currency:
+          type: string
+        description:
+          type: string
+        refType:
+          type: string
+          enum: [TRADE, POSITION, ADMIN, SYSTEM]
+        refId:
+          type: integer
+        adminId:
+          type: string
+        paymentMethod:
+          type: string
+          enum: [BANK, CRYPTO, CARD, MANUAL, BONUS]
+        paymentRef:
+          type: string
+          description: External reference (bank txn, crypto hash)
+        status:
+          type: string
+          enum: [PENDING, COMPLETED, FAILED, REVERSED]
+        createdAt:
+          type: string
+          format: date-time
+
+    Tick:
+      type: object
+      properties:
+        symbol:
+          type: string
+        bid:
+          type: number
+        ask:
+          type: number
+        spread:
+          type: number
+        lp:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    OHLC:
+      type: object
+      properties:
+        time:
+          type: integer
+          description: Unix timestamp
+        open:
+          type: number
+        high:
+          type: number
+        low:
+          type: number
+        close:
+          type: number
+        volume:
+          type: number
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTX Trading Engine - API Documentation</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui.css">
+    <style>
+        body {
+            background: #09090b;
+            margin: 0;
+        }
+        .swagger-ui {
+            background: #09090b;
+        }
+        .swagger-ui .topbar {
+            background: linear-gradient(90deg, #10b981, #059669);
+            padding: 10px 0;
+        }
+        .swagger-ui .topbar .download-url-wrapper .select-label span {
+            color: #fff;
+        }
+        .swagger-ui .topbar .download-url-wrapper input[type=text] {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .swagger-ui .info .title {
+            color: #fff;
+        }
+        .swagger-ui .info .description p {
+            color: #a1a1aa;
+        }
+        .swagger-ui .opblock-tag {
+            color: #e4e4e7;
+            border-color: #27272a;
+        }
+        .swagger-ui .opblock {
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .swagger-ui .opblock.opblock-get {
+            background: rgba(16, 185, 129, 0.1);
+            border-color: #10b981;
+        }
+        .swagger-ui .opblock.opblock-post {
+            background: rgba(59, 130, 246, 0.1);
+            border-color: #3b82f6;
+        }
+        .swagger-ui .opblock.opblock-delete {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: #ef4444;
+        }
+        .swagger-ui .opblock.opblock-deprecated {
+            background: rgba(251, 191, 36, 0.1);
+            border-color: #fbbf24;
+            opacity: 0.7;
+        }
+        .swagger-ui .opblock .opblock-summary-method {
+            border-radius: 4px;
+        }
+        .swagger-ui .opblock .opblock-summary-description {
+            color: #a1a1aa;
+        }
+        .swagger-ui section.models {
+            border-color: #27272a;
+        }
+        .swagger-ui .model-box {
+            background: #18181b;
+        }
+        .swagger-ui .model {
+            color: #e4e4e7;
+        }
+        .swagger-ui table tbody tr td {
+            color: #a1a1aa;
+            border-color: #27272a;
+        }
+        .swagger-ui .response-col_status {
+            color: #10b981;
+        }
+        .swagger-ui .btn {
+            border-radius: 6px;
+        }
+        .swagger-ui select {
+            background: #27272a;
+            color: #e4e4e7;
+            border-color: #3f3f46;
+        }
+        .swagger-ui input[type=text] {
+            background: #27272a;
+            color: #e4e4e7;
+            border-color: #3f3f46;
+        }
+        .swagger-ui textarea {
+            background: #27272a;
+            color: #e4e4e7;
+            border-color: #3f3f46;
+        }
+        /* Tag group colors */
+        .swagger-ui .opblock-tag[data-tag="B-Book Trading"],
+        .swagger-ui .opblock-tag[data-tag="B-Book Positions"],
+        .swagger-ui .opblock-tag[data-tag="B-Book Orders"] {
+            color: #10b981 !important;
+        }
+        .swagger-ui .opblock-tag[data-tag="Admin - Accounts"],
+        .swagger-ui .opblock-tag[data-tag="Admin - Ledger"] {
+            color: #f59e0b !important;
+        }
+        .swagger-ui .opblock-tag[data-tag="Legacy - OANDA"] {
+            color: #6b7280 !important;
+        }
+        .custom-header {
+            background: linear-gradient(90deg, #10b981, #059669);
+            padding: 20px 40px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .custom-header h1 {
+            color: white;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 24px;
+            font-weight: 700;
+        }
+        .custom-header .version {
+            background: rgba(0,0,0,0.2);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .custom-header .status {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: white;
+            font-size: 14px;
+        }
+        .custom-header .status-dot {
+            width: 8px;
+            height: 8px;
+            background: #22c55e;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <div class="custom-header">
+        <h1>🚀 RTX Trading Engine</h1>
+        <span class="version">v3.0 B-Book</span>
+        <div class="status">
+            <span class="status-dot"></span>
+            <span>Server Online</span>
+        </div>
+    </div>
+    <div id="swagger-ui"></div>
+    
+    <script src="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-standalone-preset.js"></script>
+    <script>
+        window.onload = function() {
+            const ui = SwaggerUIBundle({
+                url: "/swagger.yaml",
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout",
+                defaultModelsExpandDepth: 1,
+                defaultModelExpandDepth: 1,
+                docExpansion: "list",
+                filter: true,
+                tagsSorter: function(a, b) {
+                    const order = [
+                        'Auth',
+                        'B-Book Trading',
+                        'B-Book Positions',
+                        'B-Book Orders',
+                        'Admin - Accounts',
+                        'Admin - Ledger',
+                        'Market Data',
+                        'Risk Calculator',
+                        'Legacy - OANDA'
+                    ];
+                    return order.indexOf(a) - order.indexOf(b);
+                }
+            });
+            window.ui = ui;
+        };
+    </script>
+</body>
+</html>
