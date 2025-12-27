@@ -222,7 +222,7 @@ func (h *APIHandler) HandleCloseBulk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	positions := h.engine.GetPositions(req.AccountID)
-	
+
 	// Update prices to ensure P/L is fresh
 	h.engine.UpdatePositionPrices()
 
@@ -416,9 +416,9 @@ func (h *APIHandler) HandleAdminDeposit(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":      true,
-		"entry":        entry,
-		"newBalance":   entry.BalanceAfter,
+		"success":    true,
+		"entry":      entry,
+		"newBalance": entry.BalanceAfter,
 	})
 }
 
@@ -598,6 +598,20 @@ func (h *APIHandler) HandleAdminGetAccounts(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(accounts)
 }
 
+// HandleGetAdminStats returns system-wide statistics
+func (h *APIHandler) HandleGetAdminStats(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	stats := h.engine.GetSystemStats()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
 // HandleAdminGetLedgerAll returns all ledger entries
 func (h *APIHandler) HandleAdminGetLedgerAll(w http.ResponseWriter, r *http.Request) {
 	cors(w)
@@ -614,7 +628,7 @@ func (h *APIHandler) HandleAdminGetLedgerAll(w http.ResponseWriter, r *http.Requ
 	}
 
 	typeFilter := r.URL.Query().Get("type")
-	
+
 	var entries []LedgerEntry
 	if typeFilter != "" {
 		entries = h.engine.GetLedger().GetEntriesByType(typeFilter, limit)
@@ -635,7 +649,7 @@ func (h *APIHandler) HandleCreateAccount(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		UserID   string `json:"userId"` // Optional: Client User ID
+		UserID   string `json:"userId"`             // Optional: Client User ID
 		Username string `json:"username,omitempty"` // Admin-assigned username
 		Password string `json:"password,omitempty"` // Admin-assigned password
 		IsDemo   bool   `json:"isDemo"`
@@ -684,6 +698,84 @@ func (h *APIHandler) HandleAdminResetPassword(w http.ResponseWriter, r *http.Req
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// HandleGetDrawings returns drawings for a symbol
+func (h *APIHandler) HandleGetDrawings(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	accountID := int64(1)
+	if id := r.URL.Query().Get("accountId"); id != "" {
+		if parsed, err := strconv.ParseInt(id, 10, 64); err == nil {
+			accountID = parsed
+		}
+	}
+
+	symbol := r.URL.Query().Get("symbol")
+	if symbol == "" {
+		http.Error(w, "Symbol required", http.StatusBadRequest)
+		return
+	}
+
+	drawings := h.engine.GetDrawings(accountID, symbol)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(drawings)
+}
+
+// HandleSaveDrawing saves a drawing
+func (h *APIHandler) HandleSaveDrawing(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var drawing Drawing
+	if err := json.NewDecoder(r.Body).Decode(&drawing); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if drawing.AccountID == 0 {
+		drawing.AccountID = 1
+	}
+
+	h.engine.SaveDrawing(&drawing)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// HandleDeleteDrawing deletes a drawing
+func (h *APIHandler) HandleDeleteDrawing(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	drawingID := r.URL.Query().Get("id")
+	if drawingID == "" {
+		http.Error(w, "Drawing ID required", http.StatusBadRequest)
+		return
+	}
+
+	accountID := int64(1)
+	if id := r.URL.Query().Get("accountId"); id != "" {
+		if parsed, err := strconv.ParseInt(id, 10, 64); err == nil {
+			accountID = parsed
+		}
+	}
+
+	h.engine.DeleteDrawing(accountID, drawingID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})

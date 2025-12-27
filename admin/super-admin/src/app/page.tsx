@@ -26,16 +26,55 @@ interface LPConfig {
 
 export default function SuperAdminDashboard() {
   const [activeTab, setActiveTab] = useState('overview');
-  const [brokers, setBrokers] = useState<Broker[]>([
-    { id: 'broker_001', name: 'Alpha Trading Ltd', status: 'active', users: 1250, volume: 45600000, createdAt: '2024-01-15' },
-    { id: 'broker_002', name: 'Beta Markets', status: 'active', users: 890, volume: 23400000, createdAt: '2024-03-20' },
-    { id: 'broker_003', name: 'Gamma Forex', status: 'pending', users: 0, volume: 0, createdAt: '2024-12-20' },
-  ]);
-  const [lps, setLPs] = useState<LPConfig[]>([
-    { id: 'lmax_prod', name: 'LMAX Exchange', type: 'FIX', host: 'fix.lmax.com:443', status: 'LOGGED_IN', enabled: true },
-    { id: 'mass_markets', name: 'Mass Markets', type: 'FIX', host: 'fix.massmarkets.com:443', status: 'DISCONNECTED', enabled: false },
-    { id: 'currenex', name: 'Currenex', type: 'FIX', host: 'fix.currenex.com:443', status: 'DISCONNECTED', enabled: false },
-  ]);
+  const [brokers, setBrokers] = useState<Broker[]>([]);
+  const [lps, setLPs] = useState<LPConfig[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      // Fetch Config for Broker Name and LP Status for LPs
+      const [configRes, lpStatusRes, statsRes] = await Promise.all([
+        fetch('http://localhost:8080/api/config'),
+        fetch('http://localhost:8080/admin/lp-status'),
+        fetch('http://localhost:8080/admin/stats')
+      ]);
+
+      if (configRes.ok && statsRes.ok) {
+        const config = await configRes.json();
+        const stats = await statsRes.json();
+
+        // Construct Broker object from real data
+        setBrokers([{
+          id: 'broker_RTX',
+          name: config.brokerName || 'RTX Trading',
+          status: 'active',
+          users: stats.totalUsers || 0,
+          volume: stats.totalVolume || 0,
+          createdAt: '2024-01-01' // Fixed for now
+        }]);
+      }
+
+      if (lpStatusRes.ok) {
+        const lpStatus = await lpStatusRes.json();
+        const lpConfigs: LPConfig[] = [
+          { id: 'OANDA', name: 'OANDA API', type: 'API', host: 'api-fxtrade.oanda.com', status: lpStatus['OANDA'] || 'DISCONNECTED', enabled: true },
+          { id: 'INSTANTSWAP', name: 'InstantSwap', type: 'API', host: 'api.instantswap.app', status: lpStatus['INSTANTSWAP'] || 'DISCONNECTED', enabled: true }
+        ];
+        setLPs(lpConfigs);
+      }
+
+    } catch (error) {
+      console.error('Failed to fetch data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="flex h-screen bg-zinc-950 text-zinc-200">
@@ -212,8 +251,8 @@ function WhiteLabelsView({ brokers }: { brokers: any[] }) {
                 <td className="p-4 font-medium">{broker.name}</td>
                 <td className="p-4">
                   <span className={`px-2 py-0.5 rounded text-xs ${broker.status === 'active' ? 'bg-emerald-500/20 text-emerald-400' :
-                      broker.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' :
-                        'bg-red-500/20 text-red-400'
+                    broker.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' :
+                      'bg-red-500/20 text-red-400'
                     }`}>
                     {broker.status}
                   </span>

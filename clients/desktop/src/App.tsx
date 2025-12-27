@@ -5,6 +5,10 @@ import type { ChartType, Timeframe } from './components/TradingChart';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { BottomDock } from './components/BottomDock';
 import { LayoutDashboard, Zap, Settings, BookOpen, ArrowUpDown } from 'lucide-react';
+import { MarketWatch } from './components/MarketWatch';
+import { TickChart } from './components/TickChart';
+import { DepthOfMarket } from './components/DepthOfMarket';
+import { DataSyncService } from './services';
 
 interface Tick {
   symbol: string;
@@ -52,6 +56,7 @@ interface BrokerConfig {
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [ticks, setTicks] = useState<Record<string, Tick>>({});
+  const [tickHistory, setTickHistory] = useState<Record<string, number[]>>({}); // For Sparklines
   const [selectedSymbol, setSelectedSymbol] = useState('EURUSD');
   const [positions, setPositions] = useState<Position[]>([]);
   const [account, setAccount] = useState<Account | null>(null);
@@ -61,6 +66,20 @@ function App() {
   const [timeframe, setTimeframe] = useState<Timeframe>('1m');
   const [isChartMaximized, setIsChartMaximized] = useState(false);
   const [brokerConfig, setBrokerConfig] = useState<BrokerConfig | null>(null);
+  const [logs, setLogs] = useState<{ time: string, message: string, type: 'info' | 'error' | 'success' }[]>([]);
+  const [toasts, setToasts] = useState<{ id: number, message: string, type: 'info' | 'error' | 'success' }[]>([]);
+
+  // Logging helper with Toast
+  const addLog = (message: string, type: 'info' | 'error' | 'success' = 'info') => {
+    const timestamp = new Date().toLocaleTimeString();
+    setLogs(prev => [...prev, { time: timestamp, message, type }].slice(-100));
+
+    // Add Toast
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+  };
+
   const [dockHeight, setDockHeight] = useState(() => {
     const saved = localStorage.getItem('dockHeight');
     return saved ? parseInt(saved, 10) : 250;
@@ -82,6 +101,11 @@ function App() {
       .then(res => res.json())
       .then(data => setBrokerConfig(data))
       .catch(err => console.error('Failed to fetch config:', err));
+
+    // Start data sync service on mount
+    DataSyncService.start().then(() => {
+      console.log('[App] DataSyncService started');
+    });
   }, []);
 
   // Fetch account and positions from B-Book (NOT OANDA)
@@ -136,12 +160,14 @@ function App() {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log(`WebSocket connected to ${brokerConfig?.priceFeedLP || 'LP'} feed`);
+      addLog('Connected to Real-time Feed', 'success');
     };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'tick') {
+        const midPrice = (data.bid + data.ask) / 2;
+
         setTicks(prev => ({
           ...prev,
           [data.symbol]: {
@@ -149,15 +175,22 @@ function App() {
             prevBid: prev[data.symbol]?.bid
           }
         }));
+
+        setTickHistory(prev => {
+          const hist = prev[data.symbol] || [];
+          // Keep last 40 ticks for sparkline
+          const newHist = [...hist, midPrice].slice(-40);
+          return { ...prev, [data.symbol]: newHist };
+        });
       }
     };
 
     ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      addLog('Connection Error: ' + JSON.stringify(error), 'error');
     };
 
     ws.onclose = () => {
-      console.log('WebSocket disconnected');
+      addLog('Disconnected from feed', 'error');
     };
 
     return () => {
@@ -173,7 +206,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          accountId: 1, // Default B-Book account
+          accountId: parseInt(accountId), // Default B-Book account
           symbol: selectedSymbol,
           side,
           volume
@@ -186,16 +219,16 @@ function App() {
       }
 
       const result = await res.json();
-      console.log('[B-Book] Order executed:', result);
+      addLog(`Order Executed: ${side} ${volume} ${selectedSymbol}`, 'success');
 
       // Refresh positions from B-Book
-      const posRes = await fetch('http://localhost:8080/api/positions?accountId=1');
+      const posRes = await fetch(`http://localhost:8080/api/positions?accountId=${accountId}`);
       if (posRes.ok) {
         const positions = await posRes.json();
         setPositions(positions || []);
       }
     } catch (err: any) {
-      console.error('Order failed:', err);
+      addLog(`Order Failed: ${err.message}`, 'error');
       alert('Order failed: ' + err.message);
     } finally {
       setOrderLoading(false);
@@ -217,7 +250,7 @@ function App() {
       if (!res.ok) throw new Error('Failed to close');
 
       // Refresh positions from B-Book
-      const posRes = await fetch('http://localhost:8080/api/positions?accountId=1');
+      const posRes = await fetch(`http://localhost:8080/api/positions?accountId=${accountId}`);
       if (posRes.ok) {
         setPositions(await posRes.json() || []);
       }
@@ -241,7 +274,7 @@ function App() {
       if (!res.ok) throw new Error('Failed to modify');
 
       // Refresh positions
-      const posRes = await fetch('http://localhost:8080/api/positions?accountId=1');
+      const posRes = await fetch(`http://localhost:8080/api/positions?accountId=${accountId}`);
       if (posRes.ok) {
         setPositions(await posRes.json() || []);
       }
@@ -256,9 +289,9 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          accountId: 1,
+          accountId: parseInt(accountId),
           type,
-          symbol
+          symbol,
         })
       });
 
@@ -268,7 +301,7 @@ function App() {
       console.log('Bulk close result:', result);
 
       // Refresh positions
-      const posRes = await fetch('http://localhost:8080/api/positions?accountId=1');
+      const posRes = await fetch(`http://localhost:8080/api/positions?accountId=${accountId}`);
       if (posRes.ok) {
         setPositions(await posRes.json() || []);
       }
@@ -277,6 +310,64 @@ function App() {
       alert('Bulk close failed');
     }
   }, []);
+
+
+  const [oneClickEnabled, setOneClickEnabled] = useState(false);
+  const [activeMobileTab, setActiveMobileTab] = useState<'CHART' | 'TRADE' | 'ACCOUNT'>('CHART');
+
+  const handlePlacePendingOrder = useCallback(async (price: number, type: 'LIMIT' | 'STOP') => {
+    // Determine side based on current price
+    const currentPrice = ticks[selectedSymbol]?.bid || 0;
+    if (!currentPrice) return;
+
+    const side = price > currentPrice ? 'SELL' : 'BUY'; // Simple logic: click above = SELL LIMIT, below = BUY LIMIT
+
+    // For now, B-Book might only support MARKET. If so, we can't place pending.
+    // But we will try to implement or at least log.
+    // Assuming we send a Limit order.
+    // TODO: Implement Pending Orders in Backend. For now, alert or log.
+    addLog(`One-Click: Placing ${side} LIMIT at ${price.toFixed(5)} (Pending Orders not yet fully supported on B-Book)`, 'info');
+    // alert(`One-Click: Would place ${side} LIMIT at ${price.toFixed(5)}`);
+  }, [selectedSymbol, ticks]);
+
+  const handleDownloadData = useCallback(async () => {
+    try {
+      const res = await fetch(`http://localhost:8080/ohlc?symbol=${selectedSymbol}&timeframe=${timeframe}&limit=5000`);
+      if (!res.ok) {
+        addLog('Failed to fetch data for download', 'error');
+        return;
+      }
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) {
+        addLog('No data available to download', 'info');
+        return;
+      }
+
+      // Create CSV content
+      const csvHeader = 'Time,Open,High,Low,Close,Volume\n';
+      const csvRows = data.map((c: any) => {
+        const date = new Date(c.time * 1000).toISOString();
+        return `${date},${c.open},${c.high},${c.low},${c.close},${c.volume || 0}`;
+      }).join('\n');
+      const csvContent = csvHeader + csvRows;
+
+      // Download file
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${selectedSymbol}_${timeframe}_${Date.now()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      addLog(`Downloaded ${data.length} candles for ${selectedSymbol}`, 'success');
+    } catch (err) {
+      console.error('Download failed:', err);
+      addLog('Download failed', 'error');
+    }
+  }, [selectedSymbol, timeframe]);
 
   if (!isAuthenticated) {
     return <Login onLogin={() => setIsAuthenticated(true)} />;
@@ -287,10 +378,10 @@ function App() {
 
   return (
     <div className="flex h-screen w-full bg-[#09090b] text-zinc-300 overflow-hidden font-sans flex-col">
-      {/* Sidebar - NOW FLEX ROW for layout if we want, but let's keep simple first */}
+      {/* Sidebar - Desktop Only */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <div className="w-14 border-r border-zinc-800 flex flex-col items-center py-4 gap-4 bg-zinc-900/30">
+        <div className="hidden md:flex w-14 border-r border-zinc-800 flex-col items-center py-4 gap-4 bg-zinc-900/30">
           <div className="w-8 h-8 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center text-black font-bold text-xs shadow-lg shadow-emerald-500/20">
             RTX
           </div>
@@ -305,7 +396,7 @@ function App() {
         </div>
 
         {/* Main Content Area */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 pb-16 md:pb-0"> {/* Add padding bottom for mobile nav */}
           {/* Header */}
           <header className="h-9 border-b border-zinc-800 flex items-center justify-between px-3 bg-zinc-900/20">
             <div className="flex items-center gap-3">
@@ -329,30 +420,20 @@ function App() {
           </header>
 
           {/* Middle Section: Market Watch + Chart */}
-          <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 flex overflow-hidden relative">
             {/* Market Watch */}
-            {!isChartMaximized && (
-              <div className="w-56 border-r border-zinc-800 overflow-y-auto flex flex-col">
-                <div className="p-2 border-b border-zinc-800 text-[10px] font-medium text-zinc-500 uppercase flex justify-between items-center sticky top-0 bg-zinc-900/90 backdrop-blur">
-                  <span>Market Watch</span>
-                  <span className="text-emerald-400 normal-case">{sortedSymbols.length} pairs</span>
-                </div>
-                <div className="flex-1 overflow-y-auto">
-                  {sortedSymbols.map((symbol) => (
-                    <MarketWatchRow
-                      key={symbol}
-                      symbol={symbol}
-                      tick={ticks[symbol]}
-                      selected={symbol === selectedSymbol}
-                      onClick={() => setSelectedSymbol(symbol)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+            <div className={`${!isChartMaximized ? 'flex' : 'hidden'} ${activeMobileTab === 'TRADE' ? 'absolute inset-0 z-20 w-full' : 'hidden md:flex w-64'} flex-col overflow-hidden bg-[#09090b] border-r border-zinc-800`}>
+              <MarketWatch
+                ticks={ticks}
+                tickHistory={tickHistory}
+                selectedSymbol={selectedSymbol}
+                onSelectSymbol={setSelectedSymbol}
+                onNewOrder={(sym) => { setSelectedSymbol(sym); /* Open order modal logic if separate */ }}
+              />
+            </div>
 
             {/* Chart Area */}
-            <div className="flex-1 flex flex-col bg-[#131722] relative">
+            <div className={`${activeMobileTab === 'CHART' ? 'flex' : 'hidden md:flex'} flex-1 flex-col bg-[#131722] relative`}>
               {/* Chart Controls */}
               <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900/30">
                 <ChartControls
@@ -362,6 +443,9 @@ function App() {
                   onTimeframeChange={setTimeframe}
                   isMaximized={isChartMaximized}
                   onToggleMaximize={() => setIsChartMaximized(!isChartMaximized)}
+                  oneClickEnabled={oneClickEnabled}
+                  onToggleOneClick={() => setOneClickEnabled(!oneClickEnabled)}
+                  onDownloadData={handleDownloadData}
                 />
 
                 {/* Trade Controls */}
@@ -407,28 +491,96 @@ function App() {
                     positions={positions}
                     onClosePosition={(id) => closePosition(id)}
                     onModifyPosition={modifyPosition}
+                    oneClickEnabled={oneClickEnabled}
+                    onPlacePendingOrder={handlePlacePendingOrder}
                   />
                 </ErrorBoundary>
               </div>
             </div>
+            {/* NEW: Pro Panel (Tick Chart & DOM) - Only visible when maximized chart is NOT active for now, or toggleable */}
+            {!isChartMaximized && (
+              <div className="hidden lg:flex w-72 flex-col border-l border-zinc-800 bg-[#131722] overflow-hidden">
+                <div className="flex-1 p-2 flex flex-col gap-2 overflow-y-auto">
+                  {/* Tick Chart */}
+                  <div className="h-48 shrink-0">
+                    <TickChart symbol={selectedSymbol} currentTick={currentTick} />
+                  </div>
+                  {/* DOM */}
+                  <div className="flex-1 min-h-[300px]">
+                    <DepthOfMarket symbol={selectedSymbol} tick={currentTick} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom Dock - Desktop: Always. Mobile: Only if TRADE or ACCOUNT */}
+          <div className={`
+            ${['TRADE', 'ACCOUNT'].includes(activeMobileTab) ? 'block flex-1' : 'hidden'} 
+            md:block md:flex-none
+          `}>
+            <BottomDock
+              height={dockHeight}
+              onHeightChange={setDockHeight}
+              account={account}
+              positions={positions}
+              orders={[]}
+              // history={tradeHistory}
+              // ledger={ledger}
+              logs={logs}
+              onClosePosition={closePosition}
+              onModifyPosition={modifyPosition}
+              onCancelOrder={() => { }}
+              onCloseBulk={closeBulkPositions}
+            />
           </div>
         </div>
       </div>
 
-      {/* Bottom Dock */}
-      <BottomDock
-        height={dockHeight}
-        onHeightChange={setDockHeight}
-        account={account}
-        positions={positions}
-        orders={[]}
-        // history={tradeHistory}
-        // ledger={ledger}
-        onClosePosition={closePosition}
-        onModifyPosition={modifyPosition}
-        onCancelOrder={() => { }}
-        onCloseBulk={closeBulkPositions}
-      />
+      {/* Mobile Bottom Navigation */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 h-14 bg-zinc-950 border-t border-zinc-800 flex items-center justify-around z-50">
+        <button
+          onClick={() => setActiveMobileTab('CHART')}
+          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded transition-colors ${activeMobileTab === 'CHART' ? 'text-emerald-400' : 'text-zinc-500'}`}
+        >
+          <Zap size={20} />
+          <span className="text-[10px] font-medium">Chart</span>
+        </button>
+        <button
+          onClick={() => setActiveMobileTab('TRADE')}
+          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded transition-colors ${activeMobileTab === 'TRADE' ? 'text-emerald-400' : 'text-zinc-500'}`}
+        >
+          <ArrowUpDown size={20} />
+          <span className="text-[10px] font-medium">Trade</span>
+        </button>
+        <button
+          onClick={() => setActiveMobileTab('ACCOUNT')}
+          className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded transition-colors ${activeMobileTab === 'ACCOUNT' ? 'text-emerald-400' : 'text-zinc-500'}`}
+        >
+          <LayoutDashboard size={20} />
+          <span className="text-[10px] font-medium">Account</span>
+        </button>
+      </div>
+
+      {/* Toast Container */}
+      <div className="fixed top-16 right-4 z-[60] flex flex-col gap-2 pointer-events-none max-w-sm w-full items-end">
+        {toasts.map(toast => (
+          <div
+            key={toast.id}
+            className={`
+              pointer-events-auto px-4 py-2.5 rounded-lg shadow-2xl border backdrop-blur-md flex items-center gap-3 min-w-[200px]
+              ${toast.type === 'success' ? 'bg-emerald-950/80 border-emerald-500/30 text-emerald-400 shadow-emerald-500/10' : ''}
+              ${toast.type === 'error' ? 'bg-red-950/80 border-red-500/30 text-red-500 shadow-red-500/10' : ''}
+              ${toast.type === 'info' ? 'bg-blue-950/80 border-blue-500/30 text-blue-400 shadow-blue-500/10' : ''}
+            `}
+          >
+            <div className={`w-2 h-2 rounded-full ${toast.type === 'success' ? 'bg-emerald-500' :
+              toast.type === 'error' ? 'bg-red-500' : 'bg-blue-500'
+              }`} />
+            <span className="text-xs font-medium">{toast.message}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -440,34 +592,7 @@ function formatPrice(price: number, symbol: string): string {
   return price.toFixed(5);
 }
 
-function MarketWatchRow({ symbol, tick, selected, onClick }: {
-  symbol: string;
-  tick: Tick;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  const direction = tick?.prevBid !== undefined
-    ? tick.bid > tick.prevBid ? 'up' : tick.bid < tick.prevBid ? 'down' : 'none'
-    : 'none';
 
-  return (
-    <div
-      onClick={onClick}
-      className={`flex items-center justify-between px-2 py-1 cursor-pointer transition-all text-xs ${selected ? 'bg-emerald-500/10 border-l-2 border-emerald-500' : 'hover:bg-zinc-800/50 border-l-2 border-transparent'
-        }`}
-    >
-      <div className="flex items-center gap-1.5">
-        <ArrowUpDown className={`w-2.5 h-2.5 ${direction === 'up' ? 'text-emerald-400' : direction === 'down' ? 'text-red-400' : 'text-zinc-600'
-          }`} />
-        <span className="font-medium">{symbol}</span>
-      </div>
-      <div className="text-right font-mono">
-        <div className="text-emerald-400">{tick?.bid ? formatPrice(tick.bid, symbol) : '---'}</div>
-        <div className="text-[10px] text-red-400">{tick?.ask ? formatPrice(tick.ask, symbol) : '---'}</div>
-      </div>
-    </div>
-  );
-}
 
 function NavItem({ icon, active }: { icon: React.ReactNode; active?: boolean }) {
   return (

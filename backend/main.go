@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/epic1st/rtx/backend/api"
 	"github.com/epic1st/rtx/backend/auth"
@@ -16,25 +18,26 @@ import (
 
 // LP API Keys - In production, use environment variables
 const OANDA_API_KEY = "977e1a77e25bac3a688011d6b0e845dd-8e3ab3a7682d9351af4c33be65e89b70"
+
 type BrokerConfig struct {
-	BrokerName      string  `json:"brokerName"`
-	PriceFeedLP     string  `json:"priceFeedLP"`     // Current price feed provider
-	ExecutionMode   string  `json:"executionMode"`   // BBOOK or ABOOK
-	DefaultLeverage int     `json:"defaultLeverage"`
-	DefaultBalance  float64 `json:"defaultBalance"`  // Demo account starting balance
-	MarginMode      string  `json:"marginMode"`      // HEDGING or NETTING
-	MaxTicksPerSymbol int   `json:"maxTicksPerSymbol"`
+	BrokerName        string  `json:"brokerName"`
+	PriceFeedLP       string  `json:"priceFeedLP"`   // Current price feed provider
+	ExecutionMode     string  `json:"executionMode"` // BBOOK or ABOOK
+	DefaultLeverage   int     `json:"defaultLeverage"`
+	DefaultBalance    float64 `json:"defaultBalance"` // Demo account starting balance
+	MarginMode        string  `json:"marginMode"`     // HEDGING or NETTING
+	MaxTicksPerSymbol int     `json:"maxTicksPerSymbol"`
 }
 
 // Global broker configuration - modifiable from admin
 var brokerConfig = BrokerConfig{
-	BrokerName:      "RTX Trading",
-	PriceFeedLP:     "OANDA",      // Can be changed to other LPs
-	ExecutionMode:   "BBOOK",      // BBOOK (internal) or ABOOK (LP passthrough)
-	DefaultLeverage: 100,
-	DefaultBalance:  5000.0,
-	MarginMode:      "HEDGING",
-	MaxTicksPerSymbol: 50000,
+	BrokerName:        "RTX Trading",
+	PriceFeedLP:       "OANDA", // Can be changed to other LPs
+	ExecutionMode:     "BBOOK", // BBOOK (internal) or ABOOK (LP passthrough)
+	DefaultLeverage:   100,
+	DefaultBalance:    5000.0,
+	MarginMode:        "HEDGING",
+	MaxTicksPerSymbol: 200000,
 }
 
 // For backward compatibility
@@ -52,6 +55,14 @@ func main() {
 	// Initialize B-Book engine
 	bbookEngine := bbook.NewEngine()
 
+	// Load saved state
+	if err := bbookEngine.Load(); err != nil {
+		log.Printf("[B-Book] Warning: Failed to load saved state: %v", err)
+	}
+
+	// Start auto-save (every 30 seconds)
+	bbookEngine.StartAutoSave(30*time.Second, nil)
+
 	// Initialize P/L engine
 	pnlEngine := bbook.NewPnLEngine(bbookEngine)
 
@@ -60,25 +71,32 @@ func main() {
 
 	// Create Auth Service
 	authService := auth.NewService(bbookEngine)
-	
+
 	// Initialize HTTP server with dependencies
 	server := api.NewServer(authService, bbookAPI)
 
-	// Create demo account with configured balance
-	demoAccount := bbookEngine.CreateAccount("demo-user", "Demo User", "password", true)
-	bbookEngine.GetLedger().SetBalance(demoAccount.ID, brokerConfig.DefaultBalance)
-	demoAccount.Balance = brokerConfig.DefaultBalance
-	log.Printf("[B-Book] Demo account created: %s with $%.2f", demoAccount.AccountNumber, brokerConfig.DefaultBalance)
+	// Create demo account with configured balance (only if no accounts exist)
+	if len(bbookEngine.GetAllAccounts()) == 0 {
+		demoAccount := bbookEngine.CreateAccount("demo-user", "Demo User", "password", true)
+		bbookEngine.GetLedger().SetBalance(demoAccount.ID, brokerConfig.DefaultBalance)
+		demoAccount.Balance = brokerConfig.DefaultBalance
+		log.Printf("[B-Book] Demo account created: %s with $%.2f", demoAccount.AccountNumber, brokerConfig.DefaultBalance)
+	} else {
+		log.Printf("[B-Book] Loaded %d existing accounts", len(bbookEngine.GetAllAccounts()))
+	}
 	hub := ws.NewHub()
 
 	// Set tick store on hub for storing incoming ticks
 	hub.SetTickStore(tickStore)
-	
+
 	// Set B-Book engine on hub for dynamic symbol registration
 	hub.SetBBookEngine(bbookEngine)
 
 	// Set tick store on server for API access
 	server.SetTickStore(tickStore)
+
+	// Load initial prices from store to populate cache
+	hub.LoadLatestPricesFromStore()
 
 	// Wire B-Book engine to get prices from market data
 	bbookEngine.SetPriceCallback(func(symbol string) (bid, ask float64, ok bool) {
@@ -92,17 +110,24 @@ func main() {
 	// Start WebSocket hub
 	go hub.Run()
 
-	// Connect to OANDA as our Market Data Provider (NOT for trading)
-	apiKey := os.Getenv("OANDA_API_KEY")
-	if apiKey == "" {
-		apiKey = OANDA_API_KEY
+	// Connect to OANDA LP
+	oandaKey := os.Getenv("OANDA_API_KEY")
+	if oandaKey != "" {
+		if err := hub.ConnectToOandaLP(oandaKey); err != nil {
+			log.Printf("Failed to connect to OANDA: %v", err)
+		} else {
+			hub.SetActiveLP("OANDA")
+		}
+	} else {
+		log.Println("No OANDA_API_KEY found. Skipping OANDA connection.")
 	}
 
-	log.Println("[STARTUP] Connecting to Market Data Provider: OANDA...")
-	if err := hub.ConnectToOandaLP(apiKey); err != nil {
-		log.Printf("[STARTUP] Warning: Could not connect to OANDA: %v", err)
+	// Connect to InstantSwap LP (New Feed)
+	// We force this for now as requested
+	if err := hub.ConnectToInstantSwapLP(); err != nil {
+		log.Printf("Failed to connect to InstantSwap: %v", err)
 	} else {
-		log.Println("[STARTUP] OANDA connected - REAL market data streaming")
+		hub.SetActiveLP("INSTANTSWAP") // Override to InstantSwap
 	}
 
 	// Pass hub to server
@@ -119,13 +144,36 @@ func main() {
 	})
 
 	// Swagger API Documentation
-	http.HandleFunc("/docs", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "swagger-ui.html")
-	})
+
 	http.HandleFunc("/swagger.yaml", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/yaml")
 		http.ServeFile(w, r, "swagger.yaml")
+	})
+
+	// ===== TICK HISTORY API =====
+	http.HandleFunc("/api/ticks/history", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if r.Method == "OPTIONS" {
+			return
+		}
+
+		symbol := r.URL.Query().Get("symbol")
+		if symbol == "" {
+			http.Error(w, "symbol required", http.StatusBadRequest)
+			return
+		}
+
+		limitStr := r.URL.Query().Get("limit")
+		limit := 300 // Default limit
+		if limitStr != "" {
+			fmt.Sscanf(limitStr, "%d", &limit)
+		}
+
+		history := tickStore.GetHistory(symbol, limit)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(history)
 	})
 
 	// ===== DYNAMIC BROKER CONFIGURATION API =====
@@ -140,9 +188,11 @@ func main() {
 		}
 
 		if r.Method == "GET" {
-			// Return current config
+			// Return current config with active LP from Hub
+			configResponse := brokerConfig
+			configResponse.PriceFeedLP = hub.GetActiveLP() // Dynamic LP from Hub state
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(brokerConfig)
+			json.NewEncoder(w).Encode(configResponse)
 			return
 		}
 
@@ -220,7 +270,13 @@ func main() {
 	http.HandleFunc("/admin/adjust", bbookAPI.HandleAdminAdjust)
 	http.HandleFunc("/admin/bonus", bbookAPI.HandleAdminBonus)
 	http.HandleFunc("/admin/ledger", bbookAPI.HandleAdminGetLedgerAll)
+	http.HandleFunc("/admin/stats", bbookAPI.HandleGetAdminStats)
 	http.HandleFunc("/admin/reset-password", bbookAPI.HandleAdminResetPassword)
+
+	// Drawing API
+	http.HandleFunc("/api/drawings", bbookAPI.HandleGetDrawings)
+	http.HandleFunc("/api/drawings/save", bbookAPI.HandleSaveDrawing)
+	http.HandleFunc("/api/drawings/delete", bbookAPI.HandleDeleteDrawing)
 
 	// Execution Mode Toggle (A-Book vs B-Book)
 	http.HandleFunc("/admin/execution-mode", func(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +292,7 @@ func main() {
 		if r.Method == "GET" {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"mode":        executionMode,
+				"mode": executionMode,
 				"description": map[string]string{
 					"BBOOK": "Internal execution - orders processed by RTX engine using internal balance",
 					"ABOOK": "LP passthrough - orders routed to OANDA (requires active LP connection)",
@@ -263,10 +319,10 @@ func main() {
 
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success":  true,
-				"oldMode":  oldMode,
-				"newMode":  executionMode,
-				"message":  "Execution mode updated. Price feed remains connected to OANDA.",
+				"success": true,
+				"oldMode": oldMode,
+				"newMode": executionMode,
+				"message": "Execution mode updated. Price feed remains connected to OANDA.",
 			})
 			return
 		}
@@ -305,6 +361,79 @@ func main() {
 	http.HandleFunc("/admin/routes", server.HandleGetRoutes)
 	http.HandleFunc("/admin/lp-status", server.HandleLPStatus)
 
+	// LP Switcher - Dynamic switch between OANDA and InstantSwap
+	http.HandleFunc("/admin/lp-switch", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method == "GET" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"activeLP":  hub.GetActiveLP(),
+				"available": []string{"OANDA", "INSTANTSWAP"},
+			})
+			return
+		}
+
+		if r.Method == "POST" {
+			var req struct {
+				LP string `json:"lp"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+
+			if req.LP != "OANDA" && req.LP != "INSTANTSWAP" {
+				http.Error(w, "lp must be OANDA or INSTANTSWAP", http.StatusBadRequest)
+				return
+			}
+
+			currentLP := hub.GetActiveLP()
+			if currentLP == req.LP {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success":  true,
+					"message":  "Already using " + req.LP,
+					"activeLP": req.LP,
+				})
+				return
+			}
+
+			// Switch LP
+			var switchErr error
+			if req.LP == "OANDA" {
+				oandaKey := os.Getenv("OANDA_API_KEY")
+				if oandaKey == "" {
+					oandaKey = OANDA_API_KEY
+				}
+				switchErr = hub.ConnectToOandaLP(oandaKey)
+			} else if req.LP == "INSTANTSWAP" {
+				switchErr = hub.ConnectToInstantSwapLP()
+			}
+
+			if switchErr != nil {
+				http.Error(w, "Failed to switch LP: "+switchErr.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			hub.SetActiveLP(req.LP)
+			log.Printf("[ADMIN] LP switched: %s → %s", currentLP, req.LP)
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"oldLP":   currentLP,
+				"newLP":   req.LP,
+				"message": "Switched to " + req.LP,
+			})
+			return
+		}
+	})
+
 	// WebSocket for real-time prices AND account updates
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws.ServeWs(hub, w, r)
@@ -339,7 +468,10 @@ func main() {
 	log.Println("    POST /admin/bonus           - Add Bonus")
 	log.Println("    GET  /admin/ledger          - View All Transactions")
 	log.Println("")
-	log.Printf("  Demo Account: %s | Balance: $%.2f", demoAccount.AccountNumber, brokerConfig.DefaultBalance)
+	accounts := bbookEngine.GetAllAccounts()
+	if len(accounts) > 0 {
+		log.Printf("  Active Accounts: %d | Balance: $%.2f", len(accounts), accounts[0].Balance)
+	}
 	log.Println("═══════════════════════════════════════════════════════════")
 
 	if err := http.ListenAndServe(":8080", nil); err != nil {

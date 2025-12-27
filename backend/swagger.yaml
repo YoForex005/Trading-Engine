@@ -34,6 +34,12 @@ tags:
     description: SuperAdmin account management
   - name: Admin - Ledger
     description: SuperAdmin deposit, withdraw, adjust
+  - name: Admin - LP Management
+    description: Liquidity Provider switching and management
+  - name: Chart Drawings
+    description: User chart drawings (trendlines, rectangles, etc.)
+  - name: Configuration
+    description: Platform configuration endpoints
   - name: Market Data
     description: Real-time and historical price data
   - name: Risk Calculator
@@ -1036,6 +1042,182 @@ paths:
         '101':
           description: WebSocket upgrade
 
+  # ===== DRAWINGS API =====
+  /api/drawings:
+    get:
+      tags: [Chart Drawings]
+      summary: Get chart drawings for a symbol
+      description: Retrieve all user drawings (trendlines, rectangles, etc.) for a specific chart
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 1
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+            example: EURUSD
+      responses:
+        '200':
+          description: List of drawings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Drawing'
+
+  /api/drawings/save:
+    post:
+      tags: [Chart Drawings]
+      summary: Save or update a drawing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Drawing'
+      responses:
+        '200':
+          description: Drawing saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /api/drawings/delete:
+    post:
+      tags: [Chart Drawings]
+      summary: Delete a drawing
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Drawing ID
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Drawing deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  # ===== CONFIG API =====
+  /api/config:
+    get:
+      tags: [Configuration]
+      summary: Get broker configuration
+      description: Returns current broker settings including active LP, execution mode, etc.
+      responses:
+        '200':
+          description: Broker configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerConfig'
+
+  # ===== TICK HISTORY API =====
+  /api/ticks/history:
+    get:
+      tags: [Market Data]
+      summary: Get tick history for charting
+      description: Returns historical tick data for Tick Charts and Time & Sales
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+            example: BTCUSD
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+      responses:
+        '200':
+          description: Historical ticks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tick'
+
+  # ===== LP SWITCH API =====
+  /admin/lp-switch:
+    post:
+      tags: [Admin - LP Management]
+      summary: Switch active liquidity provider
+      description: Switch between OANDA and InstantSwap price feeds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lp]
+              properties:
+                lp:
+                  type: string
+                  enum: [OANDA, INSTANTSWAP]
+                  example: INSTANTSWAP
+      responses:
+        '200':
+          description: LP switched successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  activeLP:
+                    type: string
+
+  # ===== ADMIN STATS =====
+  /admin/stats:
+    get:
+      tags: [Admin - Accounts]
+      summary: Get platform statistics
+      description: Returns total accounts, positions, volume, and P/L stats
+      responses:
+        '200':
+          description: Platform statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalAccounts:
+                    type: integer
+                  totalBalance:
+                    type: number
+                  totalPositions:
+                    type: integer
+                  totalVolume:
+                    type: number
+                  totalPnL:
+                    type: number
+
 components:
   schemas:
     User:
@@ -1285,6 +1467,73 @@ components:
         close:
           type: number
         volume:
+          type: number
+
+    Drawing:
+      type: object
+      description: Chart drawing object (trendline, rectangle, etc.)
+      properties:
+        id:
+          type: string
+          example: draw_1703620000000
+        accountId:
+          type: integer
+          example: 1
+        symbol:
+          type: string
+          example: EURUSD
+        type:
+          type: string
+          enum: [line, horizontal_line, rectangle, text]
+          example: line
+        points:
+          type: array
+          items:
+            type: object
+            properties:
+              time:
+                type: integer
+                description: Unix timestamp
+              price:
+                type: number
+        options:
+          type: object
+          description: Drawing-specific options (color, style, etc.)
+          properties:
+            color:
+              type: string
+              example: "#3b82f6"
+
+    BrokerConfig:
+      type: object
+      description: Broker/platform configuration
+      properties:
+        brokerName:
+          type: string
+          example: RTX Trading
+        executionMode:
+          type: string
+          enum: [ABOOK, BBOOK]
+          example: BBOOK
+        priceFeedLP:
+          type: string
+          enum: [OANDA, INSTANTSWAP]
+          example: INSTANTSWAP
+        defaultBalance:
+          type: number
+          example: 5000
+        maxTicksPerSymbol:
+          type: integer
+          example: 5000
+
+    Point:
+      type: object
+      description: Chart coordinate point
+      properties:
+        time:
+          type: integer
+          description: Unix timestamp
+        price:
           type: number
 
   securitySchemes:

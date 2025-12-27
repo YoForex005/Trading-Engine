@@ -121,7 +121,16 @@ export function FloatingAccountPanel({ initialPosition = { x: 20, y: 100 } }: Fl
 
             {/* Content */}
             {!isCollapsed && (
-                <div className="p-3 min-w-[200px]">
+                <div className="p-3 min-w-[240px]">
+                    {/* Margin Call Warning */}
+                    {account.marginLevel < 100 && (
+                        <div className="mb-3 p-2 bg-red-500/20 border border-red-500/50 rounded animate-pulse">
+                            <div className="flex items-center justify-center gap-2">
+                                <span className="text-xs font-bold text-red-500">⚠ MARGIN CALL</span>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Balance & Equity Row */}
                     <div className="grid grid-cols-2 gap-4 mb-3">
                         <div>

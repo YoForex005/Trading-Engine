@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Scissors, X, Edit2 } from 'lucide-react';
 
 interface BottomDockProps {
     height: number;
@@ -6,11 +7,13 @@ interface BottomDockProps {
     account: any;
     positions: any[];
     orders: any[]; // Kept for future use
-    history: any[]; // New
-    ledger: any[]; // New
+    history?: any[]; // Optional
+    ledger?: any[]; // Optional
+    logs?: { time: string; message: string; type: 'info' | 'error' | 'success' }[]; // NEW
     onClosePosition: (id: number, volume?: number) => void;
     onModifyPosition: (id: number, sl: number, tp: number) => void;
     onCancelOrder: (id: number) => void; // Kept for future use
+    onCloseBulk?: (type: 'ALL' | 'WINNERS' | 'LOSERS', symbol?: string) => void; // NEW: Bulk close
 }
 
 type TabType = 'trade' | 'history' | 'journal';
@@ -22,6 +25,7 @@ export function BottomDock({
     positions,
     history,
     ledger,
+    logs,
     onClosePosition,
     onModifyPosition,
 }: BottomDockProps) {
@@ -136,7 +140,7 @@ export function BottomDock({
                     <HistoryTab history={history} formatMoney={formatMoney} formatDate={formatDate} />
                 )}
                 {activeTab === 'journal' && (
-                    <JournalTab ledger={ledger} formatMoney={formatMoney} formatDate={formatDate} />
+                    <JournalTab ledger={ledger} logs={logs} formatMoney={formatMoney} formatDate={formatDate} />
                 )}
             </div>
         </div>
@@ -188,39 +192,61 @@ function HistoryTab({ history, formatMoney, formatDate }: any) {
     );
 }
 
-function JournalTab({ ledger, formatMoney, formatDate }: any) {
-    if (!ledger || ledger.length === 0) {
-        return <div className="p-12 text-center text-zinc-600 italic text-xs">No ledger entries</div>;
+function JournalTab({ ledger, logs, formatMoney, formatDate }: any) {
+    // Combine ledger and logs for a unified journal view
+    const hasLedger = ledger && ledger.length > 0;
+    const hasLogs = logs && logs.length > 0;
+
+    if (!hasLedger && !hasLogs) {
+        return <div className="p-12 text-center text-zinc-600 italic text-xs">No journal entries</div>;
     }
 
     return (
         <div className="h-full overflow-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
-            <table className="w-full text-left border-collapse text-xs">
-                <thead className="sticky top-0 bg-[#1e222d] text-zinc-400 z-10 font-semibold shadow-sm">
-                    <tr>
-                        <th className="p-2 pl-4 border-b border-[#2a2e39] w-16">ID</th>
-                        <th className="p-2 border-b border-[#2a2e39] w-36">Time</th>
-                        <th className="p-2 border-b border-[#2a2e39] w-32">Type</th>
-                        <th className="p-2 border-b border-[#2a2e39] w-24">Amount</th>
-                        <th className="p-2 border-b border-[#2a2e39] w-24">Balance</th>
-                        <th className="p-2 border-b border-[#2a2e39]">Description</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-[#2a2e39] text-zinc-300">
-                    {[...ledger].reverse().map((entry: any) => (
-                        <tr key={entry.id} className="hover:bg-[#2a2e39]/80 bg-[#1e222d] transition-colors">
-                            <td className="p-2 pl-4 text-zinc-500">{entry.id}</td>
-                            <td className="p-2 text-zinc-500 whitespace-nowrap">{formatDate(entry.time)}</td>
-                            <td className="p-2 font-semibold text-blue-300">{entry.type}</td>
-                            <td className={`p-2 font-bold ${entry.amount >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {formatMoney(entry.amount)}
-                            </td>
-                            <td className="p-2 font-mono text-zinc-200">{formatMoney(entry.balanceAfter)}</td>
-                            <td className="p-2 text-zinc-400">{entry.description}</td>
+            {/* Ledger Table */}
+            {hasLedger && (
+                <table className="w-full text-left border-collapse text-xs mb-4">
+                    <thead className="sticky top-0 bg-[#1e222d] text-zinc-400 z-10 font-semibold shadow-sm">
+                        <tr>
+                            <th className="p-2 pl-4 border-b border-[#2a2e39] w-16">ID</th>
+                            <th className="p-2 border-b border-[#2a2e39] w-36">Time</th>
+                            <th className="p-2 border-b border-[#2a2e39] w-32">Type</th>
+                            <th className="p-2 border-b border-[#2a2e39] w-24">Amount</th>
+                            <th className="p-2 border-b border-[#2a2e39] w-24">Balance</th>
+                            <th className="p-2 border-b border-[#2a2e39]">Description</th>
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody className="divide-y divide-[#2a2e39] text-zinc-300">
+                        {[...ledger].reverse().map((entry: any) => (
+                            <tr key={entry.id} className="hover:bg-[#2a2e39]/80 bg-[#1e222d] transition-colors">
+                                <td className="p-2 pl-4 text-zinc-500">{entry.id}</td>
+                                <td className="p-2 text-zinc-500 whitespace-nowrap">{formatDate(entry.time)}</td>
+                                <td className="p-2 font-semibold text-blue-300">{entry.type}</td>
+                                <td className={`p-2 font-bold ${entry.amount >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    {formatMoney(entry.amount)}
+                                </td>
+                                <td className="p-2 font-mono text-zinc-200">{formatMoney(entry.balanceAfter)}</td>
+                                <td className="p-2 text-zinc-400">{entry.description}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+
+            {/* System Logs */}
+            {hasLogs && (
+                <div className="px-4 pb-4">
+                    <div className="text-xs font-semibold text-zinc-500 mb-2 uppercase">System Logs</div>
+                    <div className="space-y-1 max-h-48 overflow-y-auto bg-zinc-900/50 rounded p-2">
+                        {[...logs].reverse().map((log: any, i: number) => (
+                            <div key={i} className={`text-[10px] font-mono flex gap-2 ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-emerald-400' : 'text-zinc-400'}`}>
+                                <span className="text-zinc-600">{log.time}</span>
+                                <span>{log.message}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -241,8 +267,6 @@ function TradeTab({ positions, onClosePosition, onModifyPosition, formatMoney }:
         onModifyPosition(pos.id, parseFloat(editSL) || 0, parseFloat(editTP) || 0);
         setEditingId(null);
     };
-
-    const cancelEdit = () => setEditingId(null);
 
     const formatDate = (dateStr: string) => {
         try {
@@ -306,7 +330,7 @@ function TradeTab({ positions, onClosePosition, onModifyPosition, formatMoney }:
                                         className={`cursor-pointer border-b border-dashed border-zinc-700 hover:border-blue-500 hover:text-blue-400 transition-colors
                                             ${pos.sl > 0 ? 'text-zinc-300' : 'text-zinc-600'}`}
                                     >
-                                        {pos.sl > 0 ? pos.sl.toFixed(5) : 'Add'}
+                                        {pos.sl > 0 ? pos.sl.toFixed(5) : <span className="opacity-0 group-hover:opacity-100 transition-opacity"><Edit2 size={12} /></span>}
                                     </span>
                                 )}
                             </td>
@@ -329,7 +353,7 @@ function TradeTab({ positions, onClosePosition, onModifyPosition, formatMoney }:
                                         className={`cursor-pointer border-b border-dashed border-zinc-700 hover:border-blue-500 hover:text-blue-400 transition-colors
                                             ${pos.tp > 0 ? 'text-zinc-300' : 'text-zinc-600'}`}
                                     >
-                                        {pos.tp > 0 ? pos.tp.toFixed(5) : 'Add'}
+                                        {pos.tp > 0 ? pos.tp.toFixed(5) : <span className="opacity-0 group-hover:opacity-100 transition-opacity"><Edit2 size={12} /></span>}
                                     </span>
                                 )}
                             </td>
@@ -342,17 +366,17 @@ function TradeTab({ positions, onClosePosition, onModifyPosition, formatMoney }:
                             <td className="p-2 text-center flex items-center justify-end gap-1">
                                 <button
                                     onClick={() => onClosePosition(pos.id, pos.volume / 2)}
-                                    className="text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10 rounded px-1.5 py-0.5 text-[10px] transition-all border border-transparent hover:border-blue-500/30"
+                                    className="p-1.5 text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10 rounded transition-all"
                                     title="Close Half (50%)"
                                 >
-                                    ½
+                                    <Scissors size={14} />
                                 </button>
                                 <button
                                     onClick={() => onClosePosition(pos.id)}
-                                    className="text-zinc-500 hover:text-white hover:bg-red-500/80 rounded p-1 transition-all"
+                                    className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-all"
                                     title="Close Position"
                                 >
-                                    ✕
+                                    <X size={14} />
                                 </button>
                             </td>
                         </tr>

@@ -650,8 +650,104 @@ function RiskView({ accounts }: { accounts: Account[] }) {
 
 // ===== SETTINGS VIEW =====
 function SettingsView() {
+  const [activeLP, setActiveLP] = useState<string>('');
+  const [availableLPs, setAvailableLPs] = useState<string[]>([]);
+  const [selectedLP, setSelectedLP] = useState<string>('');
+  const [switching, setSwitching] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Fetch current LP status
+    fetch('http://localhost:8080/admin/lp-switch')
+      .then(res => res.json())
+      .then(data => {
+        setActiveLP(data.activeLP || 'NONE');
+        setAvailableLPs(data.available || ['OANDA', 'INSTANTSWAP']);
+        setSelectedLP(data.activeLP || 'INSTANTSWAP');
+      })
+      .catch(err => console.error('Failed to fetch LP status:', err));
+  }, []);
+
+  const handleSwitchLP = async () => {
+    if (!selectedLP || selectedLP === activeLP) return;
+
+    setSwitching(true);
+    setMessage(null);
+
+    try {
+      const res = await fetch('http://localhost:8080/admin/lp-switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lp: selectedLP })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setActiveLP(data.newLP);
+        setMessage(`✅ Switched to ${data.newLP}`);
+      } else {
+        setMessage(`❌ ${data.message || 'Switch failed'}`);
+      }
+    } catch (err) {
+      setMessage('❌ Failed to switch LP');
+    } finally {
+      setSwitching(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* LP SWITCHER */}
+      <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+        <h3 className="font-semibold mb-4 flex items-center gap-2">
+          <Activity size={18} className="text-emerald-400" />
+          Price Feed Provider (LP)
+        </h3>
+
+        <div className="mb-4 p-3 bg-zinc-800/50 rounded-lg flex items-center justify-between">
+          <div>
+            <div className="text-sm text-zinc-400">Currently Active</div>
+            <div className="text-xl font-bold text-emerald-400">{activeLP}</div>
+          </div>
+          <div className={`w-3 h-3 rounded-full ${activeLP !== 'NONE' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+        </div>
+
+        <div className="flex gap-3 items-end">
+          <div className="flex-1">
+            <label className="text-sm text-zinc-400 mb-1 block">Switch To</label>
+            <select
+              value={selectedLP}
+              onChange={(e) => setSelectedLP(e.target.value)}
+              className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg"
+            >
+              {availableLPs.map(lp => (
+                <option key={lp} value={lp}>{lp}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={handleSwitchLP}
+            disabled={switching || selectedLP === activeLP}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded-lg transition-colors flex items-center gap-2"
+          >
+            {switching ? <RefreshCw size={16} className="animate-spin" /> : <ArrowUpDown size={16} />}
+            {switching ? 'Switching...' : 'Switch LP'}
+          </button>
+        </div>
+
+        {message && (
+          <div className={`mt-3 p-2 rounded-lg text-sm ${message.includes('❌') ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+            {message}
+          </div>
+        )}
+
+        <div className="mt-4 text-xs text-zinc-500">
+          <b>OANDA:</b> Real market data from OANDA broker (requires API key, closed on weekends for Forex)<br />
+          <b>INSTANTSWAP:</b> Alternative feed from InstantSwap (works on weekends, includes crypto)
+        </div>
+      </div>
+
+      {/* EXECUTION MODE */}
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
         <h3 className="font-semibold mb-4">Execution Mode</h3>
         <div className="flex gap-4">
@@ -672,6 +768,7 @@ function SettingsView() {
         </div>
       </div>
 
+      {/* DEFAULT ACCOUNT SETTINGS */}
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
         <h3 className="font-semibold mb-4">Default Account Settings</h3>
         <div className="grid grid-cols-2 gap-4">

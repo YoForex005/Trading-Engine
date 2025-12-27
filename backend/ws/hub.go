@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/epic1st/rtx/backend/bbook"
+	"github.com/epic1st/rtx/backend/instantswap"
 	"github.com/epic1st/rtx/backend/oanda"
 	"github.com/epic1st/rtx/backend/tickstore"
 	"github.com/gorilla/websocket"
@@ -31,15 +32,17 @@ type Client struct {
 
 // Hub maintains the set of active clients and broadcasts messages
 type Hub struct {
-	clients      map[*Client]bool
-	broadcast    chan []byte
-	register     chan *Client
-	unregister   chan *Client
-	oandaClient  *oanda.Client
-	tickStore    *tickstore.TickStore
-	bbookEngine  *bbook.Engine
-	mu           sync.RWMutex
-	latestPrices map[string]*MarketTick
+	clients           map[*Client]bool
+	broadcast         chan []byte
+	register          chan *Client
+	unregister        chan *Client
+	oandaClient       *oanda.Client
+	instantswapClient *instantswap.Client
+	tickStore         *tickstore.TickStore
+	bbookEngine       *bbook.Engine
+	mu                sync.RWMutex
+	latestPrices      map[string]*MarketTick
+	activeLP          string // "OANDA" or "INSTANTSWAP"
 }
 
 // MarketTick represents a price update for clients
@@ -78,6 +81,57 @@ func (h *Hub) SetTickStore(ts *tickstore.TickStore) {
 // SetBBookEngine sets the B-Book engine for symbol synchronization
 func (h *Hub) SetBBookEngine(engine *bbook.Engine) {
 	h.bbookEngine = engine
+}
+
+// GetActiveLP returns the currently active liquidity provider
+func (h *Hub) GetActiveLP() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.activeLP == "" {
+		return "NONE"
+	}
+	return h.activeLP
+}
+
+// SetActiveLP sets the active LP (called after successful connection)
+func (h *Hub) SetActiveLP(lp string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.activeLP = lp
+	log.Printf("[Hub] Active LP set to: %s", lp)
+}
+
+// LoadLatestPricesFromStore loads the last known price for each symbol from the tick store
+func (h *Hub) LoadLatestPricesFromStore() {
+	if h.tickStore == nil {
+		return
+	}
+
+	symbols := h.tickStore.GetSymbols()
+	count := 0
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	for _, symbol := range symbols {
+		history := h.tickStore.GetHistory(symbol, 1)
+		if len(history) > 0 {
+			lastTick := history[0]
+
+			h.latestPrices[symbol] = &MarketTick{
+				Type:      "tick",
+				Symbol:    symbol,
+				Bid:       lastTick.Bid,
+				Ask:       lastTick.Ask,
+				Spread:    lastTick.Spread,
+				Timestamp: lastTick.Timestamp.UnixMilli(),
+				LP:        lastTick.LP,
+			}
+			count++
+		}
+	}
+
+	log.Printf("[WS] Loaded latest prices for %d symbols from TickStore", count)
 }
 
 func (h *Hub) Run() {
@@ -119,7 +173,7 @@ func (h *Hub) Run() {
 func (h *Hub) sendLatestPrices(client *Client) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	
+
 	for _, tick := range h.latestPrices {
 		data, err := json.Marshal(tick)
 		if err == nil {
@@ -162,7 +216,7 @@ func (h *Hub) ConnectToOandaLP(apiKey string) error {
 	var instruments []string
 	if len(oandaInstruments) > 0 {
 		log.Printf("[LP:OANDA] Found %d instruments available for trading", len(oandaInstruments))
-		
+
 		for _, inst := range oandaInstruments {
 			// Convert format: EUR_USD -> EURUSD
 			symbol := strings.Replace(inst.Name, "_", "", -1)
@@ -199,10 +253,10 @@ func (h *Hub) ConnectToOandaLP(apiKey string) error {
 					MinVolume:        0.01,
 					MaxVolume:        1000,
 					VolumeStep:       0.01,
-					MarginPercent:    1,    // Default 1% (100:1)
+					MarginPercent:    1, // Default 1% (100:1)
 					CommissionPerLot: 0,
 				}
-				
+
 				// Adjust specific asset classes
 				if inst.Type == "CFD" {
 					spec.ContractSize = 1
@@ -237,9 +291,91 @@ func (h *Hub) ConnectToOandaLP(apiKey string) error {
 	return nil
 }
 
+// ConnectToInstantSwapLP connects to InstantSwap provider
+func (h *Hub) ConnectToInstantSwapLP() error {
+	log.Println("╔═══════════════════════════════════════════════════════════╗")
+	log.Println("║        CONNECTING TO LIQUIDITY PROVIDER: INSTANTSWAP      ║")
+	log.Println("╚═══════════════════════════════════════════════════════════╝")
+
+	h.instantswapClient = instantswap.NewClient()
+
+	if err := h.instantswapClient.Connect(); err != nil {
+		return err
+	}
+
+	// Subscribe
+	h.instantswapClient.Subscribe()
+
+	log.Println("[LP:INSTANTSWAP] Connected and subscribing to flow")
+
+	go h.processInstantSwapFeed()
+
+	return nil
+}
+
+func (h *Hub) processInstantSwapFeed() {
+	log.Println("[LP:INSTANTSWAP] Price feed processor started")
+
+	for price := range h.instantswapClient.GetPricesChan() {
+		// Spread calculation (approx for now, or use embedded spread if available)
+		spread := (price.Ask - price.Bid)
+
+		// In forex pips or just raw?
+		// If Forex (e.g. 1.1234), spread is usually small (0.0001)
+		// UI expects spread in pips likely, OR raw spread.
+		// Existing OANDA logic: spread = (ask - bid) * 100000
+
+		symbol := price.Symbol
+
+		// Heuristic spread scaling
+		displaySpread := spread
+		if strings.Contains(symbol, "JPY") {
+			displaySpread = spread * 100
+		} else if len(symbol) == 6 && !strings.Contains(symbol, "XAU") && !strings.Contains(symbol, "BTC") {
+			// Forex 5 digit
+			displaySpread = spread * 100000
+		} else {
+			// Metals/Crypto - use raw or similar
+			if strings.Contains(symbol, "XAU") {
+				displaySpread = spread * 100
+			}
+		}
+
+		tick := &MarketTick{
+			Type:      "tick",
+			Symbol:    symbol,
+			Bid:       price.Bid,
+			Ask:       price.Ask,
+			Spread:    displaySpread,
+			Timestamp: price.Timestamp,
+			LP:        "INSTANTSWAP",
+		}
+
+		// Store latest price
+		h.mu.Lock()
+		h.latestPrices[symbol] = tick
+		h.mu.Unlock()
+
+		// Store tick in tick store
+		if h.tickStore != nil {
+			h.tickStore.StoreTick(symbol, price.Bid, price.Ask, displaySpread, "INSTANTSWAP", time.UnixMilli(price.Timestamp))
+		}
+
+		// Sync to B-Book Engine if symbol doesn't exist
+		if h.bbookEngine != nil {
+			// Basic symbol registration if unknown
+			// In production, we should have a symbol list. here we just auto-add.
+		}
+
+		// Broadcast
+		data, _ := json.Marshal(tick)
+		h.broadcast <- data
+	}
+}
+
 func (h *Hub) processLPFeed() {
 	log.Println("[LP:OANDA] Price feed processor started")
-	
+
 	for price := range h.oandaClient.GetPricesChan() {
 		if len(price.Bids) == 0 || len(price.Asks) == 0 {
 			continue
@@ -252,7 +388,7 @@ func (h *Hub) processLPFeed() {
 		symbol := strings.Replace(price.Instrument, "_", "", 1)
 
 		spread := (ask - bid) * 100000 // Spread in pips for forex
-		
+
 		// Adjust spread calculation for non-forex
 		if strings.HasPrefix(symbol, "XAU") || strings.HasPrefix(symbol, "XAG") {
 			spread = (ask - bid) * 100 // Metals
