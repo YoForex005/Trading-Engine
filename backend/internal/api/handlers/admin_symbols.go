@@ -57,3 +57,36 @@ func (h *APIHandler) HandleAdminToggleSymbol(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true, "disabled": req.Disabled})
 }
+
+// HandleAdminUpdateSymbolSource updates the preferred LP for a symbol
+func (h *APIHandler) HandleAdminUpdateSymbolSource(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var req struct {
+		Symbol   string `json:"symbol"`
+		SourceLP string `json:"sourceLP"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Symbol == "" {
+		http.Error(w, "Symbol required", http.StatusBadRequest)
+		return
+	}
+
+	err := h.engine.SetSymbolSource(req.Symbol, req.SourceLP)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}

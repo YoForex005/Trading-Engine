@@ -29,13 +29,15 @@ type Quote struct {
 
 // Client handles FlexyMarkets Socket.IO connection
 type Client struct {
-	conn       *websocket.Conn
-	quotesChan chan Quote
-	stopChan   chan struct{}
-	mu         sync.RWMutex
-	connected  bool
-	symbols    []string
-	sid        string
+	conn         *websocket.Conn
+	quotesChan   chan Quote
+	stopChan     chan struct{}
+	mu           sync.RWMutex
+	connected    bool
+	symbols      []string
+	sid          string
+	pingInterval time.Duration
+	writeMu      sync.Mutex
 }
 
 // NewClient creates a new FlexyMarkets client
@@ -48,24 +50,24 @@ func NewClient() *Client {
 }
 
 // handshake performs Socket.IO handshake via polling
-func (c *Client) handshake() (string, error) {
+func (c *Client) handshake() (string, time.Duration, error) {
 	handshakeURL := fmt.Sprintf("%s/socket.io/?EIO=4&transport=polling", BaseURL)
 
 	resp, err := http.Get(handshakeURL)
 	if err != nil {
-		return "", fmt.Errorf("handshake failed: %w", err)
+		return "", 0, fmt.Errorf("handshake failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read handshake: %w", err)
+		return "", 0, fmt.Errorf("failed to read handshake: %w", err)
 	}
 
 	// Socket.IO response starts with a packet type code (e.g., "0{...}")
 	bodyStr := string(body)
 	if len(bodyStr) < 2 || bodyStr[0] != '0' {
-		return "", fmt.Errorf("unexpected handshake response: %s", bodyStr)
+		return "", 0, fmt.Errorf("unexpected handshake response: %s", bodyStr)
 	}
 
 	// Parse JSON after the packet type
@@ -77,11 +79,11 @@ func (c *Client) handshake() (string, error) {
 	}
 
 	if err := json.Unmarshal([]byte(bodyStr[1:]), &handshakeData); err != nil {
-		return "", fmt.Errorf("failed to parse handshake: %w", err)
+		return "", 0, fmt.Errorf("failed to parse handshake: %w", err)
 	}
 
-	log.Printf("[FlexyMarkets] Handshake successful, sid=%s", handshakeData.Sid)
-	return handshakeData.Sid, nil
+	log.Printf("[FlexyMarkets] Handshake successful, sid=%s, pingInterval=%d", handshakeData.Sid, handshakeData.PingInterval)
+	return handshakeData.Sid, time.Duration(handshakeData.PingInterval) * time.Millisecond, nil
 }
 
 // Connect establishes Socket.IO connection to FlexyMarkets
@@ -91,11 +93,12 @@ func (c *Client) Connect(symbols []string) error {
 	log.Printf("[FlexyMarkets] Connecting to %s...", BaseURL)
 
 	// Step 1: HTTP handshake
-	sid, err := c.handshake()
+	sid, interval, err := c.handshake()
 	if err != nil {
 		return err
 	}
 	c.sid = sid
+	c.pingInterval = interval
 
 	// Step 2: Upgrade to WebSocket
 	wsURL := fmt.Sprintf("wss://quotes.instantswap.app/socket.io/?EIO=4&transport=websocket&sid=%s", url.QueryEscape(sid))
@@ -110,6 +113,7 @@ func (c *Client) Connect(symbols []string) error {
 	}
 
 	c.conn = conn
+
 	c.mu.Lock()
 	c.connected = true
 	c.mu.Unlock()
@@ -145,19 +149,16 @@ func (c *Client) Connect(symbols []string) error {
 
 	log.Println("[FlexyMarkets] Upgrade complete, now listening for quotes...")
 
+	// Step 6: Send subscription
+	if len(c.symbols) > 0 {
+		c.emitSubscribe(c.conn, c.symbols)
+	}
+
 	// Start reading messages
 	go c.readMessages()
 
-	// Start heartbeat immediately (ping every 20 seconds to be safe)
-	go c.heartbeat()
-
-	// Send initial ping right away
-	go func() {
-		time.Sleep(1 * time.Second)
-		if c.conn != nil {
-			c.conn.WriteMessage(websocket.TextMessage, []byte("2"))
-		}
-	}()
+	// Start heartbeat
+	go c.heartbeat(c.conn)
 
 	return nil
 }
@@ -276,9 +277,10 @@ func (c *Client) handleQuotes(data string) {
 	for _, q := range quotes {
 		// Filter for crypto symbols
 		sym := strings.Replace(q.Symbol, "_", "", -1)
-		if sym != "BTCUSD" && sym != "ETHUSD" {
-			continue
-		}
+		// Removed hardcoded filter to allow dynamic subscription
+		// if sym != "BTCUSD" && sym != "ETHUSD" {
+		// 	continue
+		// }
 
 		bid := parseFloat(q.Bid)
 		ask := parseFloat(q.Ask)
@@ -421,8 +423,25 @@ func (c *Client) sendQuote(quote Quote) {
 	}
 }
 
-func (c *Client) heartbeat() {
-	ticker := time.NewTicker(20 * time.Second)
+func (c *Client) heartbeat(conn *websocket.Conn) {
+	// Use 80% of ping interval to be safe, default to 20s if 0
+	interval := c.pingInterval
+	if interval == 0 {
+		interval = 25 * time.Second
+	}
+	// Calculate safe ticker duration (e.g. 20s for 25s interval)
+	tickerDur := time.Duration(float64(interval) * 0.8)
+
+	log.Printf("[FlexyMarkets] Starting heartbeat with interval: %v", tickerDur)
+
+	// Send initial ping immediately (safe as this is the dedicated writer for this conn)
+	time.Sleep(1 * time.Second)
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("2")); err != nil {
+		log.Printf("[FlexyMarkets] Initial heartbeat failed: %v", err)
+		return
+	}
+
+	ticker := time.NewTicker(tickerDur)
 	defer ticker.Stop()
 
 	for {
@@ -430,15 +449,10 @@ func (c *Client) heartbeat() {
 		case <-c.stopChan:
 			return
 		case <-ticker.C:
-			c.mu.RLock()
-			connected := c.connected
-			c.mu.RUnlock()
-
-			if connected && c.conn != nil {
-				// Socket.IO ping (packet type 2)
-				if err := c.conn.WriteMessage(websocket.TextMessage, []byte("2")); err != nil {
-					log.Printf("[FlexyMarkets] Heartbeat failed: %v", err)
-				}
+			// Write to the specific connection for this heartbeat instance
+			if err := c.write(conn, []byte("2")); err != nil {
+				log.Printf("[FlexyMarkets] Heartbeat failed: %v", err)
+				return // Exit on error
 			}
 		}
 	}
@@ -472,6 +486,35 @@ func (c *Client) Stop() {
 	if c.conn != nil {
 		c.conn.Close()
 	}
+}
+
+// Subscribe updates the list of subscribed symbols
+func (c *Client) Subscribe(symbols []string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.symbols = symbols
+	if c.IsConnected() {
+		return c.emitSubscribe(c.conn, symbols)
+	}
+	return nil
+}
+
+func (c *Client) emitSubscribe(conn *websocket.Conn, symbols []string) error {
+	// Format: 42["subscribe", ["BTCUSD", ...]]
+	payload := []interface{}{"subscribe", symbols}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	msg := "42" + string(data)
+	log.Printf("[FlexyMarkets] Sending subscription: %s", msg)
+	return c.write(conn, []byte(msg))
+}
+
+func (c *Client) write(conn *websocket.Conn, data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
 func min(a, b int) int {

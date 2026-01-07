@@ -6,6 +6,8 @@ interface SymbolSpec {
     contractSize: number;
     pipSize: number;
     disabled: boolean;
+    sourceLP: string;
+    availableLPs: string[];
 }
 
 export default function SymbolsView() {
@@ -59,6 +61,28 @@ export default function SymbolsView() {
         }
     };
 
+    const changeSource = async (symbol: string, newSource: string) => {
+        try {
+            // Optimistic update
+            setSymbols(prev => prev.map(s => 
+                s.symbol === symbol ? { ...s, sourceLP: newSource } : s
+            ));
+
+            const res = await fetch('http://localhost:8080/admin/symbols/source', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol, sourceLP: newSource })
+            });
+
+            if (!res.ok) throw new Error('Failed to change source');
+            
+            fetchSymbols();
+        } catch(err) {
+            console.error('Error changing source', err);
+            fetchSymbols();
+        }
+    };
+
     const filteredSymbols = symbols.filter(s =>
         s.symbol.toLowerCase().includes(searchTerm.toLowerCase())
     );
@@ -91,6 +115,7 @@ export default function SymbolsView() {
                             <th className="p-4">Symbol</th>
                             <th className="p-4">Contract Size</th>
                             <th className="p-4">Pip Size</th>
+                            <th className="p-4">Source LP</th>
                             <th className="p-4">Status</th>
                             <th className="p-4 text-right">Action</th>
                         </tr>
@@ -101,6 +126,22 @@ export default function SymbolsView() {
                                 <td className="p-4 font-medium text-gray-200">{sym.symbol}</td>
                                 <td className="p-4 text-gray-400">{sym.contractSize.toLocaleString()}</td>
                                 <td className="p-4 text-gray-400">{sym.pipSize}</td>
+                                <td className="p-4">
+                                    {sym.availableLPs && sym.availableLPs.length > 0 ? (
+                                        <select
+                                            value={sym.sourceLP}
+                                            onChange={(e) => changeSource(sym.symbol, e.target.value)}
+                                            disabled={sym.disabled}
+                                            className="bg-gray-700 text-xs text-gray-200 rounded px-2 py-1 border border-gray-600 outline-none focus:border-blue-500 disabled:opacity-50"
+                                        >
+                                            {sym.availableLPs.map(lp => (
+                                                <option key={lp} value={lp}>{lp.toUpperCase()}</option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        <span className="text-xs text-gray-500">{sym.sourceLP || 'DEFAULT'}</span>
+                                    )}
+                                </td>
                                 <td className="p-4">
                                     <span className={`px-2 py-1 rounded text-xs font-medium ${!sym.disabled
                                         ? 'bg-green-500/20 text-green-400 border border-green-500/30'

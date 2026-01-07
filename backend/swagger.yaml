@@ -989,13 +989,182 @@ paths:
         '200':
           description: Routing rules
 
-  /admin/lp-status:
+  # ===== LP MANAGEMENT APIs =====
+  /admin/lps:
     get:
-      tags: [Legacy - OANDA]
-      summary: Get LP connection status
+      tags: [Admin - LP Management]
+      summary: List all LP configurations
+      description: Returns all configured liquidity providers with their settings
       responses:
         '200':
-          description: LP status
+          description: List of LP configurations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LPConfig'
+    post:
+      tags: [Admin - LP Management]
+      summary: Add new LP configuration
+      description: Add a new liquidity provider to the system
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LPConfig'
+      responses:
+        '200':
+          description: LP added successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  lp:
+                    $ref: '#/components/schemas/LPConfig'
+        '400':
+          description: Invalid request or LP already exists
+
+  /admin/lps/{id}:
+    put:
+      tags: [Admin - LP Management]
+      summary: Update LP configuration
+      description: Update settings for an existing LP
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: oanda
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LPConfig'
+      responses:
+        '200':
+          description: LP updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          description: LP not found
+    delete:
+      tags: [Admin - LP Management]
+      summary: Remove LP configuration
+      description: Remove an LP from the system
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: oanda
+      responses:
+        '200':
+          description: LP removed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          description: LP not found
+
+  /admin/lps/{id}/toggle:
+    post:
+      tags: [Admin - LP Management]
+      summary: Toggle LP enabled state
+      description: Enable or disable an LP - when enabled, LP will connect and start streaming prices
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: binance
+      responses:
+        '200':
+          description: LP toggled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  id:
+                    type: string
+                  enabled:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          description: LP not found
+
+  /admin/lps/{id}/symbols:
+    get:
+      tags: [Admin - LP Management]
+      summary: Get symbols available from LP
+      description: Returns all tradeable symbols provided by this LP
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: binance
+      responses:
+        '200':
+          description: Symbol list from LP
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  count:
+                    type: integer
+                  symbols:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LPSymbolInfo'
+        '404':
+          description: LP adapter not found
+
+  /admin/lp-status:
+    get:
+      tags: [Admin - LP Management]
+      summary: Get status of all LPs
+      description: Returns connection status, symbol count, and last tick time for all configured LPs
+      responses:
+        '200':
+          description: LP status map
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/LPStatus'
 
   # ===== WEBSOCKET =====
   /ws:
@@ -1192,6 +1361,97 @@ paths:
                     type: boolean
                   activeLP:
                     type: string
+
+
+
+
+
+  # ===== ADMIN SYMBOL MANAGEMENT =====
+  /admin/symbols:
+    get:
+      tags: [Admin - LP Management]
+      summary: Get all symbols with specs
+      responses:
+        '200':
+          description: Symbol specifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SymbolSpec'
+
+  /admin/symbols/toggle:
+    post:
+      tags: [Admin - LP Management]
+      summary: Enable/disable symbol trading
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, disabled]
+              properties:
+                symbol:
+                  type: string
+                  example: BTCUSD
+                disabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Symbol toggled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  disabled:
+                    type: boolean
+
+  # ===== PUBLIC SYMBOLS =====
+  /api/symbols:
+    get:
+      tags: [B-Book Trading]
+      summary: Get available trading symbols
+      responses:
+        '200':
+          description: Symbol list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SymbolSpec'
+
+  /admin/symbols/source:
+    post:
+      tags: [Admin - LP Management]
+      summary: Set preferred LP for symbol
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, sourceLP]
+              properties:
+                symbol:
+                  type: string
+                sourceLP:
+                  type: string
+      responses:
+        '200':
+          description: Source updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
 
   # ===== ADMIN STATS =====
   /admin/stats:
@@ -1525,6 +1785,142 @@ components:
         maxTicksPerSymbol:
           type: integer
           example: 5000
+
+
+
+    SymbolSpec:
+      type: object
+      description: Trading symbol specification
+      properties:
+        symbol:
+          type: string
+        contractSize:
+          type: number
+        pipSize:
+          type: number
+        pipValue:
+          type: number
+        minVolume:
+          type: number
+        maxVolume:
+          type: number
+        volumeStep:
+          type: number
+        marginPercent:
+          type: number
+        commissionPerLot:
+          type: number
+        disabled:
+          type: boolean
+        sourceLP:
+          type: string
+        availableLPs:
+          type: array
+          items:
+            type: string
+
+    LPConfig:
+      type: object
+      description: Liquidity Provider configuration
+      required: [id, name, type]
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the LP
+          example: oanda
+        name:
+          type: string
+          description: Display name
+          example: OANDA
+        type:
+          type: string
+          description: LP type/provider
+          enum: [OANDA, BINANCE, FLEXYMARKETS]
+          example: OANDA
+        enabled:
+          type: boolean
+          description: Whether LP is currently active
+          example: true
+        priority:
+          type: integer
+          description: Priority order (lower = higher priority)
+          example: 1
+        settings:
+          type: object
+          description: API keys and configuration
+          additionalProperties:
+            type: string
+        symbols:
+          type: array
+          description: Subscribed symbols (empty = all available)
+          items:
+            type: string
+
+    LPStatus:
+      type: object
+      description: Current status of a liquidity provider
+      properties:
+        id:
+          type: string
+          example: binance
+        name:
+          type: string
+          example: Binance
+        type:
+          type: string
+          example: BINANCE
+        connected:
+          type: boolean
+          description: Whether LP is currently connected
+          example: true
+        enabled:
+          type: boolean
+          description: Whether LP is enabled in configuration
+          example: true
+        symbolCount:
+          type: integer
+          description: Number of symbols being streamed
+          example: 438
+        lastTick:
+          type: string
+          format: date-time
+          description: Timestamp of last received price tick
+        errorMessage:
+          type: string
+          description: Error message if disconnected
+
+    LPSymbolInfo:
+      type: object
+      description: Symbol information from an LP
+      properties:
+        symbol:
+          type: string
+          example: BTCUSD
+        displayName:
+          type: string
+          example: Bitcoin / US Dollar
+        baseCurrency:
+          type: string
+          example: BTC
+        quoteCurrency:
+          type: string
+          example: USD
+        minLotSize:
+          type: number
+          example: 0.001
+        maxLotSize:
+          type: number
+          example: 100
+        lotStep:
+          type: number
+          example: 0.001
+        pipValue:
+          type: number
+          example: 0.01
+        type:
+          type: string
+          enum: [forex, crypto, commodity, index]
+          example: crypto
 
     Point:
       type: object
