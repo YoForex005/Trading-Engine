@@ -128,41 +128,86 @@ function App() {
     setAccountId(id);
     setIsAuthenticated(true);
   };
-  // Connect to WebSocket after login
+
+  // Tick buffer for throttled updates (prevents UI lag)
+  const tickBuffer = useRef<Record<string, Tick>>({});
+
+  // Connect to WebSocket after login with auto-reconnect and throttled updates
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      console.log('[WS] Not authenticated, skipping WebSocket connection');
+      return;
+    }
 
-    const ws = new WebSocket('ws://localhost:8080/ws');
-    wsRef.current = ws;
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let flushInterval: ReturnType<typeof setInterval> | null = null;
+    let isUnmounting = false;
 
-    ws.onopen = () => {
-      console.log(`WebSocket connected to ${brokerConfig?.priceFeedLP || 'LP'} feed`);
+    const connect = () => {
+      if (isUnmounting) return;
+
+      console.log('[WS] Attempting connection to ws://localhost:8080/ws');
+      ws = new WebSocket('ws://localhost:8080/ws');
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('[WS] WebSocket connected, waiting for tick data...');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'tick') {
+            // Buffer tick (don't trigger render immediately)
+            tickBuffer.current[data.symbol] = {
+              ...data,
+              prevBid: ticks[data.symbol]?.bid
+            };
+          } else {
+            console.log('[WS] Non-tick message:', data.type || 'unknown');
+          }
+        } catch (e) {
+          console.error('[WS] Parse error:', e);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('[WS] Error:', error);
+      };
+
+      ws.onclose = (event) => {
+        console.log(`[WS] Disconnected (code: ${event.code}, reason: ${event.reason})`);
+        wsRef.current = null;
+
+        // Auto-reconnect after 2 seconds if not intentionally closed
+        if (!isUnmounting && event.code !== 1000) {
+          console.log('[WS] Reconnecting in 2 seconds...');
+          reconnectTimeout = setTimeout(connect, 2000);
+        }
+      };
     };
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'tick') {
-        setTicks(prev => ({
-          ...prev,
-          [data.symbol]: {
-            ...data,
-            prevBid: prev[data.symbol]?.bid
-          }
-        }));
+    connect();
+
+    // Flush tick buffer to state at 10 FPS (100ms) for smooth UI updates
+    flushInterval = setInterval(() => {
+      const buffer = tickBuffer.current;
+      if (Object.keys(buffer).length > 0) {
+        setTicks(prev => ({ ...prev, ...buffer }));
+        tickBuffer.current = {};
+      }
+    }, 100);
+
+    return () => {
+      isUnmounting = true;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (flushInterval) clearInterval(flushInterval);
+      if (ws) {
+        ws.close(1000, 'Component unmount');
       }
     };
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-    };
-
-    return () => {
-      ws.close();
-    };
   }, [isAuthenticated, brokerConfig]);
 
   const placeOrder = useCallback(async (side: 'BUY' | 'SELL') => {
@@ -278,12 +323,41 @@ function App() {
     }
   }, []);
 
+  // Fetch symbols from backend for Search
+  const [allSymbols, setAllSymbols] = useState<any[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    fetch('http://localhost:8080/api/symbols')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setAllSymbols(data);
+        }
+      })
+      .catch(err => console.error('Failed to fetch symbols:', err));
+  }, []);
+
   if (!isAuthenticated) {
     return <Login onLogin={() => setIsAuthenticated(true)} />;
   }
 
   const currentTick = ticks[selectedSymbol];
-  const sortedSymbols = Object.keys(ticks).sort();
+
+  // Filter symbols based on search
+  // If search is empty, show ticking symbols (legacy behavior) OR show all valid symbols?
+  // Architect said: "Source of truth: GetSymbols". So we should show allSymbols.
+  // But wait, if they aren't ticking, we might show "---" for price. That is fine.
+
+  // Combine allSymbols with ticks keys to ensure we catch everything
+  const uniqueSymbols = Array.from(new Set([
+    ...allSymbols.map(s => s.symbol),
+    ...Object.keys(ticks)
+  ])).sort();
+
+  const filteredSymbols = uniqueSymbols.filter(s =>
+    s.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
     <div className="flex h-screen w-full bg-[#09090b] text-zinc-300 overflow-hidden font-sans flex-col">
@@ -333,12 +407,24 @@ function App() {
             {/* Market Watch */}
             {!isChartMaximized && (
               <div className="w-56 border-r border-zinc-800 overflow-y-auto flex flex-col">
-                <div className="p-2 border-b border-zinc-800 text-[10px] font-medium text-zinc-500 uppercase flex justify-between items-center sticky top-0 bg-zinc-900/90 backdrop-blur">
+                <div className="p-2 border-b border-zinc-800 text-[10px] font-medium text-zinc-500 uppercase flex justify-between items-center sticky top-0 bg-zinc-900/90 backdrop-blur z-10">
                   <span>Market Watch</span>
-                  <span className="text-emerald-400 normal-case">{sortedSymbols.length} pairs</span>
+                  <span className="text-emerald-400 normal-case">{filteredSymbols.length} pairs</span>
                 </div>
+
+                {/* Search Input */}
+                <div className="p-2 border-b border-zinc-800 sticky top-8 bg-zinc-900 z-10">
+                  <input
+                    type="text"
+                    placeholder="Search symbols..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50"
+                  />
+                </div>
+
                 <div className="flex-1 overflow-y-auto">
-                  {sortedSymbols.map((symbol) => (
+                  {filteredSymbols.map((symbol) => (
                     <MarketWatchRow
                       key={symbol}
                       symbol={symbol}
@@ -347,6 +433,11 @@ function App() {
                       onClick={() => setSelectedSymbol(symbol)}
                     />
                   ))}
+                  {filteredSymbols.length === 0 && (
+                    <div className="p-4 text-center text-xs text-zinc-600 italic">
+                      No symbols found
+                    </div>
+                  )}
                 </div>
               </div>
             )}

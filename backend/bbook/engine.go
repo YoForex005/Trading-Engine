@@ -10,24 +10,24 @@ import (
 
 // Account represents a trading account
 type Account struct {
-	ID            int64           `json:"id"`
-	AccountNumber string          `json:"accountNumber"`
-	UserID        string          `json:"userId"`
-	Username      string          `json:"username"` // New: Admin-assigned username
-	Password      string          `json:"password"` // New: Admin-assigned password
-	Balance       float64         `json:"balance"`
-	Equity        float64         `json:"equity"`
-	Margin        float64         `json:"margin"`
-	FreeMargin    float64         `json:"freeMargin"`
-	MarginLevel   float64         `json:"marginLevel"`
-	Leverage      float64         `json:"leverage"`
-	MarginMode    string          `json:"marginMode"` // HEDGING or NETTING
-	Currency      string          `json:"currency"`
-	Status        string          `json:"status"` // ACTIVE, DISABLED
-	IsDemo        bool            `json:"isDemo"`
-	CreatedAt     int64           `json:"createdAt"`
-	Positions     []*Position     `json:"-"` // Internal use only
-	Orders        []*Order        `json:"-"`
+	ID            int64       `json:"id"`
+	AccountNumber string      `json:"accountNumber"`
+	UserID        string      `json:"userId"`
+	Username      string      `json:"username"` // New: Admin-assigned username
+	Password      string      `json:"password"` // New: Admin-assigned password
+	Balance       float64     `json:"balance"`
+	Equity        float64     `json:"equity"`
+	Margin        float64     `json:"margin"`
+	FreeMargin    float64     `json:"freeMargin"`
+	MarginLevel   float64     `json:"marginLevel"`
+	Leverage      float64     `json:"leverage"`
+	MarginMode    string      `json:"marginMode"` // HEDGING or NETTING
+	Currency      string      `json:"currency"`
+	Status        string      `json:"status"` // ACTIVE, DISABLED
+	IsDemo        bool        `json:"isDemo"`
+	CreatedAt     int64       `json:"createdAt"`
+	Positions     []*Position `json:"-"` // Internal use only
+	Orders        []*Order    `json:"-"`
 }
 
 // UpdatePassword updates an account's password
@@ -45,25 +45,46 @@ func (e *Engine) UpdatePassword(accountID int64, newPassword string) error {
 	return nil
 }
 
+// UpdateAccount updates account configuration
+func (e *Engine) UpdateAccount(accountID int64, leverage float64, marginMode string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	account, ok := e.accounts[accountID]
+	if !ok {
+		return errors.New("account not found")
+	}
+
+	if leverage > 0 {
+		account.Leverage = leverage
+	}
+	if marginMode != "" {
+		account.MarginMode = marginMode
+	}
+
+	log.Printf("[B-Book] Account %s updated: Leverage=%.0f, Mode=%s", account.AccountNumber, account.Leverage, account.MarginMode)
+	return nil
+}
+
 // Position represents an open position
 type Position struct {
-	ID            int64      `json:"id"`
-	AccountID     int64      `json:"accountId"`
-	Symbol        string     `json:"symbol"`
-	Side          string     `json:"side"` // BUY/SELL
-	Volume        float64    `json:"volume"`
-	OpenPrice     float64    `json:"openPrice"`
-	CurrentPrice  float64    `json:"currentPrice"`
-	OpenTime      time.Time  `json:"openTime"`
-	SL            float64    `json:"sl,omitempty"`
-	TP            float64    `json:"tp,omitempty"`
-	Swap          float64    `json:"swap"`
-	Commission    float64    `json:"commission"`
-	UnrealizedPnL float64    `json:"unrealizedPnL"`
-	Status        string     `json:"status"`
-	ClosePrice    float64    `json:"closePrice,omitempty"`
-	CloseTime     time.Time  `json:"closeTime,omitempty"`
-	CloseReason   string     `json:"closeReason,omitempty"`
+	ID            int64     `json:"id"`
+	AccountID     int64     `json:"accountId"`
+	Symbol        string    `json:"symbol"`
+	Side          string    `json:"side"` // BUY/SELL
+	Volume        float64   `json:"volume"`
+	OpenPrice     float64   `json:"openPrice"`
+	CurrentPrice  float64   `json:"currentPrice"`
+	OpenTime      time.Time `json:"openTime"`
+	SL            float64   `json:"sl,omitempty"`
+	TP            float64   `json:"tp,omitempty"`
+	Swap          float64   `json:"swap"`
+	Commission    float64   `json:"commission"`
+	UnrealizedPnL float64   `json:"unrealizedPnL"`
+	Status        string    `json:"status"`
+	ClosePrice    float64   `json:"closePrice,omitempty"`
+	CloseTime     time.Time `json:"closeTime,omitempty"`
+	CloseReason   string    `json:"closeReason,omitempty"`
 }
 
 // Order represents a trading order
@@ -119,17 +140,17 @@ type AccountSummary struct {
 
 // Engine is the B-Book execution engine
 type Engine struct {
-	mu            sync.RWMutex
-	accounts      map[int64]*Account
-	positions     map[int64]*Position
-	orders        map[int64]*Order
-	trades        []Trade
-	symbols       map[string]*SymbolSpec
+	mu             sync.RWMutex
+	accounts       map[int64]*Account
+	positions      map[int64]*Position
+	orders         map[int64]*Order
+	trades         []Trade
+	symbols        map[string]*SymbolSpec
 	nextPositionID int64
 	nextOrderID    int64
 	nextTradeID    int64
 	priceCallback  func(symbol string) (bid, ask float64, ok bool)
-	ledger        *Ledger
+	ledger         *Ledger
 }
 
 // SymbolSpec contains symbol specifications
@@ -148,15 +169,15 @@ type SymbolSpec struct {
 // NewEngine creates a new B-Book engine
 func NewEngine() *Engine {
 	e := &Engine{
-		accounts:      make(map[int64]*Account),
-		positions:     make(map[int64]*Position),
-		orders:        make(map[int64]*Order),
-		trades:        make([]Trade, 0),
-		symbols:       make(map[string]*SymbolSpec),
+		accounts:       make(map[int64]*Account),
+		positions:      make(map[int64]*Position),
+		orders:         make(map[int64]*Order),
+		trades:         make([]Trade, 0),
+		symbols:        make(map[string]*SymbolSpec),
 		nextPositionID: 1,
 		nextOrderID:    1,
 		nextTradeID:    1,
-		ledger:        NewLedger(),
+		ledger:         NewLedger(),
 	}
 
 	// Initialize default symbols
@@ -171,13 +192,13 @@ func (e *Engine) initDefaultSymbols() {
 	e.symbols["GBPUSD"] = &SymbolSpec{Symbol: "GBPUSD", ContractSize: 100000, PipSize: 0.0001, PipValue: 10, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
 	e.symbols["USDJPY"] = &SymbolSpec{Symbol: "USDJPY", ContractSize: 100000, PipSize: 0.01, PipValue: 9.09, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
 	e.symbols["ETHUSD"] = &SymbolSpec{Symbol: "ETHUSD", ContractSize: 1, PipSize: 0.1, PipValue: 0.1, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 5}
-	
+
 	// Major Pairs
 	e.symbols["AUDUSD"] = &SymbolSpec{Symbol: "AUDUSD", ContractSize: 100000, PipSize: 0.0001, PipValue: 10, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
 	e.symbols["USDCAD"] = &SymbolSpec{Symbol: "USDCAD", ContractSize: 100000, PipSize: 0.0001, PipValue: 7.5, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
 	e.symbols["USDCHF"] = &SymbolSpec{Symbol: "USDCHF", ContractSize: 100000, PipSize: 0.0001, PipValue: 10, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
 	e.symbols["NZDUSD"] = &SymbolSpec{Symbol: "NZDUSD", ContractSize: 100000, PipSize: 0.0001, PipValue: 10, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
-	
+
 	// Cross Pairs
 	e.symbols["EURGBP"] = &SymbolSpec{Symbol: "EURGBP", ContractSize: 100000, PipSize: 0.0001, PipValue: 13, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
 	e.symbols["EURJPY"] = &SymbolSpec{Symbol: "EURJPY", ContractSize: 100000, PipSize: 0.01, PipValue: 9.09, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
@@ -198,7 +219,7 @@ func (e *Engine) UpdateSymbol(spec *SymbolSpec) {
 func (e *Engine) GetSymbols() []*SymbolSpec {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	
+
 	var symbols []*SymbolSpec
 	for _, s := range e.symbols {
 		symbols = append(symbols, s)
@@ -222,7 +243,7 @@ func (e *Engine) CreateAccount(userID, username, password string, isDemo bool) *
 	defer e.mu.Unlock()
 
 	id := int64(len(e.accounts) + 1)
-	
+
 	// If no username provided, default to Account Number or UserID
 	if username == "" {
 		username = fmt.Sprintf("RTX-%06d", id)
@@ -405,17 +426,17 @@ func (e *Engine) ExecuteMarketOrder(accountID int64, symbol, side string, volume
 
 	position := &Position{
 		ID:           positionID,
-		AccountID:   accountID,
-		Symbol:      symbol,
-		Side:        side,
-		Volume:      volume,
-		OpenPrice:   fillPrice,
+		AccountID:    accountID,
+		Symbol:       symbol,
+		Side:         side,
+		Volume:       volume,
+		OpenPrice:    fillPrice,
 		CurrentPrice: fillPrice,
-		OpenTime:    now,
-		SL:          sl,
-		TP:          tp,
-		Commission:  commission,
-		Status:      "OPEN",
+		OpenTime:     now,
+		SL:           sl,
+		TP:           tp,
+		Commission:   commission,
+		Status:       "OPEN",
 	}
 	e.positions[positionID] = position
 
@@ -552,7 +573,7 @@ func (e *Engine) ModifyPosition(positionID int64, sl, tp float64) (*Position, er
 
 	position.SL = sl
 	position.TP = tp
-	
+
 	log.Printf("[B-Book] MODIFIED: Position #%d SL: %.5f TP: %.5f", positionID, sl, tp)
 
 	return position, nil

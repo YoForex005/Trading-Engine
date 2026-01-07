@@ -2,8 +2,11 @@ package auth
 
 import (
 	"errors"
+	"log"
 	"strconv"
-	"github.com/epic1st/rtx/backend/bbook"
+
+	"github.com/epic1st/rtx/backend/internal/core"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // User represents a system user
@@ -14,63 +17,93 @@ type User struct {
 }
 
 // Service handles authentication logic
-type Service struct{
-	engine *bbook.Engine
+type Service struct {
+	engine *core.Engine
+	// Admin hash: $2a$10$... (hash of 'password')
+
+	adminHash []byte
 }
 
-func NewService(engine *bbook.Engine) *Service {
+func NewService(engine *core.Engine) *Service {
+
+	// Generate hash for "password" on startup for the admin (Simulated Secure Config)
+	// Cost 10 is decent for startup.
+	hash, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
+
 	return &Service{
-		engine: engine,
+		engine:    engine,
+		adminHash: hash,
 	}
 }
 
-// Login validates credentials
+// Login validates credentials securely
 func (s *Service) Login(username, password string) (string, *User, error) {
-	// 1. Admin Login (Hardcoded for now)
-	if username == "admin" && password == "password" {
-		return "mock_jwt_token_admin", &User{
-			ID:       "0", 
-			Username: "admin",
-			Role:     "ADMIN",
-		}, nil
+	// 1. Admin Login
+	if username == "admin" {
+		err := bcrypt.CompareHashAndPassword(s.adminHash, []byte(password))
+		if err != nil {
+			log.Printf("[WARN] Admin login failed (invalid password)")
+			return "", nil, errors.New("invalid credentials")
+		}
+
+		log.Printf("[INFO] Admin logged in")
+		user := &User{ID: "0", Username: "admin", Role: "ADMIN"}
+		token, err := GenerateJWT(user)
+		if err != nil {
+			log.Printf("[CRITICAL] JWT Generation failed: %v", err)
+			return "", nil, errors.New("system error")
+		}
+		return token, user, nil
 	}
-	
+
 	// 2. Client Login
-	// User Requirement: "username login should always be in number"
-	// So we attempt to parse 'username' as Account ID.
-	if accountID, err := strconv.ParseInt(username, 10, 64); err == nil {
-		account, found := s.engine.GetAccount(accountID)
-		if found {
-			// Check if account has a custom password set
-			if account.Password != "" {
-				if account.Password == password {
-					return "mock_jwt_token_client", &User{
-						ID:       username,
-						Username: account.Username, // Return the custom username if set
-						Role:     "TRADER",
-					}, nil
-				} else {
-					return "", nil, errors.New("invalid password")
-				}
-			} 
-			
-			// Legacy/Dev fallback: If no password set, allow "password"
-			if password == "password" {
-				return "mock_jwt_token_universal", &User{
-					ID:       username, 
-					Username: account.Username,
-					Role:     "TRADER",
-				}, nil
-			}
+	// We iterate accounts to find by username or ID
+	// Attempt ID lookup
+	var account *core.Account
+
+	if id, err := strconv.ParseInt(username, 10, 64); err == nil {
+		acc, ok := s.engine.GetAccount(id)
+		if ok {
+			account = acc
 		}
 	}
-	
-	// Fallback for "Universal Dev Mode" - if account ID not found or valid but no password set?
-	// Actually, strictly enforce that account MUST exist.
-	// If password is "password" but account doesn't exist, Create it on the fly? 
-	// The user asked for Admin to create account. So we should probably Fail if not found.
-	// However, for smoother dev exp, I'll keep the universal backdoor ONLY if password is "password" AND it's a number, creating it if missing?
-	// NO, user wants Admin control. Let's return error if not found.
-	
-	return "", nil, errors.New("invalid credentials or account not found")
+
+	if account == nil {
+		log.Printf("[WARN] Login failed: User %s not found", username)
+		return "", nil, errors.New("invalid credentials")
+		// "User Enumeration" prevention: return same error as password fail.
+	}
+
+	// 3. Verify Password
+	// We treat account.Password as a Hash.
+	err := bcrypt.CompareHashAndPassword([]byte(account.Password), []byte(password))
+	if err != nil {
+		// Fallback: Check if it's plaintext "password" (Legacy Dev Mode)
+		// ONLY if it doesn't look like a hash (bcrypt starts with $2)
+		// And check if password is correct plaintext.
+		if len(account.Password) > 0 && account.Password[0] != '$' && account.Password == password {
+			log.Printf("[WARN] Auto-upgrading password for user %s to bcrypt", account.Username)
+			newHash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+			s.engine.UpdatePassword(account.ID, string(newHash))
+			// Proceed
+		} else {
+			log.Printf("[WARN] Login failed for user %s (invalid password)", username)
+			return "", nil, errors.New("invalid credentials")
+		}
+	}
+
+	// Success
+	user := &User{
+		ID:       strconv.FormatInt(account.ID, 10),
+		Username: account.Username,
+		Role:     "TRADER",
+	}
+
+	token, err := GenerateJWT(user)
+	if err != nil {
+		log.Printf("[CRITICAL] JWT Generation failed: %v", err)
+		return "", nil, errors.New("system error")
+	}
+
+	return token, user, nil
 }

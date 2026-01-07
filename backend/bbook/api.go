@@ -222,7 +222,7 @@ func (h *APIHandler) HandleCloseBulk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	positions := h.engine.GetPositions(req.AccountID)
-	
+
 	// Update prices to ensure P/L is fresh
 	h.engine.UpdatePositionPrices()
 
@@ -332,6 +332,9 @@ func (h *APIHandler) HandleGetTrades(w http.ResponseWriter, r *http.Request) {
 	}
 
 	trades := h.engine.GetTrades(accountID)
+	if trades == nil {
+		trades = []Trade{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(trades)
@@ -360,6 +363,9 @@ func (h *APIHandler) HandleGetLedger(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entries := h.engine.GetLedger().GetHistory(accountID, limit)
+	if entries == nil {
+		entries = []LedgerEntry{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entries)
@@ -416,9 +422,9 @@ func (h *APIHandler) HandleAdminDeposit(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":      true,
-		"entry":        entry,
-		"newBalance":   entry.BalanceAfter,
+		"success":    true,
+		"entry":      entry,
+		"newBalance": entry.BalanceAfter,
 	})
 }
 
@@ -614,12 +620,16 @@ func (h *APIHandler) HandleAdminGetLedgerAll(w http.ResponseWriter, r *http.Requ
 	}
 
 	typeFilter := r.URL.Query().Get("type")
-	
+
 	var entries []LedgerEntry
 	if typeFilter != "" {
 		entries = h.engine.GetLedger().GetEntriesByType(typeFilter, limit)
 	} else {
 		entries = h.engine.GetLedger().GetAllEntries(limit)
+	}
+
+	if entries == nil {
+		entries = []LedgerEntry{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -635,7 +645,7 @@ func (h *APIHandler) HandleCreateAccount(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		UserID   string `json:"userId"` // Optional: Client User ID
+		UserID   string `json:"userId"`             // Optional: Client User ID
 		Username string `json:"username,omitempty"` // Admin-assigned username
 		Password string `json:"password,omitempty"` // Admin-assigned password
 		IsDemo   bool   `json:"isDemo"`
@@ -687,4 +697,50 @@ func (h *APIHandler) HandleAdminResetPassword(w http.ResponseWriter, r *http.Req
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// HandleAdminUpdateAccount updates account configuration
+func (h *APIHandler) HandleAdminUpdateAccount(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var req struct {
+		AccountID  int64   `json:"accountId"`
+		Leverage   float64 `json:"leverage"`
+		MarginMode string  `json:"marginMode"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	err := h.engine.UpdateAccount(req.AccountID, req.Leverage, req.MarginMode)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// HandleGetSymbols returns all symbols
+func (h *APIHandler) HandleGetSymbols(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	symbols := h.engine.GetSymbols()
+	if symbols == nil {
+		symbols = []*SymbolSpec{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(symbols)
 }
