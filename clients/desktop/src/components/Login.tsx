@@ -35,9 +35,10 @@ export function Login({ onLogin }: LoginProps) {
             localStorage.setItem('rtx_token', data.token);
             localStorage.setItem('rtx_user', JSON.stringify(data.user));
             onLogin(accountId);
-        } catch (err) {
+        } catch (err: any) {
             console.error(err);
-            alert("Connection Failed. Make sure server is running.");
+            const msg = err.message || "Connection Failed";
+            alert(`Login Error: ${msg}\n\nCheck server is running at ${server}`);
         } finally {
             setLoading(false);
         }

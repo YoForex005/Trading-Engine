@@ -45,6 +45,27 @@ func (e *Engine) UpdatePassword(accountID int64, newPassword string) error {
 	return nil
 }
 
+// UpdateAccount updates account configuration
+func (e *Engine) UpdateAccount(accountID int64, leverage float64, marginMode string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	account, ok := e.accounts[accountID]
+	if !ok {
+		return errors.New("account not found")
+	}
+
+	if leverage > 0 {
+		account.Leverage = leverage
+	}
+	if marginMode != "" {
+		account.MarginMode = marginMode
+	}
+
+	log.Printf("[B-Book] Account %s updated: Leverage=%.0f, Mode=%s", account.AccountNumber, account.Leverage, account.MarginMode)
+	return nil
+}
+
 // Position represents an open position
 type Position struct {
 	ID            int64     `json:"id"`
@@ -130,23 +151,6 @@ type Engine struct {
 	nextTradeID    int64
 	priceCallback  func(symbol string) (bid, ask float64, ok bool)
 	ledger         *Ledger
-	drawings       map[int64][]*Drawing // AccountID -> Drawings
-}
-
-// Drawing represents a user chart drawing
-type Drawing struct {
-	ID        string                 `json:"id"`
-	AccountID int64                  `json:"accountId"`
-	Symbol    string                 `json:"symbol"`
-	Type      string                 `json:"type"` // LINE, RAY, RECT, etc.
-	Points    []Point                `json:"points"`
-	Options   map[string]interface{} `json:"options"`
-}
-
-// Point represents a chart coordinate
-type Point struct {
-	Time  int64   `json:"time"`
-	Price float64 `json:"price"`
 }
 
 // SymbolSpec contains symbol specifications
@@ -174,7 +178,6 @@ func NewEngine() *Engine {
 		nextOrderID:    1,
 		nextTradeID:    1,
 		ledger:         NewLedger(),
-		drawings:       make(map[int64][]*Drawing),
 	}
 
 	// Initialize default symbols
@@ -189,9 +192,6 @@ func (e *Engine) initDefaultSymbols() {
 	e.symbols["GBPUSD"] = &SymbolSpec{Symbol: "GBPUSD", ContractSize: 100000, PipSize: 0.0001, PipValue: 10, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
 	e.symbols["USDJPY"] = &SymbolSpec{Symbol: "USDJPY", ContractSize: 100000, PipSize: 0.01, PipValue: 9.09, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
 	e.symbols["ETHUSD"] = &SymbolSpec{Symbol: "ETHUSD", ContractSize: 1, PipSize: 0.1, PipValue: 0.1, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 5}
-	e.symbols["BTCUSD"] = &SymbolSpec{Symbol: "BTCUSD", ContractSize: 1, PipSize: 0.01, PipValue: 0.01, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 5}
-	e.symbols["XAUUSD"] = &SymbolSpec{Symbol: "XAUUSD", ContractSize: 100, PipSize: 0.01, PipValue: 1, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
-	e.symbols["BCOUSD"] = &SymbolSpec{Symbol: "BCOUSD", ContractSize: 100, PipSize: 0.01, PipValue: 1, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
 
 	// Major Pairs
 	e.symbols["AUDUSD"] = &SymbolSpec{Symbol: "AUDUSD", ContractSize: 100000, PipSize: 0.0001, PipValue: 10, MinVolume: 0.01, MaxVolume: 100, VolumeStep: 0.01, MarginPercent: 1}
@@ -286,18 +286,6 @@ func (e *Engine) GetAccountByUser(userID string) []*Account {
 		if acc.UserID == userID {
 			accounts = append(accounts, acc)
 		}
-	}
-	return accounts
-}
-
-// GetAllAccounts returns all accounts
-func (e *Engine) GetAllAccounts() []*Account {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
-	accounts := make([]*Account, 0, len(e.accounts))
-	for _, acc := range e.accounts {
-		accounts = append(accounts, acc)
 	}
 	return accounts
 }
@@ -649,26 +637,6 @@ func (e *Engine) GetTrades(accountID int64) []Trade {
 	return trades
 }
 
-// GetSystemStats returns system-wide statistics
-func (e *Engine) GetSystemStats() map[string]interface{} {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
-	totalUsers := len(e.accounts)
-	totalVolume := 0.0
-	totalTrades := len(e.trades)
-
-	for _, trade := range e.trades {
-		totalVolume += trade.Volume * trade.Price // Approximate notional volume
-	}
-
-	return map[string]interface{}{
-		"totalUsers":  totalUsers,
-		"totalVolume": totalVolume,
-		"totalTrades": totalTrades,
-	}
-}
-
 // UpdatePositionPrices updates current prices and P/L for all positions
 func (e *Engine) UpdatePositionPrices() {
 	if e.priceCallback == nil {
@@ -768,67 +736,4 @@ func (e *Engine) getAccountSummaryUnlocked(accountID int64) (*AccountSummary, er
 		Margin:     usedMargin,
 		FreeMargin: freeMargin,
 	}, nil
-}
-
-// GetDrawings returns drawings for an account and symbol
-func (e *Engine) GetDrawings(accountID int64, symbol string) []*Drawing {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
-	userDrawings, ok := e.drawings[accountID]
-	if !ok {
-		return []*Drawing{}
-	}
-
-	var result []*Drawing
-	for _, d := range userDrawings {
-		if d.Symbol == symbol {
-			result = append(result, d)
-		}
-	}
-	return result
-}
-
-// SaveDrawing saves or updates a drawing
-func (e *Engine) SaveDrawing(drawing *Drawing) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	userDrawings := e.drawings[drawing.AccountID]
-
-	// Check if update
-	found := false
-	for i, d := range userDrawings {
-		if d.ID == drawing.ID {
-			userDrawings[i] = drawing
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		userDrawings = append(userDrawings, drawing)
-	}
-
-	e.drawings[drawing.AccountID] = userDrawings
-}
-
-// DeleteDrawing deletes a drawing
-func (e *Engine) DeleteDrawing(accountID int64, drawingID string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	userDrawings, ok := e.drawings[accountID]
-	if !ok {
-		return
-	}
-
-	var newDrawings []*Drawing
-	for _, d := range userDrawings {
-		if d.ID != drawingID {
-			newDrawings = append(newDrawings, d)
-		}
-	}
-
-	e.drawings[accountID] = newDrawings
 }

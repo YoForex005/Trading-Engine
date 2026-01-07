@@ -29,28 +29,32 @@ type OHLC struct {
 	Volume int     `json:"volume"`
 }
 
-// TickStore provides in-memory tick storage with file persistence
+// TickStore provides unified tick storage with file persistence
 type TickStore struct {
-	mu       sync.RWMutex
-	ticks    map[string][]Tick // symbol -> ticks
-	maxTicks int               // Max ticks per symbol
-	filePath string            // Persistence file path
-	brokerID string            // This broker's ID
+	mu         sync.RWMutex
+	ticks      map[string][]Tick // In-memory tick buffer (current session)
+	maxTicks   int               // Max ticks per symbol in memory
+	filePath   string            // Legacy file path
+	brokerID   string
+	dailyStore *DailyStore // Daily file rotation
+	ohlcCache  *OHLCCache  // Pre-computed OHLC
 }
 
 // NewTickStore creates a new tick store instance
 func NewTickStore(brokerID string, maxTicksPerSymbol int) *TickStore {
 	ts := &TickStore{
-		ticks:    make(map[string][]Tick),
-		maxTicks: maxTicksPerSymbol,
-		filePath: "data/ticks.json",
-		brokerID: brokerID,
+		ticks:      make(map[string][]Tick),
+		maxTicks:   maxTicksPerSymbol,
+		filePath:   "data/ticks.json",
+		brokerID:   brokerID,
+		dailyStore: NewDailyStore(brokerID, 30), // Keep 30 days
+		ohlcCache:  NewOHLCCache([]Timeframe{TF_M1, TF_M5, TF_M15, TF_H1, TF_H4, TF_D1}),
 	}
 
 	// Ensure data directory exists
 	os.MkdirAll("data", 0755)
 
-	// Load existing ticks from file
+	// Load legacy ticks (migration support)
 	ts.loadFromFile()
 
 	// Start periodic persistence
@@ -75,13 +79,19 @@ func (ts *TickStore) StoreTick(symbol string, bid, ask, spread float64, lp strin
 		LP:        lp,
 	}
 
-	// Append tick
+	// Store in memory buffer
 	ts.ticks[symbol] = append(ts.ticks[symbol], tick)
 
 	// Trim if exceeds max
 	if len(ts.ticks[symbol]) > ts.maxTicks {
 		ts.ticks[symbol] = ts.ticks[symbol][len(ts.ticks[symbol])-ts.maxTicks:]
 	}
+
+	// Store in daily file system
+	ts.dailyStore.StoreTick(symbol, tick)
+
+	// Update OHLC cache
+	ts.ohlcCache.UpdateFromTick(symbol, bid, ask, timestamp)
 }
 
 // GetHistory retrieves historical ticks for a symbol
@@ -89,78 +99,44 @@ func (ts *TickStore) GetHistory(symbol string, limit int) []Tick {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
 
+	// Try memory first for recent data
 	ticks, ok := ts.ticks[symbol]
-	if !ok {
-		return []Tick{}
+	if ok && len(ticks) >= limit {
+		if limit <= 0 || limit > len(ticks) {
+			limit = len(ticks)
+		}
+		start := len(ticks) - limit
+		result := make([]Tick, limit)
+		copy(result, ticks[start:])
+		return result
 	}
 
-	if limit <= 0 || limit > len(ticks) {
-		limit = len(ticks)
-	}
-
-	// Return most recent ticks
-	start := len(ticks) - limit
-	if start < 0 {
-		start = 0
-	}
-
-	result := make([]Tick, limit)
-	copy(result, ticks[start:])
-	return result
+	// Fall back to daily store for more historical data
+	return ts.dailyStore.GetHistory(symbol, limit, 7) // Look back 7 days
 }
 
-// GetOHLC aggregates ticks into OHLC bars for a given timeframe
+// GetOHLC retrieves OHLC bars for a symbol and timeframe
 func (ts *TickStore) GetOHLC(symbol string, timeframeSecs int64, limit int) []OHLC {
-	ts.mu.RLock()
-	defer ts.mu.RUnlock()
-
-	ticks, ok := ts.ticks[symbol]
-	if !ok || len(ticks) == 0 {
-		return []OHLC{}
+	// Map timeframe seconds to enum
+	var tf Timeframe
+	switch timeframeSecs {
+	case 60:
+		tf = TF_M1
+	case 300:
+		tf = TF_M5
+	case 900:
+		tf = TF_M15
+	case 3600:
+		tf = TF_H1
+	case 14400:
+		tf = TF_H4
+	case 86400:
+		tf = TF_D1
+	default:
+		tf = TF_M1
 	}
 
-	// Group ticks by candle time
-	candles := make(map[int64]*OHLC)
-	var candleTimes []int64
-
-	for _, tick := range ticks {
-		ts := tick.Timestamp.Unix()
-		candleTime := (ts / timeframeSecs) * timeframeSecs
-		price := (tick.Bid + tick.Ask) / 2
-
-		if candle, exists := candles[candleTime]; exists {
-			if price > candle.High {
-				candle.High = price
-			}
-			if price < candle.Low {
-				candle.Low = price
-			}
-			candle.Close = price
-			candle.Volume++
-		} else {
-			candles[candleTime] = &OHLC{
-				Time:   candleTime,
-				Open:   price,
-				High:   price,
-				Low:    price,
-				Close:  price,
-				Volume: 1,
-			}
-			candleTimes = append(candleTimes, candleTime)
-		}
-	}
-
-	// Convert to slice and limit
-	result := make([]OHLC, 0, len(candleTimes))
-	for _, t := range candleTimes {
-		result = append(result, *candles[t])
-	}
-
-	if limit > 0 && len(result) > limit {
-		result = result[len(result)-limit:]
-	}
-
-	return result
+	return ts.ohlcCache.GetBars(symbol, tf, limit)
 }
 
 // GetSymbols returns all symbols with stored ticks
@@ -168,8 +144,20 @@ func (ts *TickStore) GetSymbols() []string {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
 
-	symbols := make([]string, 0, len(ts.ticks))
+	symbolMap := make(map[string]bool)
+
+	// From memory
 	for symbol := range ts.ticks {
+		symbolMap[symbol] = true
+	}
+
+	// From daily store
+	for _, sym := range ts.dailyStore.GetSymbols() {
+		symbolMap[sym] = true
+	}
+
+	symbols := make([]string, 0, len(symbolMap))
+	for symbol := range symbolMap {
 		symbols = append(symbols, symbol)
 	}
 	return symbols
@@ -190,7 +178,7 @@ func (ts *TickStore) persistPeriodically() {
 	}
 }
 
-// saveToFile persists all ticks to JSON file
+// saveToFile persists current session ticks to JSON file (legacy compat)
 func (ts *TickStore) saveToFile() {
 	ts.mu.RLock()
 	defer ts.mu.RUnlock()
@@ -234,4 +222,22 @@ func (ts *TickStore) loadFromFile() {
 		total += len(ticks)
 	}
 	log.Printf("[TickStore] Loaded %d ticks across %d symbols from file", total, len(ts.ticks))
+}
+
+// GetDailyStore returns the daily store for direct access
+func (ts *TickStore) GetDailyStore() *DailyStore {
+	return ts.dailyStore
+}
+
+// GetOHLCCache returns the OHLC cache for direct access
+func (ts *TickStore) GetOHLCCache() *OHLCCache {
+	return ts.ohlcCache
+}
+
+// RebuildOHLCForSymbol rebuilds OHLC cache from tick history
+func (ts *TickStore) RebuildOHLCForSymbol(symbol string) {
+	ticks := ts.dailyStore.GetHistory(symbol, 0, 30) // All ticks for 30 days
+	if len(ticks) > 0 {
+		ts.ohlcCache.RebuildFromTicks(symbol, ticks)
+	}
 }

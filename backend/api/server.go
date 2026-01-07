@@ -5,11 +5,10 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/epic1st/rtx/backend/auth"
-	"github.com/epic1st/rtx/backend/bbook"
 	"github.com/epic1st/rtx/backend/fix"
+	"github.com/epic1st/rtx/backend/internal/api/handlers"
 	"github.com/epic1st/rtx/backend/oms"
 	"github.com/epic1st/rtx/backend/orders"
 	"github.com/epic1st/rtx/backend/risk"
@@ -19,8 +18,9 @@ import (
 )
 
 type Server struct {
-	authService     *auth.Service
-	bbookAPI        *bbook.APIHandler
+	authService *auth.Service
+	bbookAPI    *handlers.APIHandler
+
 	omsService      *oms.Service
 	riskEngine      *risk.Engine
 	smartRouter     *router.SmartRouter
@@ -33,7 +33,8 @@ type Server struct {
 	riskCalculator  *risk.RiskCalculator
 }
 
-func NewServer(authService *auth.Service, bbookAPI *bbook.APIHandler) *Server {
+func NewServer(authService *auth.Service, bbookAPI *handlers.APIHandler) *Server {
+
 	return &Server{
 		authService:     authService,
 		bbookAPI:        bbookAPI,
@@ -123,9 +124,9 @@ func (s *Server) HandlePlaceOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Symbol  string  `json:"symbol"`
-		Side    string  `json:"side"`
-		Volume  float64 `json:"volume"`
+		Symbol string  `json:"symbol"`
+		Side   string  `json:"side"`
+		Volume float64 `json:"volume"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -146,37 +147,16 @@ func (s *Server) HandlePlaceOrder(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[ORDER] Executing %s %s %.2f lots (%d units) via OANDA LP",
 		req.Side, req.Symbol, req.Volume, units)
 
-	if s.hub != nil && s.hub.GetOandaClient() != nil {
-		oandaClient := s.hub.GetOandaClient()
-		
-		orderResp, err := oandaClient.PlaceMarketOrder(oandaSymbol, units)
-		if err != nil {
-			log.Printf("[ORDER] OANDA execution failed: %v", err)
-			http.Error(w, "Order execution failed: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
+	// A-Book Execution (LP Routing) - Pending Implementation of Generic LP Routing
+	/*
+		// OANDA Legacy logic removed
+	*/
+	// For now, if we are here, we default to "No LP connection available" if not B-Book logic handled earlier?
+	// Actually B-Book logic is handled *before* this in the full file (Lines 117-130 usually).
+	// So we just return an error here.
+	http.Error(w, "A-Book execution disabled (Dynamic LP Manager migration)", http.StatusServiceUnavailable)
 
-		log.Printf("[ORDER] OANDA fill - Trade ID: %s, Price: %s",
-			orderResp.OrderFillTransaction.TradeOpened.TradeID,
-			orderResp.OrderFillTransaction.Price)
-
-		resp := map[string]interface{}{
-			"success":  true,
-			"orderId":  orderResp.OrderCreateTransaction.ID,
-			"tradeId":  orderResp.OrderFillTransaction.TradeOpened.TradeID,
-			"price":    orderResp.OrderFillTransaction.Price,
-			"symbol":   req.Symbol,
-			"side":     req.Side,
-			"volume":   req.Volume,
-			"lp":       "OANDA",
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-
-	http.Error(w, "No LP connection available", http.StatusServiceUnavailable)
+	// http.Error(w, "No LP connection available", http.StatusServiceUnavailable)
 }
 
 // HandlePlaceLimitOrder handles limit order placement
@@ -356,34 +336,12 @@ func (s *Server) HandlePartialClose(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// For OANDA, we need to close partial units
-	if s.hub != nil && s.hub.GetOandaClient() != nil {
-		trades, err := s.hub.GetOandaClient().GetOpenTrades()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	// if s.hub != nil && s.hub.GetOandaClient() != nil {
+	// 	trades, err := s.hub.GetOandaClient().GetOpenTrades()
+	//     // ...
+	// }
 
-		for _, trade := range trades {
-			if trade.ID == req.TradeID {
-				units, _ := strconv.ParseFloat(trade.CurrentUnits, 64)
-				closeUnits := int(units * (req.Percent / 100))
-				
-				log.Printf("[ORDER] Partial close %s: %.0f%% = %d units", req.TradeID, req.Percent, closeUnits)
-				
-				// OANDA partial close would be implemented here
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"success":    true,
-					"tradeId":    req.TradeID,
-					"closedUnits": closeUnits,
-					"percent":    req.Percent,
-				})
-				return
-			}
-		}
-	}
-
-	http.Error(w, "Trade not found", http.StatusNotFound)
+	http.Error(w, "Partial close disabled (Dynamic LP Manager migration)", http.StatusServiceUnavailable)
 }
 
 // HandleCloseAll closes all positions
@@ -402,38 +360,8 @@ func (s *Server) HandleCloseAll(w http.ResponseWriter, r *http.Request) {
 
 	json.NewDecoder(r.Body).Decode(&req) // Optional body
 
-	if s.hub != nil && s.hub.GetOandaClient() != nil {
-		trades, err := s.hub.GetOandaClient().GetOpenTrades()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		closed := 0
-		for _, trade := range trades {
-			symbol := strings.Replace(trade.Instrument, "_", "", 1)
-			if req.Symbol != "" && symbol != req.Symbol {
-				continue
-			}
-
-			if err := s.hub.GetOandaClient().CloseTrade(trade.ID); err != nil {
-				log.Printf("[ORDER] Failed to close %s: %v", trade.ID, err)
-				continue
-			}
-			closed++
-		}
-
-		log.Printf("[ORDER] Closed %d positions", closed)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"closed":  closed,
-		})
-		return
-	}
-
-	http.Error(w, "No LP connection", http.StatusServiceUnavailable)
+	// Legacy OANDA logic removed
+	http.Error(w, "Close All disabled (Dynamic LP Manager migration)", http.StatusServiceUnavailable)
 }
 
 // HandleModifySLTP modifies stop loss and take profit
@@ -488,24 +416,7 @@ func (s *Server) HandleBreakeven(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get trade's entry price and set SL to it
-	if s.hub != nil && s.hub.GetOandaClient() != nil {
-		trades, _ := s.hub.GetOandaClient().GetOpenTrades()
-		for _, trade := range trades {
-			if trade.ID == req.TradeID {
-				entryPrice, _ := strconv.ParseFloat(trade.Price, 64)
-				log.Printf("[ORDER] Break-even for %s at %.5f", req.TradeID, entryPrice)
-
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"success":   true,
-					"tradeId":   req.TradeID,
-					"breakeven": entryPrice,
-				})
-				return
-			}
-		}
-	}
+	// Legacy OANDA logic removed
 
 	http.Error(w, "Trade not found", http.StatusNotFound)
 }
@@ -593,12 +504,8 @@ func (s *Server) HandleMarginPreview(w http.ResponseWriter, r *http.Request) {
 	var currentMargin, freeMargin float64
 	leverage := 50
 
-	if s.hub != nil && s.hub.GetOandaClient() != nil {
-		summary, err := s.hub.GetOandaClient().GetAccountSummary()
-		if err == nil {
-			currentMargin, _ = strconv.ParseFloat(summary.MarginUsed, 64)
-			freeMargin, _ = strconv.ParseFloat(summary.MarginAvailable, 64)
-		}
+	if s.hub != nil {
+		// OANDA logic removed
 	}
 
 	result, err := s.riskCalculator.PreviewMargin(symbol, volume, side, leverage, currentMargin, freeMargin)
@@ -616,44 +523,7 @@ func (s *Server) HandleGetAccountInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-	if s.hub != nil && s.hub.GetOandaClient() != nil {
-		summary, err := s.hub.GetOandaClient().GetAccountSummary()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		balance, _ := strconv.ParseFloat(summary.Balance, 64)
-		nav, _ := strconv.ParseFloat(summary.NAV, 64)
-		marginUsed, _ := strconv.ParseFloat(summary.MarginUsed, 64)
-		marginAvail, _ := strconv.ParseFloat(summary.MarginAvailable, 64)
-		unrealizedPL, _ := strconv.ParseFloat(summary.UnrealizedPL, 64)
-
-		marginLevel := 0.0
-		if marginUsed > 0 {
-			marginLevel = (nav / marginUsed) * 100
-		}
-
-		resp := map[string]interface{}{
-			"id":              summary.ID,
-			"currency":        summary.Currency,
-			"balance":         balance,
-			"equity":          nav,
-			"margin":          marginUsed,
-			"freeMargin":      marginAvail,
-			"marginLevel":     marginLevel,
-			"unrealizedPL":    unrealizedPL,
-			"openTradeCount":  summary.OpenTradeCount,
-			"leverage":        50,
-			"hedgingMode":     s.positionManager.IsHedgingMode(),
-			"lp":              "OANDA",
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-
+	// Legacy OANDA logic removed
 	http.Error(w, "No LP connection", http.StatusServiceUnavailable)
 }
 
@@ -670,44 +540,7 @@ func (s *Server) HandleGetPositions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.hub != nil && s.hub.GetOandaClient() != nil {
-		trades, err := s.hub.GetOandaClient().GetOpenTrades()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		var positions []map[string]interface{}
-		for _, trade := range trades {
-			units, _ := strconv.ParseFloat(trade.CurrentUnits, 64)
-			price, _ := strconv.ParseFloat(trade.Price, 64)
-			pl, _ := strconv.ParseFloat(trade.UnrealizedPL, 64)
-
-			side := "BUY"
-			if units < 0 {
-				side = "SELL"
-				units = -units
-			}
-
-			symbol := strings.Replace(trade.Instrument, "_", "", 1)
-
-			positions = append(positions, map[string]interface{}{
-				"id":           trade.ID,
-				"symbol":       symbol,
-				"side":         side,
-				"volume":       units / 100000,
-				"openPrice":    price,
-				"openTime":     trade.OpenTime,
-				"unrealizedPL": pl,
-				"lp":           "OANDA",
-			})
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(positions)
-		return
-	}
-
+	// Legacy OANDA logic removed
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode([]interface{}{})
 }
@@ -730,23 +563,7 @@ func (s *Server) HandleClosePosition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.hub != nil && s.hub.GetOandaClient() != nil {
-		err := s.hub.GetOandaClient().CloseTrade(req.TradeID)
-		if err != nil {
-			http.Error(w, "Failed to close trade: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		log.Printf("[ORDER] Closed trade %s via OANDA", req.TradeID)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"tradeId": req.TradeID,
-		})
-		return
-	}
-
+	// Legacy OANDA logic removed
 	http.Error(w, "No LP connection", http.StatusServiceUnavailable)
 }
 
@@ -848,28 +665,17 @@ func (s *Server) HandleGetRoutes(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rules)
 }
 
+// HandleLPStatus returns the status of LPs (Legacy - use /admin/lp-status)
 func (s *Server) HandleLPStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-	status := map[string]interface{}{
-		"OANDA": map[string]interface{}{
-			"status":    "CONNECTED",
-			"streaming": true,
-			"type":      "REST/Streaming API",
-		},
-	}
-
-	fixStatus := s.fixGateway.GetStatus()
-	for id, st := range fixStatus {
-		status[id] = map[string]interface{}{
-			"status": st,
-			"type":   "FIX 4.4",
-		}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+
+	// Legacy endpoint compatibility
+	// The new endpoint is handled by handlers.LPHandler
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "managed_by_lp_manager",
+		"info":   "Use /admin/lp-status for detailed info",
+	})
 }
 
 func (s *Server) ConnectToLP(sessionID string) error {
