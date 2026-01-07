@@ -4,7 +4,7 @@
       "id": "oanda",
       "name": "OANDA",
       "type": "OANDA",
-      "enabled": true,
+      "enabled": false,
       "priority": 1,
       "settings": {},
       "symbols": []
@@ -13,12 +13,21 @@
       "id": "binance",
       "name": "Binance",
       "type": "BINANCE",
-      "enabled": true,
+      "enabled": false,
       "priority": 2,
+      "settings": {},
+      "symbols": []
+    },
+    {
+      "id": "flexy",
+      "name": "FlexyMarkets",
+      "type": "socket.io",
+      "enabled": true,
+      "priority": 3,
       "settings": {},
       "symbols": []
     }
   ],
   "primaryLp": "oanda",
-  "lastModified": 1767450415
+  "lastModified": 1767775109
 }

@@ -103,7 +103,7 @@ func (h *Hub) BroadcastTick(tick *MarketTick) {
 
 	// Notify B-Book engine of new price (for order execution)
 	if h.bbookEngine != nil {
-		h.bbookEngine.UpdatePrice(tick.Symbol, tick.Bid, tick.Ask)
+		h.bbookEngine.UpdatePrice(tick.Symbol, tick.Bid, tick.Ask, tick.LP)
 	}
 
 	// CRITICAL: Persist tick for chart history

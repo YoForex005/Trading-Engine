@@ -104,6 +104,7 @@ func main() {
 	// Register Adapters
 	lpMgr.RegisterAdapter(adapters.NewBinanceAdapter())
 	lpMgr.RegisterAdapter(adapters.NewOANDAAdapter(OANDA_API_KEY, OANDA_ACCOUNT_ID))
+	lpMgr.RegisterAdapter(adapters.NewFlexyAdapter())
 
 	// Load Config
 	if err := lpMgr.LoadConfig(); err != nil {
@@ -118,6 +119,68 @@ func main() {
 
 	// Start LP Manager Aggregation
 	lpMgr.StartQuoteAggregation()
+
+	// Periodically sync symbols from enabled LPs to Engine
+	go func() {
+		// Initial sync after a short delay to allow connections
+		time.Sleep(2 * time.Second)
+
+		syncTicker := time.NewTicker(30 * time.Second)
+		for {
+			adapters := lpMgr.GetEnabledAdapters()
+			for _, adapter := range adapters {
+				if syms, err := adapter.GetSymbols(); err == nil {
+					for _, s := range syms {
+						// Register/Update in engine
+						existing := bbookEngine.GetSymbol(s.Symbol)
+						var spec *core.SymbolSpec
+
+						if existing != nil {
+							spec = existing
+						} else {
+							// Default values if missing
+							contractSize := 100000.0
+							if s.Type == "crypto" {
+								contractSize = 1.0
+							}
+							spec = &core.SymbolSpec{
+								Symbol:           s.Symbol,
+								ContractSize:     contractSize,
+								PipSize:          s.PipValue,
+								MinVolume:        s.MinLotSize,
+								MaxVolume:        s.MaxLotSize,
+								VolumeStep:       s.LotStep,
+								MarginPercent:    1.0,
+								CommissionPerLot: 0.0,
+								Disabled:         false,
+								AvailableLPs:     []string{},
+							}
+						}
+
+						// Update AvailableLPs
+						found := false
+						for _, lp := range spec.AvailableLPs {
+							if lp == adapter.ID() {
+								found = true
+								break
+							}
+						}
+						if !found {
+							spec.AvailableLPs = append(spec.AvailableLPs, adapter.ID())
+						}
+
+						// Set Default SourceLP if empty
+						if spec.SourceLP == "" {
+							spec.SourceLP = adapter.ID()
+						}
+
+						bbookEngine.UpdateSymbol(spec)
+					}
+				}
+			}
+			<-syncTicker.C
+		}
+	}()
 
 	// Connect all enabled LPs - REMOVED (Handled internally by StartQuoteAggregation)
 
@@ -260,6 +323,7 @@ func main() {
 	http.HandleFunc("/admin/account/update", apiHandler.HandleAdminUpdateAccount)
 	http.HandleFunc("/admin/symbols", apiHandler.HandleAdminGetSymbols)
 	http.HandleFunc("/admin/symbols/toggle", apiHandler.HandleAdminToggleSymbol)
+	http.HandleFunc("/admin/symbols/source", apiHandler.HandleAdminUpdateSymbolSource)
 
 	// Execution Mode Toggle (A-Book vs B-Book)
 	http.HandleFunc("/admin/execution-mode", func(w http.ResponseWriter, r *http.Request) {

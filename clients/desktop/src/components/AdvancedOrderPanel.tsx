@@ -160,8 +160,8 @@ export function AdvancedOrderPanel({ symbol, currentPrice, onOrderPlaced }: Orde
                         key={type.value}
                         onClick={() => setOrderType(type.value)}
                         className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${orderType === type.value
-                                ? 'bg-emerald-500/20 text-emerald-400'
-                                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
                             }`}
                     >
                         {type.label}
@@ -233,8 +233,8 @@ export function AdvancedOrderPanel({ symbol, currentPrice, onOrderPlaced }: Orde
                         key={mode}
                         onClick={() => setSlTpMode(mode)}
                         className={`flex-1 py-1 text-[10px] rounded ${slTpMode === mode
-                                ? 'bg-zinc-700 text-zinc-200'
-                                : 'bg-zinc-800/50 text-zinc-500 hover:text-zinc-400'
+                            ? 'bg-zinc-700 text-zinc-200'
+                            : 'bg-zinc-800/50 text-zinc-500 hover:text-zinc-400'
                             }`}
                     >
                         {mode}
@@ -316,28 +316,43 @@ export function AdvancedOrderPanel({ symbol, currentPrice, onOrderPlaced }: Orde
             )}
 
             {/* Buy/Sell Buttons */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3 mt-auto">
                 <button
                     onClick={() => {
                         setSide('SELL');
                         handleSubmit();
                     }}
                     disabled={loading}
-                    className="py-3 rounded-lg bg-red-500/20 text-red-400 font-semibold hover:bg-red-500/30 transition-colors disabled:opacity-50"
+                    className={`relative overflow-hidden group py-4 rounded-xl transition-all duration-200 
+                        ${side === 'SELL' ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-[#131722]' : ''}
+                        bg-gradient-to-br from-red-500/10 to-red-600/20 hover:from-red-500/20 hover:to-red-600/30 
+                        border border-red-500/20 hover:border-red-500/40 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
-                    <div className="text-lg">SELL</div>
-                    <div className="text-xs opacity-70">{currentBid}</div>
+                    <div className="flex flex-col items-center">
+                        <span className="text-sm font-bold text-red-500 mb-0.5 group-hover:scale-105 transition-transform">SELL</span>
+                        <div className="flex items-baseline gap-1">
+                            <span className="text-2xl font-bold text-red-400 tracking-tight">{currentBid}</span>
+                        </div>
+                    </div>
                 </button>
+
                 <button
                     onClick={() => {
                         setSide('BUY');
                         handleSubmit();
                     }}
                     disabled={loading}
-                    className="py-3 rounded-lg bg-emerald-500/20 text-emerald-400 font-semibold hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
+                    className={`relative overflow-hidden group py-4 rounded-xl transition-all duration-200
+                        ${side === 'BUY' ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-[#131722]' : ''}
+                        bg-gradient-to-br from-emerald-500/10 to-emerald-600/20 hover:from-emerald-500/20 hover:to-emerald-600/30
+                        border border-emerald-500/20 hover:border-emerald-500/40 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
-                    <div className="text-lg">BUY</div>
-                    <div className="text-xs opacity-70">{currentAsk}</div>
+                    <div className="flex flex-col items-center">
+                        <span className="text-sm font-bold text-emerald-500 mb-0.5 group-hover:scale-105 transition-transform">BUY</span>
+                        <div className="flex items-baseline gap-1">
+                            <span className="text-2xl font-bold text-emerald-400 tracking-tight">{currentAsk}</span>
+                        </div>
+                    </div>
                 </button>
             </div>
 
@@ -363,8 +378,8 @@ export function AdvancedOrderPanel({ symbol, currentPrice, onOrderPlaced }: Orde
                             <button
                                 onClick={executeOrder}
                                 className={`flex-1 py-2 rounded font-semibold ${side === 'BUY'
-                                        ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                                        : 'bg-red-500 text-white hover:bg-red-600'
+                                    ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                                    : 'bg-red-500 text-white hover:bg-red-600'
                                     }`}
                             >
                                 Confirm

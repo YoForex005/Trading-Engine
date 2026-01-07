@@ -34,6 +34,12 @@ tags:
     description: SuperAdmin account management
   - name: Admin - Ledger
     description: SuperAdmin deposit, withdraw, adjust
+  - name: Admin - LP Management
+    description: Liquidity Provider switching and management
+  - name: Chart Drawings
+    description: User chart drawings (trendlines, rectangles, etc.)
+  - name: Configuration
+    description: Platform configuration endpoints
   - name: Market Data
     description: Real-time and historical price data
   - name: Risk Calculator
@@ -983,13 +989,182 @@ paths:
         '200':
           description: Routing rules
 
-  /admin/lp-status:
+  # ===== LP MANAGEMENT APIs =====
+  /admin/lps:
     get:
-      tags: [Legacy - OANDA]
-      summary: Get LP connection status
+      tags: [Admin - LP Management]
+      summary: List all LP configurations
+      description: Returns all configured liquidity providers with their settings
       responses:
         '200':
-          description: LP status
+          description: List of LP configurations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LPConfig'
+    post:
+      tags: [Admin - LP Management]
+      summary: Add new LP configuration
+      description: Add a new liquidity provider to the system
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LPConfig'
+      responses:
+        '200':
+          description: LP added successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  lp:
+                    $ref: '#/components/schemas/LPConfig'
+        '400':
+          description: Invalid request or LP already exists
+
+  /admin/lps/{id}:
+    put:
+      tags: [Admin - LP Management]
+      summary: Update LP configuration
+      description: Update settings for an existing LP
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: oanda
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LPConfig'
+      responses:
+        '200':
+          description: LP updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          description: LP not found
+    delete:
+      tags: [Admin - LP Management]
+      summary: Remove LP configuration
+      description: Remove an LP from the system
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: oanda
+      responses:
+        '200':
+          description: LP removed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          description: LP not found
+
+  /admin/lps/{id}/toggle:
+    post:
+      tags: [Admin - LP Management]
+      summary: Toggle LP enabled state
+      description: Enable or disable an LP - when enabled, LP will connect and start streaming prices
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: binance
+      responses:
+        '200':
+          description: LP toggled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  id:
+                    type: string
+                  enabled:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          description: LP not found
+
+  /admin/lps/{id}/symbols:
+    get:
+      tags: [Admin - LP Management]
+      summary: Get symbols available from LP
+      description: Returns all tradeable symbols provided by this LP
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: binance
+      responses:
+        '200':
+          description: Symbol list from LP
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  count:
+                    type: integer
+                  symbols:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LPSymbolInfo'
+        '404':
+          description: LP adapter not found
+
+  /admin/lp-status:
+    get:
+      tags: [Admin - LP Management]
+      summary: Get status of all LPs
+      description: Returns connection status, symbol count, and last tick time for all configured LPs
+      responses:
+        '200':
+          description: LP status map
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/LPStatus'
 
   # ===== WEBSOCKET =====
   /ws:
@@ -1035,6 +1210,273 @@ paths:
       responses:
         '101':
           description: WebSocket upgrade
+
+  # ===== DRAWINGS API =====
+  /api/drawings:
+    get:
+      tags: [Chart Drawings]
+      summary: Get chart drawings for a symbol
+      description: Retrieve all user drawings (trendlines, rectangles, etc.) for a specific chart
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 1
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+            example: EURUSD
+      responses:
+        '200':
+          description: List of drawings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Drawing'
+
+  /api/drawings/save:
+    post:
+      tags: [Chart Drawings]
+      summary: Save or update a drawing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Drawing'
+      responses:
+        '200':
+          description: Drawing saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /api/drawings/delete:
+    post:
+      tags: [Chart Drawings]
+      summary: Delete a drawing
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Drawing ID
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Drawing deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  # ===== CONFIG API =====
+  /api/config:
+    get:
+      tags: [Configuration]
+      summary: Get broker configuration
+      description: Returns current broker settings including active LP, execution mode, etc.
+      responses:
+        '200':
+          description: Broker configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerConfig'
+
+  # ===== TICK HISTORY API =====
+  /api/ticks/history:
+    get:
+      tags: [Market Data]
+      summary: Get tick history for charting
+      description: Returns historical tick data for Tick Charts and Time & Sales
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+            example: BTCUSD
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+      responses:
+        '200':
+          description: Historical ticks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tick'
+
+  # ===== LP SWITCH API =====
+  /admin/lp-switch:
+    post:
+      tags: [Admin - LP Management]
+      summary: Switch active liquidity provider
+      description: Switch between OANDA and InstantSwap price feeds
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lp]
+              properties:
+                lp:
+                  type: string
+                  enum: [OANDA, INSTANTSWAP]
+                  example: INSTANTSWAP
+      responses:
+        '200':
+          description: LP switched successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  activeLP:
+                    type: string
+
+
+
+
+
+  # ===== ADMIN SYMBOL MANAGEMENT =====
+  /admin/symbols:
+    get:
+      tags: [Admin - LP Management]
+      summary: Get all symbols with specs
+      responses:
+        '200':
+          description: Symbol specifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SymbolSpec'
+
+  /admin/symbols/toggle:
+    post:
+      tags: [Admin - LP Management]
+      summary: Enable/disable symbol trading
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, disabled]
+              properties:
+                symbol:
+                  type: string
+                  example: BTCUSD
+                disabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Symbol toggled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  disabled:
+                    type: boolean
+
+  # ===== PUBLIC SYMBOLS =====
+  /api/symbols:
+    get:
+      tags: [B-Book Trading]
+      summary: Get available trading symbols
+      responses:
+        '200':
+          description: Symbol list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SymbolSpec'
+
+  /admin/symbols/source:
+    post:
+      tags: [Admin - LP Management]
+      summary: Set preferred LP for symbol
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, sourceLP]
+              properties:
+                symbol:
+                  type: string
+                sourceLP:
+                  type: string
+      responses:
+        '200':
+          description: Source updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  # ===== ADMIN STATS =====
+  /admin/stats:
+    get:
+      tags: [Admin - Accounts]
+      summary: Get platform statistics
+      description: Returns total accounts, positions, volume, and P/L stats
+      responses:
+        '200':
+          description: Platform statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalAccounts:
+                    type: integer
+                  totalBalance:
+                    type: number
+                  totalPositions:
+                    type: integer
+                  totalVolume:
+                    type: number
+                  totalPnL:
+                    type: number
 
 components:
   schemas:
@@ -1285,6 +1727,209 @@ components:
         close:
           type: number
         volume:
+          type: number
+
+    Drawing:
+      type: object
+      description: Chart drawing object (trendline, rectangle, etc.)
+      properties:
+        id:
+          type: string
+          example: draw_1703620000000
+        accountId:
+          type: integer
+          example: 1
+        symbol:
+          type: string
+          example: EURUSD
+        type:
+          type: string
+          enum: [line, horizontal_line, rectangle, text]
+          example: line
+        points:
+          type: array
+          items:
+            type: object
+            properties:
+              time:
+                type: integer
+                description: Unix timestamp
+              price:
+                type: number
+        options:
+          type: object
+          description: Drawing-specific options (color, style, etc.)
+          properties:
+            color:
+              type: string
+              example: "#3b82f6"
+
+    BrokerConfig:
+      type: object
+      description: Broker/platform configuration
+      properties:
+        brokerName:
+          type: string
+          example: RTX Trading
+        executionMode:
+          type: string
+          enum: [ABOOK, BBOOK]
+          example: BBOOK
+        priceFeedLP:
+          type: string
+          enum: [OANDA, INSTANTSWAP]
+          example: INSTANTSWAP
+        defaultBalance:
+          type: number
+          example: 5000
+        maxTicksPerSymbol:
+          type: integer
+          example: 5000
+
+
+
+    SymbolSpec:
+      type: object
+      description: Trading symbol specification
+      properties:
+        symbol:
+          type: string
+        contractSize:
+          type: number
+        pipSize:
+          type: number
+        pipValue:
+          type: number
+        minVolume:
+          type: number
+        maxVolume:
+          type: number
+        volumeStep:
+          type: number
+        marginPercent:
+          type: number
+        commissionPerLot:
+          type: number
+        disabled:
+          type: boolean
+        sourceLP:
+          type: string
+        availableLPs:
+          type: array
+          items:
+            type: string
+
+    LPConfig:
+      type: object
+      description: Liquidity Provider configuration
+      required: [id, name, type]
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the LP
+          example: oanda
+        name:
+          type: string
+          description: Display name
+          example: OANDA
+        type:
+          type: string
+          description: LP type/provider
+          enum: [OANDA, BINANCE, FLEXYMARKETS]
+          example: OANDA
+        enabled:
+          type: boolean
+          description: Whether LP is currently active
+          example: true
+        priority:
+          type: integer
+          description: Priority order (lower = higher priority)
+          example: 1
+        settings:
+          type: object
+          description: API keys and configuration
+          additionalProperties:
+            type: string
+        symbols:
+          type: array
+          description: Subscribed symbols (empty = all available)
+          items:
+            type: string
+
+    LPStatus:
+      type: object
+      description: Current status of a liquidity provider
+      properties:
+        id:
+          type: string
+          example: binance
+        name:
+          type: string
+          example: Binance
+        type:
+          type: string
+          example: BINANCE
+        connected:
+          type: boolean
+          description: Whether LP is currently connected
+          example: true
+        enabled:
+          type: boolean
+          description: Whether LP is enabled in configuration
+          example: true
+        symbolCount:
+          type: integer
+          description: Number of symbols being streamed
+          example: 438
+        lastTick:
+          type: string
+          format: date-time
+          description: Timestamp of last received price tick
+        errorMessage:
+          type: string
+          description: Error message if disconnected
+
+    LPSymbolInfo:
+      type: object
+      description: Symbol information from an LP
+      properties:
+        symbol:
+          type: string
+          example: BTCUSD
+        displayName:
+          type: string
+          example: Bitcoin / US Dollar
+        baseCurrency:
+          type: string
+          example: BTC
+        quoteCurrency:
+          type: string
+          example: USD
+        minLotSize:
+          type: number
+          example: 0.001
+        maxLotSize:
+          type: number
+          example: 100
+        lotStep:
+          type: number
+          example: 0.001
+        pipValue:
+          type: number
+          example: 0.01
+        type:
+          type: string
+          enum: [forex, crypto, commodity, index]
+          example: crypto
+
+    Point:
+      type: object
+      description: Chart coordinate point
+      properties:
+        time:
+          type: integer
+          description: Unix timestamp
+        price:
           type: number
 
   securitySchemes:

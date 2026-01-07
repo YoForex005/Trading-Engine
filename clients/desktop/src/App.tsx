@@ -68,6 +68,7 @@ function App() {
   const [accountId, setAccountId] = useState<string>("1");
   const [tradeHistory, setTradeHistory] = useState<any[]>([]);
   const [ledger, setLedger] = useState<any[]>([]);
+  const [wsStatus, setWsStatus] = useState<string>('DISCONNECTED');
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -148,11 +149,13 @@ function App() {
       if (isUnmounting) return;
 
       console.log('[WS] Attempting connection to ws://localhost:8080/ws');
+      setWsStatus('CONNECTING');
       ws = new WebSocket('ws://localhost:8080/ws');
       wsRef.current = ws;
 
       ws.onopen = () => {
         console.log('[WS] WebSocket connected, waiting for tick data...');
+        setWsStatus('CONNECTED');
       };
 
       ws.onmessage = (event) => {
@@ -178,6 +181,7 @@ function App() {
 
       ws.onclose = (event) => {
         console.log(`[WS] Disconnected (code: ${event.code}, reason: ${event.reason})`);
+        setWsStatus('DISCONNECTED');
         wsRef.current = null;
 
         // Auto-reconnect after 2 seconds if not intentionally closed
@@ -395,9 +399,20 @@ function App() {
               )}
             </div>
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 rounded border border-emerald-500/20">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                <span className="text-[10px] text-emerald-400 font-medium">{brokerConfig?.priceFeedLP || 'LP'}</span>
+              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded border ${wsStatus === 'CONNECTED'
+                  ? 'bg-emerald-500/10 border-emerald-500/20'
+                  : wsStatus === 'CONNECTING'
+                    ? 'bg-yellow-500/10 border-yellow-500/20'
+                    : 'bg-red-500/10 border-red-500/20'
+                }`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${wsStatus === 'CONNECTED' ? 'bg-emerald-500 animate-pulse' :
+                    wsStatus === 'CONNECTING' ? 'bg-yellow-500 animate-ping' : 'bg-red-500'
+                  }`}></div>
+                <span className={`text-[10px] font-medium ${wsStatus === 'CONNECTED' ? 'text-emerald-400' :
+                    wsStatus === 'CONNECTING' ? 'text-yellow-400' : 'text-red-400'
+                  }`}>
+                  {wsStatus === 'CONNECTED' ? (brokerConfig?.priceFeedLP || 'LP') : wsStatus}
+                </span>
               </div>
             </div>
           </header>

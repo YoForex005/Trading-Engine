@@ -9,7 +9,12 @@ import {
     AreaSeries,
 } from 'lightweight-charts';
 import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts';
-import { X } from 'lucide-react';
+import { Maximize2, Minimize2 } from 'lucide-react';
+import { DrawingTools, type DrawingType } from './TradingChart/DrawingTools';
+import { DrawingOverlay } from './TradingChart/DrawingOverlay';
+import type { Drawing } from './TradingChart/types';
+import { DataCache, type CachedCandle } from '../services/DataCache';
+import { ExternalDataService } from '../services/ExternalDataService';
 
 export type ChartType = 'candlestick' | 'heikinAshi' | 'bar' | 'line' | 'area';
 export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
@@ -22,6 +27,8 @@ interface ChartProps {
     positions?: any[]; // Array of open positions
     onClosePosition?: (id: number) => void;
     onModifyPosition?: (id: number, sl: number, tp: number) => void;
+    onPlacePendingOrder?: (price: number, type: 'LIMIT' | 'STOP') => void;
+    oneClickEnabled?: boolean;
 }
 
 interface OHLC {
@@ -32,6 +39,8 @@ interface OHLC {
     close: number;
 }
 
+// ... (previous imports)
+
 export function TradingChart({
     symbol,
     currentPrice,
@@ -39,13 +48,61 @@ export function TradingChart({
     timeframe = '1m',
     positions = [],
     onClosePosition,
-    onModifyPosition
+    onModifyPosition,
+    onPlacePendingOrder,
+    oneClickEnabled
 }: ChartProps) {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<any> | null>(null);
     const candlesRef = useRef<OHLC[]>([]);
     const [isChartReady, setIsChartReady] = useState(false);
+
+    // Drawing State
+    const [activeTool, setActiveTool] = useState<DrawingType>('cursor');
+    const [drawings, setDrawings] = useState<Drawing[]>([]);
+
+    // Fetch drawings on load
+    useEffect(() => {
+        // Need accountId, assuming 1 for now or passed from props (TODO: Pass accountId to TradingChart)
+        const accountId = 1;
+        fetch(`http://localhost:8080/api/drawings?accountId=${accountId}&symbol=${symbol}`)
+            .then(res => res.json())
+            .then(data => setDrawings(data || []))
+            .catch(err => console.error('Failed to fetch drawings:', err));
+    }, [symbol]);
+
+    const handleUpdateDrawing = async (drawing: Drawing) => {
+        // Optimistic update
+        setDrawings(prev => {
+            const exists = prev.find(d => d.id === drawing.id);
+            if (exists) {
+                return prev.map(d => d.id === drawing.id ? drawing : d);
+            }
+            return [...prev, drawing];
+        });
+
+        // Save to backend
+        try {
+            await fetch('http://localhost:8080/api/drawings/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(drawing)
+            });
+        } catch (err) {
+            console.error('Failed to save drawing:', err);
+        }
+    };
+
+    const handleDeleteDrawing = async (id: string) => {
+        setDrawings(prev => prev.filter(d => d.id !== id));
+        try {
+            // Need accountId
+            await fetch(`http://localhost:8080/api/drawings/delete?id=${id}&accountId=1`, { method: 'POST' });
+        } catch (err) {
+            console.error('Failed to delete drawing:', err);
+        }
+    };
 
     // State for overlays
     const [overlayPositions, setOverlayPositions] = useState<any[]>([]);
@@ -169,29 +226,87 @@ export function TradingChart({
             if (!seriesRef.current) return;
 
             try {
-                const res = await fetch(`http://localhost:8080/ohlc?symbol=${symbol}&timeframe=${timeframe}&limit=500`);
+                // 1. Get cached data first
+                const cachedCandles = await DataCache.getCandles(symbol, timeframe);
 
-                if (!res.ok) {
-                    candlesRef.current = [];
-                    seriesRef.current.setData([]);
-                    return;
+                // 2. Fetch from backend API
+                const res = await fetch(`http://localhost:8080/ohlc?symbol=${symbol}&timeframe=${timeframe}&limit=1000`);
+                let apiCandles: OHLC[] = [];
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (Array.isArray(data) && data.length > 0) {
+                        apiCandles = data.map((d: any) => ({
+                            time: d.time as Time,
+                            open: d.open, high: d.high, low: d.low, close: d.close,
+                        }));
+                    }
                 }
 
-                const data = await res.json();
+                // 3. AUTO-FETCH FROM BINANCE if backend data is insufficient
+                let externalCandles: OHLC[] = [];
+                const totalLocalCandles = cachedCandles.length + apiCandles.length;
 
-                if (Array.isArray(data) && data.length > 0) {
-                    const candles: OHLC[] = data.map((d: any) => ({
-                        time: d.time as Time,
-                        open: d.open, high: d.high, low: d.low, close: d.close,
+                if (totalLocalCandles < 100 && ExternalDataService.isSupported(symbol)) {
+                    console.log(`[TradingChart] Backend data insufficient (${totalLocalCandles}), fetching from Binance...`);
+                    const binanceData = await ExternalDataService.fetchOHLC(symbol, timeframe, 500);
+                    externalCandles = binanceData.map(c => ({
+                        time: c.time as Time,
+                        open: c.open, high: c.high, low: c.low, close: c.close,
                     }));
-
-                    candlesRef.current = candles;
-                    const formattedData = formatDataForSeries(candles, chartType);
-                    seriesRef.current.setData(formattedData);
-                } else {
-                    candlesRef.current = [];
-                    seriesRef.current.setData([]);
                 }
+
+                // 4. Merge all sources: External (oldest) + Cache + Backend (newest)
+                const allCandlesMap = new Map<number, OHLC>();
+
+                // External data first (lowest priority)
+                for (const c of externalCandles) {
+                    allCandlesMap.set(c.time as number, c);
+                }
+                // Then cached data
+                for (const c of cachedCandles) {
+                    allCandlesMap.set(c.time, { time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close });
+                }
+                // Backend API data takes highest priority
+                for (const c of apiCandles) {
+                    allCandlesMap.set(c.time as number, c);
+                }
+
+                let mergedCandles = Array.from(allCandlesMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
+
+                // 5. Fill gaps using DataCache logic
+                if (mergedCandles.length > 1) {
+                    const filledCandles = DataCache.fillGaps(
+                        mergedCandles.map(c => ({
+                            symbol, timeframe, time: c.time as number,
+                            open: c.open, high: c.high, low: c.low, close: c.close
+                        })),
+                        timeframe
+                    );
+                    mergedCandles = filledCandles.map((c: CachedCandle) => ({
+                        time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close
+                    }));
+                }
+
+                // 6. Store merged data to cache
+                if (mergedCandles.length > 0) {
+                    await DataCache.storeCandles(
+                        symbol,
+                        timeframe,
+                        mergedCandles.map(c => ({
+                            symbol, timeframe, time: c.time as number,
+                            open: c.open, high: c.high, low: c.low, close: c.close
+                        }))
+                    );
+                }
+
+                // 7. Update chart
+                candlesRef.current = mergedCandles;
+                const formattedData = formatDataForSeries(mergedCandles, chartType);
+                seriesRef.current.setData(formattedData);
+
+                console.log(`[TradingChart] Loaded ${mergedCandles.length} candles for ${symbol}/${timeframe} (${cachedCandles.length} cached, ${apiCandles.length} backend, ${externalCandles.length} Binance)`);
+
             } catch (err) {
                 console.error('Error fetching historical data:', err);
                 candlesRef.current = [];
@@ -258,8 +373,6 @@ export function TradingChart({
         };
     }, [positions, symbol, isChartReady]);
 
-
-
     // Dragging Logic
     const [draggingState, setDraggingState] = useState<{ id: number; type: 'SL' | 'TP'; startPrice: number } | null>(null);
     const [dragPrice, setDragPrice] = useState<number | null>(null);
@@ -315,12 +428,72 @@ export function TradingChart({
         };
     }, [draggingState, positions, onModifyPosition]);
 
+    // Force re-render of overlay on scroll/scale
+    // Force re-render of overlay on scroll/scale
+    useEffect(() => {
+        if (!chartRef.current) return;
+        const chart = chartRef.current;
+        const refresh = () => setOverlayPositions(prev => [...prev]); // Trigger re-render
+        chart.timeScale().subscribeVisibleTimeRangeChange(refresh);
+        return () => chart.timeScale().unsubscribeVisibleTimeRangeChange(refresh);
+    }, [isChartReady]);
+
+    // One-Click Trading Handler
+    useEffect(() => {
+        if (!chartRef.current || !seriesRef.current || !oneClickEnabled || !onPlacePendingOrder) return;
+
+        const handleChartClick = (param: any) => {
+            if (!param.point || !param.time || !seriesRef.current) return;
+            const price = seriesRef.current.coordinateToPrice(param.point.y);
+            if (price) {
+                // Determine Limit vs Stop based on current price
+                // Simple logic: if click > current (ask), Buy Stop or Sell Limit?
+                // Standard: Click Above -> Sell Limit. Click Below -> Buy Limit.
+                // Or user context? Let's implement Limit orders for now.
+                // Actually, typically One-Click ON CHART places limit orders.
+                // Above price = Sell Limit. Below price = Buy Limit.
+                onPlacePendingOrder(price, 'LIMIT');
+            }
+        };
+
+        chartRef.current.subscribeClick(handleChartClick);
+        return () => {
+            if (chartRef.current) chartRef.current.unsubscribeClick(handleChartClick);
+        };
+    }, [oneClickEnabled, onPlacePendingOrder, currentPrice]);
+
+
     return (
         <div className="relative w-full h-full bg-[#131722]">
             <div ref={chartContainerRef} className="w-full h-full" />
 
-            {/* HTML Overlays */}
-            <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            <DrawingTools
+                activeTool={activeTool}
+                onToolChange={setActiveTool}
+                onClearAll={() => {
+                    // TODO: Implement clear all
+                    setDrawings([]);
+                }}
+            />
+
+            {/* Drawing Overlay */}
+            {isChartReady && (
+                <DrawingOverlay
+                    chart={chartRef.current}
+                    series={seriesRef.current}
+                    drawings={drawings}
+                    selectedTool={activeTool}
+                    symbol={symbol}
+                    accountId={1} // TODO: Prop
+                    onUpdateDrawing={handleUpdateDrawing}
+                    onFinishDrawing={() => setActiveTool('cursor')}
+                    onDeleteDrawing={handleDeleteDrawing}
+                    containerRef={chartContainerRef as React.RefObject<HTMLDivElement>}
+                />
+            )}
+
+            {/* HTML Overlays (Positions) */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden z-30">
                 {overlayPositions.map((pos) => (
                     <PositionOverlay
                         key={pos.id}
@@ -334,7 +507,7 @@ export function TradingChart({
                 {/* Active Drag Line */}
                 {draggingState && dragPrice && (
                     <div
-                        className="absolute left-0 right-0 border-b border-dashed flex items-center justify-end pr-12 z-30"
+                        className="absolute left-0 right-0 border-b border-dashed flex items-center justify-end pr-12 z-40"
                         style={{
                             top: seriesRef.current?.priceToCoordinate(dragPrice) ?? 0,
                             height: 1,
@@ -359,52 +532,133 @@ export function TradingChart({
 }
 
 function PositionOverlay({ pos, draggingState, onDragStart, onClose }: any) {
-    // If this position is being dragged, override the Y position of the active line
     const isDraggingThis = draggingState?.id === pos.id;
+    const pnl = pos.unrealizedPnL || 0;
+    const pnlColor = pnl >= 0 ? 'text-emerald-400' : 'text-red-400';
+
 
     return (
         <>
-            {/* Entry Line */}
+            {/* Entry Line - Blue solid line with price label on right */}
             {pos.yEntry !== null && (
                 <div
-                    className="absolute left-0 right-0 border-b border-dotted border-blue-500 flex items-center justify-end pr-2 pointer-events-auto group hover:border-solid hover:border-2 z-20"
-                    style={{ top: pos.yEntry, height: 1 }}
+                    className="absolute left-0 right-0 pointer-events-auto group z-20"
+                    style={{ top: pos.yEntry }}
                 >
-                    <div className="bg-blue-500 text-white text-[10px] px-1 rounded-sm flex items-center gap-1 -mt-5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span>#{pos.id} {pos.side} {pos.volume}</span>
-                        <X size={12} className="cursor-pointer hover:text-red-300" onClick={onClose} />
+                    {/* Line */}
+                    <div className="absolute inset-x-0 top-0 h-[2px] bg-blue-500" />
+
+                    {/* Left Label - Position Info */}
+                    <div className="absolute left-3 -top-3 flex items-center gap-2 opacity-90 group-hover:opacity-100 transition-opacity">
+                        <div className={`${pos.side === 'BUY' ? 'bg-emerald-500' : 'bg-red-500'} text-white text-[10px] font-bold px-1.5 py-0.5 rounded-sm shadow-lg`}>
+                            {pos.side} {pos.volume}
+                        </div>
+                        <span className={`text-[10px] font-mono ${pnlColor} font-bold`}>
+                            {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
+                        </span>
+                    </div>
+
+                    {/* Right Label - Price Tag (MT5 Style) */}
+                    <div className="absolute right-0 -top-2.5 flex items-center">
+                        <div className="relative">
+                            <div className="bg-blue-500 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-l-sm shadow-lg">
+                                {pos.openPrice.toFixed(5)}
+                            </div>
+                            {/* Triangle pointer */}
+                            <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full w-0 h-0 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent border-l-[6px] border-l-blue-500" />
+                        </div>
+                    </div>
+
+                    {/* Close Button on Hover */}
+                    <div className="absolute left-24 -top-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                            onClick={onClose}
+                            className="bg-red-500 hover:bg-red-600 text-white text-[10px] px-1.5 py-0.5 rounded-sm shadow-lg font-bold"
+                        >
+                            ✕ CLOSE
+                        </button>
                     </div>
                 </div>
             )}
 
-            {/* SL Line */}
-            {(pos.ySL !== null || !pos.sl) && (
+            {/* SL Line - Red dashed with fill zone */}
+            {pos.ySL !== null && pos.sl > 0 && (
                 <div
-                    className={`absolute left-0 right-0 border-b border-dashed border-red-500 flex items-center justify-end pr-12 pointer-events-auto cursor-ns-resize group z-20 ${isDraggingThis && draggingState.type === 'SL' ? 'opacity-0' : ''}`}
-                    style={{ top: pos.ySL ?? pos.yEntry, height: 1, opacity: pos.ySL ? 1 : 0.5 }}
-                    onMouseDown={(e) => {
-                        e.stopPropagation();
-                        onDragStart(pos.id, 'SL', pos.sl || pos.openPrice);
-                    }}
+                    className={`absolute left-0 right-0 pointer-events-auto cursor-ns-resize group z-20 ${isDraggingThis && draggingState.type === 'SL' ? 'opacity-0' : ''}`}
+                    style={{ top: pos.ySL }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onDragStart(pos.id, 'SL', pos.sl); }}
                 >
-                    <div className="bg-red-500 text-white text-[10px] px-1 rounded-sm -mt-5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span>SL: {pos.sl}</span>
+                    {/* Invisible Hit Area for easier grabbing - Increased height */}
+                    <div className="absolute inset-x-0 -top-4 h-8 bg-transparent" />
+
+                    {/* Danger Zone Fill (between entry and SL) */}
+                    {pos.yEntry !== null && (
+                        <div
+                            className="absolute inset-x-0 bg-gradient-to-b from-red-500/10 to-red-500/5 pointer-events-none"
+                            style={{
+                                top: pos.side === 'BUY' ? 0 : -(pos.yEntry - pos.ySL),
+                                height: Math.abs(pos.yEntry - pos.ySL)
+                            }}
+                        />
+                    )}
+
+                    {/* Line */}
+                    <div className="absolute inset-x-0 top-0 h-[1px] border-t border-dashed border-red-500 group-hover:border-solid group-hover:h-[2px] shadow-sm" />
+
+                    {/* Right Label */}
+                    <div className="absolute right-0 -top-2.5 flex items-center">
+                        <div className="relative hover:scale-110 transition-transform origin-right">
+                            <div className="bg-red-500 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-l-md shadow-lg flex items-center gap-1 border border-red-400/50">
+                                <span className="opacity-70">SL</span> {pos.sl.toFixed(5)}
+                            </div>
+                            <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full w-0 h-0 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent border-l-[6px] border-l-red-500" />
+                        </div>
+                    </div>
+
+                    {/* Drag Handle Hint */}
+                    <div className="absolute left-3 -top-2 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-red-500 font-bold bg-white/10 backdrop-blur-md px-1 rounded">
+                        <span>Drag to Modify</span>
                     </div>
                 </div>
             )}
 
-            {/* TP Line */}
-            {(pos.yTP !== null || !pos.tp) && (
+            {/* TP Line - Green dashed with fill zone */}
+            {pos.yTP !== null && pos.tp > 0 && (
                 <div
-                    className={`absolute left-0 right-0 border-b border-dashed border-emerald-500 flex items-center justify-end pr-12 pointer-events-auto cursor-ns-resize group z-20 ${isDraggingThis && draggingState.type === 'TP' ? 'opacity-0' : ''}`}
-                    style={{ top: pos.yTP ?? pos.yEntry, height: 1, opacity: pos.yTP ? 1 : 0.5 }}
-                    onMouseDown={(e) => {
-                        e.stopPropagation();
-                        onDragStart(pos.id, 'TP', pos.tp || pos.openPrice);
-                    }}
+                    className={`absolute left-0 right-0 pointer-events-auto cursor-ns-resize group z-20 ${isDraggingThis && draggingState.type === 'TP' ? 'opacity-0' : ''}`}
+                    style={{ top: pos.yTP }}
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onDragStart(pos.id, 'TP', pos.tp); }}
                 >
-                    <div className="bg-emerald-500 text-white text-[10px] px-1 rounded-sm -mt-5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span>TP: {pos.tp}</span>
+                    {/* Invisible Hit Area for easier grabbing - Increased height */}
+                    <div className="absolute inset-x-0 -top-4 h-8 bg-transparent" />
+
+                    {/* Profit Zone Fill (between entry and TP) */}
+                    {pos.yEntry !== null && (
+                        <div
+                            className="absolute inset-x-0 bg-gradient-to-b from-emerald-500/5 to-emerald-500/10 pointer-events-none"
+                            style={{
+                                top: pos.side === 'BUY' ? -(pos.yEntry - pos.yTP) : 0,
+                                height: Math.abs(pos.yEntry - pos.yTP)
+                            }}
+                        />
+                    )}
+
+                    {/* Line */}
+                    <div className="absolute inset-x-0 top-0 h-[1px] border-t border-dashed border-emerald-500 group-hover:border-solid group-hover:h-[2px] shadow-sm" />
+
+                    {/* Right Label */}
+                    <div className="absolute right-0 -top-2.5 flex items-center">
+                        <div className="relative hover:scale-110 transition-transform origin-right">
+                            <div className="bg-emerald-500 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded-l-md shadow-lg flex items-center gap-1 border border-emerald-400/50">
+                                <span className="opacity-70">TP</span> {pos.tp.toFixed(5)}
+                            </div>
+                            <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full w-0 h-0 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent border-l-[6px] border-l-emerald-500" />
+                        </div>
+                    </div>
+
+                    {/* Drag Handle Hint */}
+                    <div className="absolute left-3 -top-2 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-emerald-500 font-bold bg-white/10 backdrop-blur-md px-1 rounded">
+                        <span>Drag to Modify</span>
                     </div>
                 </div>
             )}
@@ -447,7 +701,7 @@ function toHeikinAshi(candle: OHLC, prevCandle?: OHLC): OHLC {
 // Chart Controls Component
 // Chart Controls Component
 export function ChartControls({
-    chartType, timeframe, onChartTypeChange, onTimeframeChange, isMaximized, onToggleMaximize
+    chartType, timeframe, onChartTypeChange, onTimeframeChange, isMaximized, onToggleMaximize, oneClickEnabled, onToggleOneClick, onDownloadData
 }: {
     chartType: ChartType;
     timeframe: Timeframe;
@@ -455,62 +709,83 @@ export function ChartControls({
     onTimeframeChange: (tf: Timeframe) => void;
     isMaximized: boolean;
     onToggleMaximize: () => void;
+    oneClickEnabled?: boolean;
+    onToggleOneClick?: () => void;
+    onDownloadData?: () => void;
 }) {
     const chartTypes: { value: ChartType; label: string }[] = [
         { value: 'candlestick', label: 'Candles' },
-        { value: 'heikinAshi', label: 'Heiken Ashi' },
-        { value: 'bar', label: 'OHLC' },
+        { value: 'heikinAshi', label: 'HA' },
         { value: 'line', label: 'Line' },
-        { value: 'area', label: 'Area' },
     ];
 
     const timeframes: { value: Timeframe; label: string }[] = [
         { value: '1m', label: 'M1' }, { value: '5m', label: 'M5' },
         { value: '15m', label: 'M15' }, { value: '1h', label: 'H1' },
-        { value: '4h', label: 'H4' }, { value: '1d', label: 'D1' },
     ];
 
     return (
         <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-800">
-            <div className="flex items-center">
-                <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mr-2">TF</span>
-                <div className="flex items-center bg-zinc-800/50 rounded-md p-0.5">
-                    {timeframes.map((tf) => (
-                        <button
-                            key={tf.value}
-                            onClick={() => onTimeframeChange(tf.value)}
-                            className={`px-2.5 py-1 text-[11px] font-medium rounded transition-all duration-150 ${timeframe === tf.value
-                                ? 'bg-emerald-500/20 text-emerald-400 shadow-sm'
-                                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'
-                                }`}
-                        >
-                            {tf.label}
-                        </button>
-                    ))}
-                </div>
+            {/* Timeframes */}
+            <div className="flex items-center bg-zinc-800/50 rounded-md p-0.5">
+                {timeframes.map((tf) => (
+                    <button
+                        key={tf.value}
+                        onClick={() => onTimeframeChange(tf.value)}
+                        className={`px-2.5 py-1 text-[11px] font-medium rounded transition-all duration-150 ${timeframe === tf.value
+                            ? 'bg-emerald-500/20 text-emerald-400 shadow-sm'
+                            : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'
+                            }`}
+                    >
+                        {tf.label}
+                    </button>
+                ))}
             </div>
 
-            <div className="w-px h-5 bg-zinc-700/50 mx-1" />
+            <div className="w-px h-4 bg-zinc-700/50 mx-1" />
 
-            <div className="flex items-center">
-                <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mr-2">Type</span>
-                <div className="flex items-center bg-zinc-800/50 rounded-md p-0.5">
-                    {chartTypes.map((ct) => (
-                        <button
-                            key={ct.value}
-                            onClick={() => onChartTypeChange(ct.value)}
-                            className={`px-2.5 py-1 text-[11px] font-medium rounded transition-all duration-150 ${chartType === ct.value
-                                ? 'bg-emerald-500/20 text-emerald-400 shadow-sm'
-                                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'
-                                }`}
-                        >
-                            {ct.label}
-                        </button>
-                    ))}
-                </div>
+            {/* Chart Types */}
+            <div className="flex items-center bg-zinc-800/50 rounded-md p-0.5">
+                {chartTypes.map((ct) => (
+                    <button
+                        key={ct.value}
+                        onClick={() => onChartTypeChange(ct.value)}
+                        className={`px-2 py-1 text-[11px] font-medium rounded transition-all duration-150 ${chartType === ct.value
+                            ? 'bg-emerald-500/20 text-emerald-400 shadow-sm'
+                            : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'
+                            }`}
+                    >
+                        {ct.label}
+                    </button>
+                ))}
             </div>
 
             <div className="flex-1" />
+
+            {/* Download Data Button */}
+            {onDownloadData && (
+                <button
+                    onClick={onDownloadData}
+                    className="px-2 py-1 text-[10px] font-medium rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors mr-2"
+                    title="Download chart data as CSV"
+                >
+                    ⬇ CSV
+                </button>
+            )}
+
+            {/* One-Click Toggle */}
+            {onToggleOneClick && (
+                <button
+                    onClick={onToggleOneClick}
+                    className={`px-2 py-1 text-[10px] font-bold uppercase rounded border transition-colors mr-2 ${oneClickEnabled
+                        ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                        : 'bg-transparent text-zinc-500 border-zinc-700 hover:text-zinc-300'
+                        }`}
+                    title="One-Click Trading: Click chart to place pending order"
+                >
+                    One-Click {oneClickEnabled ? 'ON' : 'OFF'}
+                </button>
+            )}
 
             <button
                 onClick={onToggleMaximize}
@@ -524,4 +799,4 @@ export function ChartControls({
 }
 
 // Helper icons (need to import Minimize2, Maximize2 in this file or pass icons? Better to import)
-import { Maximize2, Minimize2 } from 'lucide-react';
+

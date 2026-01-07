@@ -152,56 +152,102 @@ func (m *Manager) RemoveLP(id string) error {
 // ToggleLP enables or disables an LP
 func (m *Manager) ToggleLP(id string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Defer unlock is NOT used here because we need to unlock before calling startLP
+	// defer m.mu.Unlock()
 
+	var targetLP *LPConfig
 	for i := range m.config.LPs {
 		if m.config.LPs[i].ID == id {
-			newState := !m.config.LPs[i].Enabled
-			m.config.LPs[i].Enabled = newState
-
-			if newState {
-				if err := m.startLPLocked(id); err != nil {
-					log.Printf("[LPManager] Failed to start LP %s: %v", id, err)
-					m.config.LPs[i].Enabled = false
-					return err
-				}
-			} else {
-				m.stopLPLocked(id)
-			}
-
-			log.Printf("[LPManager] LP %s enabled=%v", id, newState)
-			return m.saveConfigLocked()
+			targetLP = &m.config.LPs[i]
+			break
 		}
 	}
 
-	return ErrLPNotFound
+	if targetLP == nil {
+		m.mu.Unlock()
+		return ErrLPNotFound
+	}
+
+	newState := !targetLP.Enabled
+	targetLP.Enabled = newState
+
+	// Save config while locked
+	if err := m.saveConfigLocked(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+
+	m.mu.Unlock() // Release lock before I/O
+
+	log.Printf("[LPManager] LP %s enabled=%v", id, newState)
+
+	if newState {
+		if err := m.startLP(id); err != nil {
+			log.Printf("[LPManager] Failed to start LP %s: %v", id, err)
+			// Revert state on failure
+			m.mu.Lock()
+			// Find LP again just to be safe
+			for i := range m.config.LPs {
+				if m.config.LPs[i].ID == id {
+					m.config.LPs[i].Enabled = false
+					break
+				}
+			}
+			m.saveConfigLocked()
+			m.mu.Unlock()
+			return err
+		}
+	} else {
+		m.stopLP(id)
+	}
+
+	return nil
 }
 
 // SetLPEnabled sets the enabled state of an LP
 func (m *Manager) SetLPEnabled(id string, enabled bool) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	var targetLP *LPConfig
 	for i := range m.config.LPs {
 		if m.config.LPs[i].ID == id {
-			m.config.LPs[i].Enabled = enabled
-
-			if enabled {
-				if err := m.startLPLocked(id); err != nil {
-					// Revert
-					m.config.LPs[i].Enabled = false
-					return err
-				}
-			} else {
-				m.stopLPLocked(id)
-			}
-
-			log.Printf("[LPManager] LP %s enabled=%v", id, enabled)
-			return m.saveConfigLocked()
+			targetLP = &m.config.LPs[i]
+			break
 		}
 	}
 
-	return ErrLPNotFound
+	if targetLP == nil {
+		m.mu.Unlock()
+		return ErrLPNotFound
+	}
+
+	targetLP.Enabled = enabled
+	if err := m.saveConfigLocked(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	m.mu.Unlock()
+
+	log.Printf("[LPManager] LP %s enabled=%v", id, enabled)
+
+	if enabled {
+		if err := m.startLP(id); err != nil {
+			// Revert
+			m.mu.Lock()
+			for i := range m.config.LPs {
+				if m.config.LPs[i].ID == id {
+					m.config.LPs[i].Enabled = false
+					break
+				}
+			}
+			m.saveConfigLocked()
+			m.mu.Unlock()
+			return err
+		}
+	} else {
+		m.stopLP(id)
+	}
+
+	return nil
 }
 
 // RegisterAdapter registers an LP adapter with the manager
@@ -271,7 +317,7 @@ func (m *Manager) StartQuoteAggregation() {
 		if lpConfig.Enabled {
 			// Launch in goroutine to prevent blocking
 			go func(id string) {
-				if err := m.startLPLocked(id); err != nil {
+				if err := m.startLP(id); err != nil {
 					log.Printf("[LPManager] Failed to start LP %s: %v", id, err)
 				}
 			}(lpConfig.ID)
@@ -279,17 +325,9 @@ func (m *Manager) StartQuoteAggregation() {
 	}
 }
 
-func (m *Manager) startLPLocked(id string) error {
-	// Note: This needs to acquire lock if accessing m.activeAggregators,
-	// BUT we are called from StartQuoteAggregation which holds lock?
-	// Wait, StartQuoteAggregation holds lock, then launches goroutine. Goroutine calls this.
-	// So this function needs to acquire lock.
-	// BUT ToggleLP calls this while holding lock.
-	// ISSUE: We need separate public/private methods or careful locking.
-
-	// Simplest fix: startLPLocked handles its own locking for map access,
-	// and StartQuoteAggregation releases lock before launching goroutines.
-	// Actually, let's just use a mutex in this function for the map check.
+func (m *Manager) startLP(id string) error {
+	// Note: This function acquires locks internally only when needed.
+	// It relies on m.activeAggregators check.
 
 	m.mu.Lock()
 	if _, exists := m.activeAggregators[id]; exists {
@@ -346,11 +384,17 @@ func (m *Manager) startLPLocked(id string) error {
 	return nil
 }
 
-func (m *Manager) stopLPLocked(id string) {
-	if cancel, exists := m.activeAggregators[id]; exists {
+func (m *Manager) stopLP(id string) {
+	m.mu.Lock()
+	cancel, exists := m.activeAggregators[id]
+	if exists {
+		delete(m.activeAggregators, id)
+	}
+	m.mu.Unlock()
+
+	if exists {
 		log.Printf("[LPManager] Stopping LP: %s", id)
 		cancel()
-		delete(m.activeAggregators, id)
 	}
 
 	if adapter, exists := m.registry.Get(id); exists {

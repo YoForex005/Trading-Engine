@@ -155,16 +155,18 @@ type Engine struct {
 
 // SymbolSpec contains symbol specifications
 type SymbolSpec struct {
-	Symbol           string  `json:"symbol"`
-	ContractSize     float64 `json:"contractSize"`
-	PipSize          float64 `json:"pipSize"`
-	PipValue         float64 `json:"pipValue"`
-	MinVolume        float64 `json:"minVolume"`
-	MaxVolume        float64 `json:"maxVolume"`
-	VolumeStep       float64 `json:"volumeStep"`
-	MarginPercent    float64 `json:"marginPercent"`
-	CommissionPerLot float64 `json:"commissionPerLot"`
-	Disabled         bool    `json:"disabled"` // True if trading/feed is disabled
+	Symbol           string   `json:"symbol"`
+	ContractSize     float64  `json:"contractSize"`
+	PipSize          float64  `json:"pipSize"`
+	PipValue         float64  `json:"pipValue"`
+	MinVolume        float64  `json:"minVolume"`
+	MaxVolume        float64  `json:"maxVolume"`
+	VolumeStep       float64  `json:"volumeStep"`
+	MarginPercent    float64  `json:"marginPercent"`
+	CommissionPerLot float64  `json:"commissionPerLot"`
+	Disabled         bool     `json:"disabled"` // True if trading/feed is disabled
+	SourceLP         string   `json:"sourceLP"` // Preferred LP for this symbol
+	AvailableLPs     []string `json:"availableLPs"`
 }
 
 // NewEngine creates a new B-Book engine
@@ -234,10 +236,48 @@ func (e *Engine) GetSymbols() []*SymbolSpec {
 	return symbols
 }
 
-// UpdatePrice updates the current price for a symbol and triggers position checks
-func (e *Engine) UpdatePrice(symbol string, bid, ask float64) {
+// GetSymbol returns a specific symbol spec
+func (e *Engine) GetSymbol(symbol string) *SymbolSpec {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	if s, exists := e.symbols[symbol]; exists {
+		// Return copy to avoid race conditions if caller modifies
+		copy := *s
+		return &copy
+	}
+	return nil
+}
+
+// SetSymbolSource updates the preferred LP for a symbol
+func (e *Engine) SetSymbolSource(symbol, sourceLP string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	spec, ok := e.symbols[symbol]
+	if !ok {
+		return errors.New("symbol not found")
+	}
+
+	spec.SourceLP = sourceLP
+	e.symbols[symbol] = spec
+	return nil
+}
+
+// UpdatePrice updates the current price for a symbol and triggers position checks
+func (e *Engine) UpdatePrice(symbol string, bid, ask float64, lpID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	spec, exists := e.symbols[symbol]
+	if !exists {
+		return
+	}
+
+	// Filter by SourceLP if set
+	if spec.SourceLP != "" && lpID != "" && spec.SourceLP != lpID {
+		return
+	}
 
 	// 1. Update Symbol Price in Memory (if any specific field uses it)
 	// Currently, positions track CurrentPrice individually, so we iterate them.
