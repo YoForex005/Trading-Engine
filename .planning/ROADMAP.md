@@ -39,10 +39,12 @@ Transform the existing Trading Engine into a complete, production-ready broker p
   4. All passwords stored as bcrypt hashes (no plaintext fallback)
   5. Platform starts successfully using .env configuration
 **Research**: Unlikely (security best practices are well-established)
-**Plans**: TBD
+**Plans**: 3 plans ready for execution
 
 Plans:
-- [ ] TBD (to be planned)
+- [ ] 01-environment-secrets-PLAN.md — Environment Configuration & Secret Management (Wave 1)
+- [ ] 02-websocket-cors-PLAN.md — WebSocket Security & CORS Validation (Wave 1)
+- [ ] 03-password-security-PLAN.md — Password Security Hardening (Wave 1)
 
 ### Phase 2: Database Migration
 **Goal**: All application data persisted in production database with ACID guarantees
@@ -345,7 +347,7 @@ Phases execute in numeric order: 1 → 2 → 3 → ... → 15
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Security & Configuration | 0/TBD | Not started | - |
+| 1. Security & Configuration | 0/3 | Ready to execute | - |
 | 2. Database Migration | 0/TBD | Not started | - |
 | 3. Testing Infrastructure | 0/TBD | Not started | - |
 | 4. Deployment & Operations | 0/TBD | Not started | - |
