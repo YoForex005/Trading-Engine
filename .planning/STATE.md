@@ -9,18 +9,18 @@ See: .planning/PROJECT.md (updated 2026-01-15)
 
 ## Current Position
 
-Phase: 6 of 15 (Risk Management)
-Plan: 6 of 6 in current phase (All complete: 06-01 through 06-06)
-Status: Complete
-Last activity: 2026-01-16 — Completed 06-06-PLAN.md (Position and Leverage Limits)
+Phase: 3 of 15 (Testing Infrastructure)
+Plan: 6 of 7 in current phase
+Status: In Progress
+Last activity: 2026-01-16 — Completed 03-06-PLAN.md (End-to-End Testing)
 
-Progress: ▓▓▓▓░░░░░░ 40% (6/15 phases, 29/total plans)
+Progress: ▓▓▓░░░░░░░ 30% (3/15 phases partial, 30/total plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 29
-- Average duration: ~37 min per plan
+- Total plans completed: 30
+- Average duration: ~36 min per plan
 - Total execution time: 1 day (2026-01-16)
 
 **By Phase:**
@@ -29,14 +29,14 @@ Progress: ▓▓▓▓░░░░░░ 40% (6/15 phases, 29/total plans)
 |-------|-------|-------|----------|
 | 1. Security & Configuration | 3/3 | 1 day | ~8 hours |
 | 2. Database Migration | 4/4 | ~3 hours | ~45 min |
-| 3. Testing Infrastructure | 4/7 | ~110 min | ~27 min |
+| 3. Testing Infrastructure | 6/7 | ~155 min | ~26 min |
 | 4. Deployment Operations | 8/8 | ~2.3 hours | ~17 min |
 | 5. Advanced Order Types | 4/4 | ~180 min | ~45 min |
-| 6. Risk Management | 6/6 | ~240 min | ~40 min |
+| 6. Risk Management | 7/7 | ~270 min | ~39 min |
 **Recent Trend:**
-- Last 29 plans: Phase 4 complete, Phase 3 partial, Phase 5 complete, Phase 6 complete (29/29 plans)
+- Last 30 plans: Phase 4 complete, Phase 3 partial, Phase 5 complete, Phase 6 complete (30/30 plans)
 - Trend: Excellent execution velocity, Phase 6 risk management complete
-- Trend: Position exposure limits prevent concentration risk (40% default, 300% aggregate)
+- Trend: Daily loss limits and drawdown protection prevent catastrophic losses
 ## Accumulated Context
 
 ### Decisions
@@ -109,6 +109,14 @@ Recent decisions affecting current work:
 | 03-04 | TradingChart full rendering tests deferred to E2E | Component has complex side effects (network, timers, storage) unsuitable for unit testing |
 | 03-04 | ErrorBoundary tests suppress console.error | Prevents test noise while verifying error logging behavior |
 | 03-04 | IndicatorManager uses mocked IndicatorEngine | Isolates component behavior from indicator calculation logic for focused testing |
+| 03-06 | E2E tests use real database repositories not mocks | Integration verification requires actual database persistence testing |
+| 03-06 | Frontend E2E tests use WebSocket mocks | Isolation without backend dependency enables faster test execution |
+| 03-06 | Test database isolation with separate database | trading_engine_test database prevents pollution of development data |
+| 06-07 | Daily stats keyed by (account_id, stat_date) | Single row per account per day for efficient tracking and queries |
+| 06-07 | High-water mark tracked across all time | Enables accurate drawdown calculation from peak equity, not just daily peak |
+| 06-07 | Check daily limits BEFORE order execution | Prevents trading when account already disabled for the day |
+| 06-07 | Update stats AFTER position close | Ensures P&L is realized before updating daily statistics |
+| 06-07 | Auto-disable on breach with timestamp | Requires manual re-enable for safety, provides compliance audit trail |
 
 ### Pending Todos
 
@@ -121,7 +129,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-16
-Stopped at: Completed 06-06-PLAN.md (Position and Leverage Limits) - Phase 6 Complete
+Stopped at: Completed 03-06-PLAN.md (End-to-End Testing) - Phase 3 Plan 6/7
 Resume file: None
 
 ## Phase 1 Completion Summary
@@ -249,3 +257,62 @@ All 4 plans executed successfully:
 **Verification:** All must-haves verified in 05-04-SUMMARY.md
 
 **Ready for:** Phase 6 - Risk Management (in progress)
+
+## Phase 6 Completion Summary
+
+**Phase 6: Risk Management** ✅ Complete (2026-01-16)
+
+All 7 plans executed successfully:
+1. ✅ Risk Management Schema (06-01)
+2. ✅ Decimal Precision for Financial Calculations (06-02)
+3. ✅ Real-Time Margin Calculation Engine (06-03)
+4. ✅ Pre-Trade Risk Validation (06-04)
+5. ✅ Automatic Stop-Out Liquidation (06-05)
+6. ✅ Position and Leverage Limits (06-06)
+7. ✅ Daily Loss Limits and Drawdown Protection (06-07)
+
+**Success Criteria Verification:**
+- ✅ Risk management database tables created (margin_state, risk_limits, symbol_margin_config, daily_account_stats)
+- ✅ Decimal precision integrated for all financial calculations
+- ✅ Real-time margin calculations on every position change
+- ✅ Pre-trade validation prevents insufficient margin orders
+- ✅ Automatic stop-out liquidation when margin level drops below threshold
+- ✅ Position count, size, and exposure limits enforced
+- ✅ Daily loss limits prevent single-day blowouts
+- ✅ Drawdown tracking from high-water mark prevents prolonged losses
+- ✅ Account auto-disablement on limit breach
+
+**Key Achievements:**
+- PostgreSQL schema with 4 risk management tables (margin_state, risk_limits, symbol_margin_config, daily_account_stats)
+- ESMA-compliant leverage limits per asset class (30:1 major pairs, 20:1 minors, 5:1 stocks, 2:1 crypto)
+- govalues/decimal v0.1.36 integration eliminating float64 precision errors
+- Decimal wrapper utilities (MustParse, Parse, ToString, AssertDecimalNear)
+- Event-driven margin calculation on position open/close/update
+- Generated column for free_margin (equity - used_margin) in database
+- Pre-trade validation with projected margin level checks
+- Graceful repository fallback for backward compatibility
+- Automatic stop-out liquidation closing positions one by one
+- Most losing positions closed first to maximize recovery
+- Symbol exposure validation (40% default limit)
+- Total exposure validation (300% default limit)
+- Configurable account-specific exposure limits
+- Position count limits (50 default) and position size limits
+- Daily loss limit tracking and enforcement
+- High-water mark drawdown protection
+- Automatic account disablement on limit breach
+- Daily statistics tracking (P&L, drawdown, trade counts)
+
+**Regulatory Compliance:**
+- ESMA Guidelines: Prevents excessive leverage and concentration risk
+- MiFID II: Position limit monitoring and enforcement
+- Negative Balance Protection: Stop-out prevents account going negative
+- Risk Disclosure: Margin level monitoring and margin call enforcement
+
+**Database Migration Required:**
+- Migration 000002_risk_management_schema.up.sql (tables created in Plan 06-01)
+- Migration 000003_add_exposure_limits.up.sql (exposure columns for Plan 06-06)
+- Migration 000005_daily_stats_schema.up.sql (daily_account_stats table for Plan 06-07)
+
+**Verification:** All must-haves verified in individual plan SUMMARY files (06-01 through 06-07)
+
+**Ready for:** Phase 7 - WebSocket Real-Time Updates
