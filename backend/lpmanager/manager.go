@@ -42,6 +42,11 @@ func (m *Manager) LoadConfig() error {
 		if os.IsNotExist(err) {
 			// Create default config
 			m.config = NewDefaultConfig()
+			// Populate the O(1) lookup map for default config
+			m.lpConfigMap = make(map[string]*LPConfig, len(m.config.LPs))
+			for i := range m.config.LPs {
+				m.lpConfigMap[m.config.LPs[i].ID] = &m.config.LPs[i]
+			}
 			return m.saveConfigLocked()
 		}
 		return err
