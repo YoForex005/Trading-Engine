@@ -383,6 +383,8 @@ func main() {
 	// Orders (B-Book)
 	http.HandleFunc("/api/orders", apiHandler.HandleGetOrders)
 	http.HandleFunc("/api/orders/market", apiHandler.HandlePlaceMarketOrder)
+	http.HandleFunc("/api/orders/pending", apiHandler.HandlePlacePendingOrder)
+	http.HandleFunc("/api/orders/cancel", apiHandler.HandleCancelOrder)
 
 	// Trades & Ledger
 	http.HandleFunc("/api/trades", apiHandler.HandleGetTrades)

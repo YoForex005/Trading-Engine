@@ -687,6 +687,148 @@ func (e *Engine) ExecuteMarketOrder(accountID int64, symbol, side string, volume
 	return position, nil
 }
 
+// CreatePendingOrder creates a pending order (BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP)
+func (e *Engine) CreatePendingOrder(accountID int64, orderType, symbol string, volume, triggerPrice, sl, tp float64) (*Order, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	ctx := context.Background()
+
+	// Get account
+	account, ok := e.accounts[accountID]
+	if !ok {
+		return nil, errors.New("account not found")
+	}
+
+	if account.Status != "ACTIVE" {
+		return nil, errors.New("account is not active")
+	}
+
+	// Get symbol specs
+	spec, ok := e.symbols[symbol]
+	if !ok {
+		return nil, fmt.Errorf("symbol %s not found", symbol)
+	}
+
+	// Validate volume
+	if volume < spec.MinVolume || volume > spec.MaxVolume {
+		return nil, fmt.Errorf("volume must be between %.2f and %.2f", spec.MinVolume, spec.MaxVolume)
+	}
+
+	// Validate order type
+	validTypes := map[string]bool{
+		"BUY_LIMIT":  true,
+		"SELL_LIMIT": true,
+		"BUY_STOP":   true,
+		"SELL_STOP":  true,
+	}
+	if !validTypes[orderType] {
+		return nil, fmt.Errorf("invalid order type: %s (must be BUY_LIMIT, SELL_LIMIT, BUY_STOP, or SELL_STOP)", orderType)
+	}
+
+	// Get current price for validation
+	if e.priceCallback == nil {
+		return nil, errors.New("price feed not available")
+	}
+
+	bid, ask, ok := e.priceCallback(symbol)
+	if !ok {
+		return nil, fmt.Errorf("no price available for %s", symbol)
+	}
+
+	// Validate trigger price makes sense for order type
+	switch orderType {
+	case "BUY_LIMIT":
+		if triggerPrice >= ask {
+			return nil, fmt.Errorf("BUY_LIMIT trigger price (%.5f) must be below current ask (%.5f)", triggerPrice, ask)
+		}
+	case "SELL_LIMIT":
+		if triggerPrice <= bid {
+			return nil, fmt.Errorf("SELL_LIMIT trigger price (%.5f) must be above current bid (%.5f)", triggerPrice, bid)
+		}
+	case "BUY_STOP":
+		if triggerPrice <= ask {
+			return nil, fmt.Errorf("BUY_STOP trigger price (%.5f) must be above current ask (%.5f)", triggerPrice, ask)
+		}
+	case "SELL_STOP":
+		if triggerPrice >= bid {
+			return nil, fmt.Errorf("SELL_STOP trigger price (%.5f) must be below current bid (%.5f)", triggerPrice, bid)
+		}
+	}
+
+	// Validate SL/TP if provided
+	side := "BUY"
+	if orderType == "SELL_LIMIT" || orderType == "SELL_STOP" {
+		side = "SELL"
+	}
+
+	if sl > 0 {
+		if side == "BUY" && sl >= triggerPrice {
+			return nil, fmt.Errorf("stop-loss (%.5f) must be below trigger price (%.5f) for BUY orders", sl, triggerPrice)
+		}
+		if side == "SELL" && sl <= triggerPrice {
+			return nil, fmt.Errorf("stop-loss (%.5f) must be above trigger price (%.5f) for SELL orders", sl, triggerPrice)
+		}
+	}
+
+	if tp > 0 {
+		if side == "BUY" && tp <= triggerPrice {
+			return nil, fmt.Errorf("take-profit (%.5f) must be above trigger price (%.5f) for BUY orders", tp, triggerPrice)
+		}
+		if side == "SELL" && tp >= triggerPrice {
+			return nil, fmt.Errorf("take-profit (%.5f) must be below trigger price (%.5f) for SELL orders", tp, triggerPrice)
+		}
+	}
+
+	// Create order (in-memory)
+	orderID := e.nextOrderID
+	e.nextOrderID++
+
+	now := time.Now()
+	order := &Order{
+		ID:           orderID,
+		AccountID:    accountID,
+		Symbol:       symbol,
+		Type:         orderType,
+		Side:         side,
+		Volume:       volume,
+		TriggerPrice: triggerPrice,
+		SL:           sl,
+		TP:           tp,
+		Status:       "PENDING",
+		CreatedAt:    now,
+	}
+	e.orders[orderID] = order
+
+	// Persist to database
+	if e.orderRepo != nil {
+		repoOrder := &repository.Order{
+			AccountID:    accountID,
+			Symbol:       symbol,
+			Type:         orderType,
+			Side:         side,
+			Volume:       volume,
+			TriggerPrice: triggerPrice,
+			SL:           sl,
+			TP:           tp,
+			Status:       "PENDING",
+			CreatedAt:    now,
+		}
+		if err := e.orderRepo.Create(ctx, repoOrder); err != nil {
+			log.Printf("[ERROR] Failed to persist pending order: %v", err)
+		} else {
+			// Update in-memory order with database-generated ID
+			order.ID = repoOrder.ID
+			e.orders[repoOrder.ID] = order
+			delete(e.orders, orderID)
+		}
+	}
+
+	log.Printf("[B-Book] PENDING ORDER CREATED: %s %s %.2f lots @ %.5f (Order #%d)", orderType, symbol, volume, triggerPrice, order.ID)
+
+	return order, nil
+}
+
 // ClosePosition closes a position
 func (e *Engine) ClosePosition(positionID int64, closeVolume float64) (*Trade, error) {
 	e.mu.Lock()
@@ -966,5 +1108,282 @@ func (e *Engine) ToggleSymbol(symbol string, disabled bool) error {
 
 	spec.Disabled = disabled
 	log.Printf("[B-Book] Symbol %s disabled=%v", symbol, disabled)
+	return nil
+}
+
+// ExecuteTriggeredOrder executes an order that has been triggered by price conditions
+// This is called by OrderMonitor when a pending order's trigger price is hit
+func (e *Engine) ExecuteTriggeredOrder(ctx context.Context, orderID int64) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Load order from repository
+	if e.orderRepo == nil {
+		return errors.New("order repository not available")
+	}
+
+	order, err := e.orderRepo.GetByID(ctx, orderID)
+	if err != nil {
+		return fmt.Errorf("failed to load order: %w", err)
+	}
+
+	// Verify order is still pending
+	if order.Status != "PENDING" {
+		return fmt.Errorf("order #%d is not pending (status: %s)", orderID, order.Status)
+	}
+
+	// Get current market price
+	if e.priceCallback == nil {
+		return errors.New("price feed not available")
+	}
+
+	bid, ask, ok := e.priceCallback(order.Symbol)
+	if !ok {
+		return fmt.Errorf("no price available for %s", order.Symbol)
+	}
+
+	// Determine execution price
+	var fillPrice float64
+	if order.Side == "BUY" {
+		fillPrice = ask
+	} else {
+		fillPrice = bid
+	}
+
+	// If this is a SL/TP order linked to a position, close the position
+	if order.ParentPositionID != nil && *order.ParentPositionID > 0 {
+		return e.executePositionClose(ctx, order, fillPrice)
+	}
+
+	// Otherwise, open a new position (for pending STOP/LIMIT orders)
+	return e.executePositionOpen(ctx, order, fillPrice)
+}
+
+// executePositionClose handles SL/TP execution by closing the parent position
+func (e *Engine) executePositionClose(ctx context.Context, order *repository.Order, closePrice float64) error {
+	parentPosID := *order.ParentPositionID
+
+	// Get position from in-memory cache
+	position, ok := e.positions[parentPosID]
+	if !ok {
+		return fmt.Errorf("parent position #%d not found", parentPosID)
+	}
+
+	if position.Status != "OPEN" {
+		return fmt.Errorf("parent position #%d is not open", parentPosID)
+	}
+
+	// Calculate realized P/L
+	spec, _ := e.symbols[position.Symbol]
+	realizedPnL := e.calculatePnL(position, closePrice, position.Volume, spec)
+
+	// Get account
+	account := e.accounts[position.AccountID]
+	if account == nil {
+		return fmt.Errorf("account #%d not found", position.AccountID)
+	}
+
+	// Update account balance
+	account.Balance += realizedPnL
+
+	// Record in ledger
+	tradeID := e.nextTradeID
+	e.nextTradeID++
+	e.ledger.RecordRealizedPnL(account.ID, realizedPnL, tradeID)
+
+	// Create closing trade record
+	now := time.Now()
+	closeSide := "CLOSE_BUY"
+	if position.Side == "SELL" {
+		closeSide = "CLOSE_SELL"
+	}
+
+	trade := Trade{
+		ID:          tradeID,
+		OrderID:     order.ID,
+		PositionID:  parentPosID,
+		AccountID:   account.ID,
+		Symbol:      position.Symbol,
+		Side:        closeSide,
+		Volume:      position.Volume,
+		Price:       closePrice,
+		RealizedPnL: realizedPnL,
+		ExecutedAt:  now,
+	}
+	e.trades = append(e.trades, trade)
+
+	// Persist trade to database
+	if e.tradeRepo != nil {
+		orderIDPtr := &order.ID
+		repoTrade := &repository.Trade{
+			OrderID:     orderIDPtr,
+			PositionID:  parentPosID,
+			AccountID:   account.ID,
+			Symbol:      position.Symbol,
+			Side:        closeSide,
+			Volume:      position.Volume,
+			Price:       closePrice,
+			RealizedPnL: realizedPnL,
+			Commission:  0,
+			ExecutedAt:  now,
+		}
+		if err := e.tradeRepo.Create(ctx, repoTrade); err != nil {
+			log.Printf("[ERROR] Failed to persist trade to database: %v", err)
+		}
+	}
+
+	// Close position
+	position.Status = "CLOSED"
+	position.ClosePrice = closePrice
+	position.CloseTime = now
+	position.CloseReason = order.Type // STOP_LOSS or TAKE_PROFIT
+
+	// Persist position update (use Close method from repository)
+	if e.positionRepo != nil {
+		if err := e.positionRepo.Close(ctx, position.ID, closePrice, order.Type); err != nil {
+			log.Printf("[ERROR] Failed to persist position close: %v", err)
+		}
+	}
+
+	// Mark order as filled
+	filledAt := now
+	fillPrice := closePrice
+	order.Status = "FILLED"
+	order.FilledPrice = fillPrice
+	order.FilledAt = &filledAt
+
+	if e.orderRepo != nil {
+		if err := e.orderRepo.UpdateStatus(ctx, order.ID, "FILLED", &fillPrice); err != nil {
+			log.Printf("[ERROR] Failed to update order status: %v", err)
+		}
+	}
+
+	// Update in-memory order cache
+	if memOrder, ok := e.orders[order.ID]; ok {
+		memOrder.Status = "FILLED"
+		memOrder.FilledPrice = fillPrice
+		memOrder.FilledAt = &filledAt
+	}
+
+	// Persist account balance update (use UpdateBalance method from repository)
+	if e.accountRepo != nil {
+		// Recalculate account summary for persistence
+		accountSummary, _ := e.getAccountSummaryUnlocked(account.ID)
+		if err := e.accountRepo.UpdateBalance(ctx, account.ID, account.Balance,
+			accountSummary.Equity, accountSummary.Margin, accountSummary.FreeMargin,
+			accountSummary.MarginLevel); err != nil {
+			log.Printf("[ERROR] Failed to update account balance: %v", err)
+		}
+	}
+
+	log.Printf("[B-Book] %s TRIGGERED: Closed Position #%d @ %.5f | P/L: %.2f",
+		order.Type, parentPosID, closePrice, realizedPnL)
+
+	return nil
+}
+
+// executePositionOpen handles pending order execution by opening a new position
+func (e *Engine) executePositionOpen(ctx context.Context, order *repository.Order, fillPrice float64) error {
+	// Get account
+	account, ok := e.accounts[order.AccountID]
+	if !ok {
+		return fmt.Errorf("account #%d not found", order.AccountID)
+	}
+
+	// Get symbol specs
+	spec, ok := e.symbols[order.Symbol]
+	if !ok {
+		return fmt.Errorf("symbol %s not found", order.Symbol)
+	}
+
+	// Calculate required margin
+	requiredMargin := e.calculateMargin(order.Symbol, order.Volume, fillPrice, account.Leverage)
+
+	// Check free margin
+	summary, _ := e.getAccountSummaryUnlocked(order.AccountID)
+	if summary.FreeMargin < requiredMargin {
+		// Reject order due to insufficient margin
+		order.Status = "REJECTED"
+		order.RejectReason = fmt.Sprintf("Insufficient margin: required %.2f, available %.2f",
+			requiredMargin, summary.FreeMargin)
+
+		if e.orderRepo != nil {
+			e.orderRepo.UpdateStatus(ctx, order.ID, "REJECTED", nil)
+		}
+
+		log.Printf("[B-Book] Order #%d REJECTED: %s", order.ID, order.RejectReason)
+		return errors.New(order.RejectReason)
+	}
+
+	// Calculate commission
+	commission := spec.CommissionPerLot * order.Volume
+
+	// Create position
+	positionID := e.nextPositionID
+	e.nextPositionID++
+
+	now := time.Now()
+	position := &Position{
+		ID:           positionID,
+		AccountID:    order.AccountID,
+		Symbol:       order.Symbol,
+		Side:         order.Side,
+		Volume:       order.Volume,
+		OpenPrice:    fillPrice,
+		CurrentPrice: fillPrice,
+		OpenTime:     now,
+		SL:           order.SL,
+		TP:           order.TP,
+		Commission:   commission,
+		Status:       "OPEN",
+	}
+	e.positions[positionID] = position
+
+	// Update order
+	order.Status = "FILLED"
+	order.FilledPrice = fillPrice
+	filledAt := now
+	order.FilledAt = &filledAt
+	order.PositionID = positionID
+
+	// Persist to database
+	if e.orderRepo != nil {
+		e.orderRepo.UpdateStatus(ctx, order.ID, "FILLED", &fillPrice)
+	}
+
+	if e.positionRepo != nil {
+		repoPos := &repository.Position{
+			AccountID:     position.AccountID,
+			Symbol:        position.Symbol,
+			Side:          position.Side,
+			Volume:        position.Volume,
+			OpenPrice:     position.OpenPrice,
+			CurrentPrice:  position.CurrentPrice,
+			OpenTime:      position.OpenTime,
+			SL:            position.SL,
+			TP:            position.TP,
+			Swap:          position.Swap,
+			Commission:    position.Commission,
+			UnrealizedPnL: 0,
+			Status:        "OPEN",
+		}
+		if err := e.positionRepo.Create(ctx, repoPos); err != nil {
+			log.Printf("[ERROR] Failed to persist position: %v", err)
+		} else {
+			position.ID = repoPos.ID
+		}
+	}
+
+	// Deduct commission from balance
+	if commission > 0 {
+		account.Balance -= commission
+		tradeID := e.nextTradeID
+		e.nextTradeID++
+		e.ledger.RecordCommission(order.AccountID, -commission, tradeID)
+	}
+
+	log.Printf("[B-Book] %s TRIGGERED: Opened Position #%d (%s %s %.2f lots @ %.5f)",
+		order.Type, positionID, order.Side, order.Symbol, order.Volume, fillPrice)
+
 	return nil
 }
