@@ -17,11 +17,8 @@ import (
 	"github.com/epic1st/rtx/backend/lpmanager/adapters"
 	"github.com/epic1st/rtx/backend/tickstore"
 	"github.com/epic1st/rtx/backend/ws"
+	"github.com/joho/godotenv"
 )
-
-// LP API Keys - In production, use environment variables
-const OANDA_API_KEY = "977e1a77e25bac3a688011d6b0e845dd-8e3ab3a7682d9351af4c33be65e89b70"
-const OANDA_ACCOUNT_ID = "101-004-37008470-002"
 
 type BrokerConfig struct {
 	BrokerName        string          `json:"brokerName"`
@@ -73,6 +70,7 @@ func main() {
 	server := api.NewServer(authService, apiHandler)
 
 	// Create demo account with configured balance
+	// Password "password" is hashed internally by CreateAccount using bcrypt
 	demoAccount := bbookEngine.CreateAccount("demo-user", "Demo User", "password", true)
 	bbookEngine.GetLedger().SetBalance(demoAccount.ID, brokerConfig.DefaultBalance)
 	demoAccount.Balance = brokerConfig.DefaultBalance
@@ -109,6 +107,15 @@ func main() {
 	// Load Config
 	if err := lpMgr.LoadConfig(); err != nil {
 		log.Printf("[LPManager] Failed to load config: %v", err)
+	}
+
+	// Load LP priorities from config and set them on Hub
+	if config := lpMgr.GetConfig(); config != nil {
+		for _, lp := range config.LPs {
+			hub.SetLPPriority(lp.ID, lp.Priority)
+		}
+		log.Printf("[Main] Loaded LP priorities: Binance=%d, OANDA=%d, FlexyMarkets=%d",
+			config.LPs[0].Priority, config.LPs[1].Priority, config.LPs[2].Priority)
 	}
 
 	// Pass hub to server
