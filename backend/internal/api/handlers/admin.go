@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/epic1st/rtx/backend/internal/core"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // HandleAdminDeposit adds funds to an account
@@ -295,7 +296,15 @@ func (h *APIHandler) HandleAdminResetPassword(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	err := h.engine.UpdatePassword(req.AccountID, req.NewPassword)
+	// Hash password with bcrypt before updating
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("[ERROR] Failed to hash password for account %d: %v", req.AccountID, err)
+		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		return
+	}
+
+	err = h.engine.UpdatePassword(req.AccountID, string(passwordHash))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
