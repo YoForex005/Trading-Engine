@@ -151,13 +151,20 @@ func main() {
 	server.SetTickStore(tickStore)
 
 	// Wire B-Book engine to get prices from market data
-	bbookEngine.SetPriceCallback(func(symbol string) (bid, ask float64, ok bool) {
+	priceCallback := func(symbol string) (bid, ask float64, ok bool) {
 		tick := hub.GetLatestPrice(symbol)
 		if tick != nil {
 			return tick.Bid, tick.Ask, true
 		}
 		return 0, 0, false
-	})
+	}
+	bbookEngine.SetPriceCallback(priceCallback)
+
+	// Initialize and start OrderMonitor for automatic SL/TP/pending order execution
+	orderMonitor := core.NewOrderMonitor(orderRepo, bbookEngine, priceCallback)
+	orderMonitor.Start()
+	defer orderMonitor.Stop()
+	log.Println("OrderMonitor started - monitoring SL/TP/pending orders every 100ms")
 
 	// Initialize LP Manager
 	lpMgr := lpmanager.NewManager("data/lp_config.json")
