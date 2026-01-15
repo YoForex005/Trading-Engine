@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-01-15)
 ## Current Position
 
 Phase: 6 of 15 (Risk Management)
-Plan: 4 of 6 in current phase (06-01, 06-02, 06-03, 06-04 complete)
-Status: In Progress
-Last activity: 2026-01-16 — Completed 05-04-PLAN.md (OCO, Modification, Expiry)
+Plan: 6 of 6 in current phase (All complete: 06-01 through 06-06)
+Status: Complete
+Last activity: 2026-01-16 — Completed 06-06-PLAN.md (Position and Leverage Limits)
 
-Progress: ▓▓▓▓░░░░░░ 33% (5/15 phases complete, 27/total plans)
+Progress: ▓▓▓▓░░░░░░ 40% (6/15 phases, 29/total plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 27
+- Total plans completed: 29
 - Average duration: ~37 min per plan
 - Total execution time: 1 day (2026-01-16)
 
@@ -29,14 +29,14 @@ Progress: ▓▓▓▓░░░░░░ 33% (5/15 phases complete, 27/total pla
 |-------|-------|-------|----------|
 | 1. Security & Configuration | 3/3 | 1 day | ~8 hours |
 | 2. Database Migration | 4/4 | ~3 hours | ~45 min |
-| 3. Testing Infrastructure | 3/7 | ~90 min | ~30 min |
+| 3. Testing Infrastructure | 4/7 | ~110 min | ~27 min |
 | 4. Deployment Operations | 8/8 | ~2.3 hours | ~17 min |
 | 5. Advanced Order Types | 4/4 | ~180 min | ~45 min |
-| 6. Risk Management | 4/6 | ~160 min | ~40 min |
+| 6. Risk Management | 6/6 | ~240 min | ~40 min |
 **Recent Trend:**
-- Last 27 plans: Phase 4 complete, Phase 3 partial, Phase 5 complete, Phase 6 in progress (27/27 plans)
-- Trend: Excellent execution velocity, Phase 5 advanced orders complete
-- Trend: Pre-trade validation prevents ESMA violations (margin call prevention)
+- Last 29 plans: Phase 4 complete, Phase 3 partial, Phase 5 complete, Phase 6 complete (29/29 plans)
+- Trend: Excellent execution velocity, Phase 6 risk management complete
+- Trend: Position exposure limits prevent concentration risk (40% default, 300% aggregate)
 ## Accumulated Context
 
 ### Decisions
@@ -95,11 +95,20 @@ Recent decisions affecting current work:
 | 06-04 | Graceful repository fallback in validation | If repositories not initialized, fallback to old margin check - ensures backward compatibility |
 | 06-03 | Event-driven margin calculation (not periodic) | Calculate on every position change per ESMA requirements - prevents negative balance scenarios |
 | 06-03 | Optional repository injection in bbook.Engine | Maintains backward compatibility with tests while enabling real-time margin updates in production |
+| 06-05 | Close positions one by one during stop-out | Recalculate margin after each closure to stop as soon as recovered - industry standard (MT5) |
+| 06-05 | Most losing positions closed first | Maximizes account recovery chance, aligns with MT5/cTrader liquidation order |
+| 06-05 | Unlock mutex before ExecuteStopOut | Prevents deadlock since ExecuteStopOut calls ClosePosition which needs lock |
 | 05-04 | OCO creates bidirectional links | Both orders point to each other via oco_link_id for automatic cancellation when either fills |
 | 05-04 | Filling one OCO order cancels the linked order | CancelOCOLinkedOrder() called after executePositionClose() and executePositionOpen() |
 | 05-04 | Order modification validates trigger price | ModifyOrder() validates trigger price changes against current market to prevent invalid orders |
 | 05-04 | Expiry checking runs before trigger checking | checkOrderExpiry() runs BEFORE checkPriceTriggers() to prevent expired orders from triggering |
 | 05-04 | Expired orders cancelled with 'Expired' reject reason | Auto-cancellation tracks expiry vs manual cancellation for analytics |
+| 06-06 | Default 40% symbol exposure limit | Industry standard for concentration risk - prevents account having 80% in single symbol |
+| 06-06 | Default 300% total exposure limit | Allows 3x leverage with margin while preventing excessive over-leveraging |
+| 06-06 | Exposure validation uses current price parameter | SymbolMarginConfig has no Bid/Ask - price comes from market data at validation time |
+| 03-04 | TradingChart full rendering tests deferred to E2E | Component has complex side effects (network, timers, storage) unsuitable for unit testing |
+| 03-04 | ErrorBoundary tests suppress console.error | Prevents test noise while verifying error logging behavior |
+| 03-04 | IndicatorManager uses mocked IndicatorEngine | Isolates component behavior from indicator calculation logic for focused testing |
 
 ### Pending Todos
 
@@ -112,7 +121,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-16
-Stopped at: Completed 05-04-PLAN.md (OCO, Modification, and Expiry)
+Stopped at: Completed 06-06-PLAN.md (Position and Leverage Limits) - Phase 6 Complete
 Resume file: None
 
 ## Phase 1 Completion Summary
