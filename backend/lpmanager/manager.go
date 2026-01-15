@@ -14,6 +14,7 @@ import (
 type Manager struct {
 	registry          *Registry
 	config            *LPManagerConfig
+	lpConfigMap       map[string]*LPConfig // O(1) lookup map for LP configs
 	configPath        string
 	mu                sync.RWMutex
 	quotesChan        chan Quote
@@ -25,6 +26,7 @@ func NewManager(configPath string) *Manager {
 	return &Manager{
 		registry:          NewRegistry(),
 		configPath:        configPath,
+		lpConfigMap:       make(map[string]*LPConfig),
 		quotesChan:        make(chan Quote, 1000),
 		activeAggregators: make(map[string]context.CancelFunc),
 	}
@@ -51,6 +53,13 @@ func (m *Manager) LoadConfig() error {
 	}
 
 	m.config = &config
+
+	// Populate the O(1) lookup map
+	m.lpConfigMap = make(map[string]*LPConfig, len(m.config.LPs))
+	for i := range m.config.LPs {
+		m.lpConfigMap[m.config.LPs[i].ID] = &m.config.LPs[i]
+	}
+
 	log.Printf("[LPManager] Loaded config with %d LPs", len(m.config.LPs))
 	return nil
 }
@@ -95,12 +104,8 @@ func (m *Manager) GetLPConfig(id string) *LPConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	for i := range m.config.LPs {
-		if m.config.LPs[i].ID == id {
-			return &m.config.LPs[i]
-		}
-	}
-	return nil
+	// O(1) map lookup instead of O(n) iteration
+	return m.lpConfigMap[id]
 }
 
 // AddLP adds a new LP configuration
@@ -108,14 +113,14 @@ func (m *Manager) AddLP(config LPConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check if ID already exists
-	for _, lp := range m.config.LPs {
-		if lp.ID == config.ID {
-			return ErrLPAlreadyExists
-		}
+	// O(1) check if ID already exists using map
+	if _, exists := m.lpConfigMap[config.ID]; exists {
+		return ErrLPAlreadyExists
 	}
 
 	m.config.LPs = append(m.config.LPs, config)
+	// Update map with pointer to the newly added config
+	m.lpConfigMap[config.ID] = &m.config.LPs[len(m.config.LPs)-1]
 	return m.saveConfigLocked()
 }
 
@@ -124,14 +129,15 @@ func (m *Manager) UpdateLP(config LPConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for i := range m.config.LPs {
-		if m.config.LPs[i].ID == config.ID {
-			m.config.LPs[i] = config
-			return m.saveConfigLocked()
-		}
+	// O(1) lookup to find the LP config
+	lpConfig, exists := m.lpConfigMap[config.ID]
+	if !exists {
+		return ErrLPNotFound
 	}
 
-	return ErrLPNotFound
+	// Update the config in place
+	*lpConfig = config
+	return m.saveConfigLocked()
 }
 
 // RemoveLP removes an LP configuration
@@ -139,14 +145,23 @@ func (m *Manager) RemoveLP(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// O(1) check if LP exists
+	if _, exists := m.lpConfigMap[id]; !exists {
+		return ErrLPNotFound
+	}
+
+	// Remove from map
+	delete(m.lpConfigMap, id)
+
+	// Remove from slice
 	for i := range m.config.LPs {
 		if m.config.LPs[i].ID == id {
 			m.config.LPs = append(m.config.LPs[:i], m.config.LPs[i+1:]...)
-			return m.saveConfigLocked()
+			break
 		}
 	}
 
-	return ErrLPNotFound
+	return m.saveConfigLocked()
 }
 
 // ToggleLP enables or disables an LP
@@ -155,15 +170,9 @@ func (m *Manager) ToggleLP(id string) error {
 	// Defer unlock is NOT used here because we need to unlock before calling startLP
 	// defer m.mu.Unlock()
 
-	var targetLP *LPConfig
-	for i := range m.config.LPs {
-		if m.config.LPs[i].ID == id {
-			targetLP = &m.config.LPs[i]
-			break
-		}
-	}
-
-	if targetLP == nil {
+	// O(1) lookup using map
+	targetLP, exists := m.lpConfigMap[id]
+	if !exists {
 		m.mu.Unlock()
 		return ErrLPNotFound
 	}
@@ -186,12 +195,9 @@ func (m *Manager) ToggleLP(id string) error {
 			log.Printf("[LPManager] Failed to start LP %s: %v", id, err)
 			// Revert state on failure
 			m.mu.Lock()
-			// Find LP again just to be safe
-			for i := range m.config.LPs {
-				if m.config.LPs[i].ID == id {
-					m.config.LPs[i].Enabled = false
-					break
-				}
+			// O(1) lookup to revert the state
+			if lp, exists := m.lpConfigMap[id]; exists {
+				lp.Enabled = false
 			}
 			m.saveConfigLocked()
 			m.mu.Unlock()
@@ -207,15 +213,10 @@ func (m *Manager) ToggleLP(id string) error {
 // SetLPEnabled sets the enabled state of an LP
 func (m *Manager) SetLPEnabled(id string, enabled bool) error {
 	m.mu.Lock()
-	var targetLP *LPConfig
-	for i := range m.config.LPs {
-		if m.config.LPs[i].ID == id {
-			targetLP = &m.config.LPs[i]
-			break
-		}
-	}
 
-	if targetLP == nil {
+	// O(1) lookup using map
+	targetLP, exists := m.lpConfigMap[id]
+	if !exists {
 		m.mu.Unlock()
 		return ErrLPNotFound
 	}
@@ -231,13 +232,10 @@ func (m *Manager) SetLPEnabled(id string, enabled bool) error {
 
 	if enabled {
 		if err := m.startLP(id); err != nil {
-			// Revert
+			// Revert using O(1) lookup
 			m.mu.Lock()
-			for i := range m.config.LPs {
-				if m.config.LPs[i].ID == id {
-					m.config.LPs[i].Enabled = false
-					break
-				}
+			if lp, exists := m.lpConfigMap[id]; exists {
+				lp.Enabled = false
 			}
 			m.saveConfigLocked()
 			m.mu.Unlock()
@@ -349,19 +347,30 @@ func (m *Manager) startLP(id string) error {
 	// Auto-Subscribe logic
 	if wsAdapter, ok := adapter.(interface{ Subscribe([]string) error }); ok {
 		var symbolsToSub []string
-		// Hardcoded defaults for now (moved from main.go)
-		if id == "binance" {
-			symbolsToSub = []string{"BTCUSD", "ETHUSD", "BNBUSD", "SOLUSD", "XRPUSD"}
+
+		// First, check if symbols are configured in LP config using O(1) lookup
+		m.mu.Lock()
+		var configSymbols []string
+		if lp, exists := m.lpConfigMap[id]; exists {
+			configSymbols = lp.Symbols
+		}
+		m.mu.Unlock()
+
+		if len(configSymbols) > 0 {
+			// Use symbols from config
+			symbolsToSub = configSymbols
+			log.Printf("[LPManager] Using %d configured symbols for %s", len(symbolsToSub), id)
 		} else {
-			// Try to get all symbols?
+			// Fallback: fetch available symbols from adapter
 			if syms, err := adapter.GetSymbols(); err == nil {
 				for _, s := range syms {
 					symbolsToSub = append(symbolsToSub, s.Symbol)
 				}
-				// Limit if too many?
+				// Limit if too many
 				if len(symbolsToSub) > 50 {
 					symbolsToSub = symbolsToSub[:50]
 				}
+				log.Printf("[LPManager] Auto-discovered %d symbols for %s", len(symbolsToSub), id)
 			}
 		}
 
