@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +18,31 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
+}
+
+// Allowed origins for WebSocket CORS validation
+var allowedOrigins []string
+
+func init() {
+	// Load allowed origins from environment variable
+	originsEnv := os.Getenv("ALLOWED_ORIGINS")
+	if originsEnv == "" {
+		log.Println("[WARN] ALLOWED_ORIGINS not set - WebSocket will reject all connections")
+		log.Println("[WARN] Set ALLOWED_ORIGINS=http://localhost:5173,... in .env for development")
+		allowedOrigins = []string{} // Empty whitelist = reject all
+		return
+	}
+
+	// Parse comma-separated origins
+	rawOrigins := strings.Split(originsEnv, ",")
+	for _, origin := range rawOrigins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed != "" {
+			allowedOrigins = append(allowedOrigins, trimmed)
+		}
+	}
+
+	log.Printf("[WebSocket] CORS allowed origins: %v", allowedOrigins)
 }
 
 // Client represents a connected WebSocket client
@@ -38,6 +65,7 @@ type Hub struct {
 	mu              sync.RWMutex
 	latestPrices    map[string]*MarketTick
 	disabledSymbols map[string]bool
+	lpPriority      map[string]int // LP ID -> priority (lower number = higher priority)
 }
 
 // MarketTick represents a price update for clients
@@ -59,6 +87,7 @@ func NewHub() *Hub {
 		unregister:      make(chan *Client),
 		latestPrices:    make(map[string]*MarketTick),
 		disabledSymbols: make(map[string]bool),
+		lpPriority:      make(map[string]int),
 	}
 }
 
@@ -74,6 +103,14 @@ func (h *Hub) ToggleSymbol(symbol string, disabled bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.disabledSymbols[symbol] = disabled
+}
+
+// SetLPPriority sets the priority for a liquidity provider
+func (h *Hub) SetLPPriority(lpID string, priority int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.lpPriority[lpID] = priority
+	log.Printf("[Hub] Set LP priority: %s = %d", lpID, priority)
 }
 
 // BroadcastTick broadcasts a market tick to all clients
@@ -92,7 +129,31 @@ func (h *Hub) BroadcastTick(tick *MarketTick) {
 	}
 
 	h.mu.Lock()
-	h.latestPrices[tick.Symbol] = tick
+
+	// LP Priority Check: Only update if new tick is from higher or equal priority LP
+	shouldUpdate := true
+	if existingTick, exists := h.latestPrices[tick.Symbol]; exists {
+		existingPriority, existingHasPriority := h.lpPriority[existingTick.LP]
+		newPriority, newHasPriority := h.lpPriority[tick.LP]
+
+		// If both have priority set, compare (lower number = higher priority)
+		if existingHasPriority && newHasPriority {
+			if newPriority > existingPriority {
+				// New tick is from LOWER priority LP, skip it
+				shouldUpdate = false
+			}
+		}
+		// If only existing has priority but new doesn't, skip new tick
+		if existingHasPriority && !newHasPriority {
+			shouldUpdate = false
+		}
+		// If new has priority but existing doesn't, always use new (shouldUpdate = true)
+		// If neither has priority, accept new tick (shouldUpdate = true)
+	}
+
+	if shouldUpdate {
+		h.latestPrices[tick.Symbol] = tick
+	}
 
 	// Skip broadcast if symbol is disabled
 	if h.disabledSymbols[tick.Symbol] {
