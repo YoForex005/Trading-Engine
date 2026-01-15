@@ -105,12 +105,19 @@ Plans:
   7. Database backups run automatically
   8. Caching layer reduces database load for tick/OHLC data
   9. LP lookups use O(1) map access
-**Research**: Likely (deployment architecture, monitoring stack, caching strategy)
+**Research**: Completed (04-RESEARCH.md)
 **Research topics**: Docker best practices for Go+React, CI/CD for broker platform, monitoring stack (Prometheus+Grafana vs alternatives), Redis caching patterns
-**Plans**: TBD
+**Plans**: 8 plans ready for execution
 
 Plans:
-- [ ] TBD (to be planned)
+- [ ] 04-01-PLAN.md — Docker Containerization (Wave 1)
+- [ ] 04-02-PLAN.md — Local Development Environment (Wave 2)
+- [ ] 04-03-PLAN.md — CI/CD Pipeline (Wave 2)
+- [ ] 04-04-PLAN.md — Observability Infrastructure (Wave 1)
+- [ ] 04-05-PLAN.md — Redis Caching Layer (Wave 1)
+- [ ] 04-06-PLAN.md — Performance Optimization (Wave 1)
+- [ ] 04-07-PLAN.md — Database Backup Automation (Wave 3)
+- [ ] 04-08-PLAN.md — Deployment Documentation (Wave 4)
 
 ### Phase 5: Advanced Order Types
 **Goal**: Traders can use all standard order types (SL, TP, trailing stops, pending orders, OCO)
