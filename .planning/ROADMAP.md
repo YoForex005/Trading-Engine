@@ -25,6 +25,7 @@ Transform the existing Trading Engine into a complete, production-ready broker p
 - [ ] **Phase 13: Broker Manager Application** - Desktop MT5 Manager clone
 - [ ] **Phase 14: Client API Documentation** - Swagger docs for client API
 - [ ] **Phase 15: Admin API Documentation** - Swagger docs for admin API
+- [ ] **Phase 16: Code Organization & Best Practices** - Systematic codebase refactoring and professional standards
 
 ## Phase Details
 
@@ -366,10 +367,37 @@ Plans:
 Plans:
 - [ ] TBD (to be planned)
 
+### Phase 16: Code Organization & Best Practices
+
+**Goal:** Codebase refactored to follow professional software engineering standards with clean architecture, maintainability, and scalability
+**Depends on:** Phase 15
+**Requirements:** CODE-ORG-01, CODE-ORG-02, CODE-ORG-03, CODE-ORG-04, CODE-ORG-05, CODE-ORG-06, CODE-ORG-07, CODE-ORG-08
+**Success Criteria** (what must be TRUE):
+  1. Backend follows clean architecture with clear separation of concerns (handlers, services, repositories)
+  2. Frontend components follow single responsibility principle (no 900+ line files)
+  3. Shared business logic extracted into reusable packages
+  4. Error handling is consistent across all layers
+  5. Logging follows structured logging best practices
+  6. Code duplication eliminated (DRY principle applied)
+  7. Package structure follows Go and TypeScript conventions
+  8. Code passes linting with no violations (backend: golangci-lint, frontend: eslint)
+**Research:** Likely (analyzing current codebase structure and identifying refactoring opportunities)
+**Research topics:** Go project layout best practices (Standard Go Project Layout), clean architecture patterns, TypeScript code organization, frontend component composition patterns, error handling strategies
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 16 to break down)
+
+**Details:**
+This phase focuses on systematic code organization and refactoring to bring the codebase up to professional standards. Areas of focus include:
+- Backend: Clean architecture layers, dependency injection, service pattern
+- Frontend: Component composition, custom hooks extraction, shared utilities
+- Both: Consistent error handling, structured logging, configuration management
+- Documentation: Code comments, README files, architecture diagrams
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → ... → 15
+Phases execute in numeric order: 1 → 2 → 3 → ... → 16
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -388,3 +416,4 @@ Phases execute in numeric order: 1 → 2 → 3 → ... → 15
 | 13. Broker Manager Application | 0/TBD | Not started | - |
 | 14. Client API Documentation | 0/TBD | Not started | - |
 | 15. Admin API Documentation | 0/TBD | Not started | - |
+| 16. Code Organization & Best Practices | 0/TBD | Not started | - |
