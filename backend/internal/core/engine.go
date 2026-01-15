@@ -1519,6 +1519,172 @@ func (e *Engine) executePositionOpen(ctx context.Context, order *repository.Orde
 	return nil
 }
 
+// ModifyOrder modifies a pending order's parameters
+func (e *Engine) ModifyOrder(orderID int64, triggerPrice, sl, tp, volume *float64, expiryTime *time.Time) (*Order, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	ctx := context.Background()
+
+	// Load order from repository
+	if e.orderRepo == nil {
+		return nil, errors.New("order repository not available")
+	}
+
+	order, err := e.orderRepo.GetByID(ctx, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("order not found: %w", err)
+	}
+
+	// Validate order is PENDING
+	if order.Status != "PENDING" {
+		return nil, fmt.Errorf("cannot modify order in status: %s", order.Status)
+	}
+
+	// Update fields if provided
+	updated := false
+
+	if triggerPrice != nil && *triggerPrice > 0 {
+		// Validate trigger price makes sense for order type
+		if e.priceCallback != nil {
+			bid, ask, ok := e.priceCallback(order.Symbol)
+			if ok {
+				switch order.Type {
+				case "BUY_LIMIT":
+					if *triggerPrice >= ask {
+						return nil, fmt.Errorf("BUY_LIMIT trigger (%.5f) must be below ask (%.5f)", *triggerPrice, ask)
+					}
+				case "SELL_LIMIT":
+					if *triggerPrice <= bid {
+						return nil, fmt.Errorf("SELL_LIMIT trigger (%.5f) must be above bid (%.5f)", *triggerPrice, bid)
+					}
+				case "BUY_STOP":
+					if *triggerPrice <= ask {
+						return nil, fmt.Errorf("BUY_STOP trigger (%.5f) must be above ask (%.5f)", *triggerPrice, ask)
+					}
+				case "SELL_STOP":
+					if *triggerPrice >= bid {
+						return nil, fmt.Errorf("SELL_STOP trigger (%.5f) must be below bid (%.5f)", *triggerPrice, bid)
+					}
+				}
+			}
+		}
+		order.TriggerPrice = *triggerPrice
+		updated = true
+	}
+
+	if sl != nil {
+		order.SL = *sl
+		updated = true
+	}
+
+	if tp != nil {
+		order.TP = *tp
+		updated = true
+	}
+
+	if volume != nil && *volume > 0 {
+		// Get symbol specs to validate volume
+		if spec, ok := e.symbols[order.Symbol]; ok {
+			if *volume < spec.MinVolume || *volume > spec.MaxVolume {
+				return nil, fmt.Errorf("volume must be between %.2f and %.2f", spec.MinVolume, spec.MaxVolume)
+			}
+		}
+		order.Volume = *volume
+		updated = true
+	}
+
+	if expiryTime != nil {
+		order.ExpiryTime = expiryTime
+		updated = true
+	}
+
+	if !updated {
+		return nil, errors.New("no modifications provided")
+	}
+
+	// Save changes to database
+	if err := e.orderRepo.UpdateModifiable(ctx, order); err != nil {
+		return nil, fmt.Errorf("failed to update order: %w", err)
+	}
+
+	// Update in-memory cache
+	if memOrder, ok := e.orders[orderID]; ok {
+		if triggerPrice != nil {
+			memOrder.TriggerPrice = *triggerPrice
+		}
+		if sl != nil {
+			memOrder.SL = *sl
+		}
+		if tp != nil {
+			memOrder.TP = *tp
+		}
+		if volume != nil {
+			memOrder.Volume = *volume
+		}
+	}
+
+	log.Printf("[Engine] Modified order #%d", orderID)
+
+	// Convert repository.Order to core.Order for return
+	coreOrder := &Order{
+		ID:           order.ID,
+		AccountID:    order.AccountID,
+		Symbol:       order.Symbol,
+		Type:         order.Type,
+		Side:         order.Side,
+		Volume:       order.Volume,
+		TriggerPrice: order.TriggerPrice,
+		SL:           order.SL,
+		TP:           order.TP,
+		Status:       order.Status,
+		CreatedAt:    order.CreatedAt,
+	}
+
+	return coreOrder, nil
+}
+
+// CancelOrder cancels a pending order
+func (e *Engine) CancelOrder(orderID int64) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	ctx := context.Background()
+
+	// Load order from repository
+	if e.orderRepo == nil {
+		return errors.New("order repository not available")
+	}
+
+	order, err := e.orderRepo.GetByID(ctx, orderID)
+	if err != nil {
+		return fmt.Errorf("order not found: %w", err)
+	}
+
+	// Validate order is PENDING
+	if order.Status != "PENDING" {
+		return fmt.Errorf("cannot cancel order in status: %s", order.Status)
+	}
+
+	// Update status to CANCELLED
+	order.Status = "CANCELLED"
+	order.RejectReason = "User cancelled"
+
+	if err := e.orderRepo.UpdateStatus(ctx, order.ID, "CANCELLED", nil); err != nil {
+		return fmt.Errorf("failed to cancel order: %w", err)
+	}
+
+	// Update in-memory cache
+	if memOrder, ok := e.orders[orderID]; ok {
+		memOrder.Status = "CANCELLED"
+		memOrder.RejectReason = "User cancelled"
+	}
+
+	log.Printf("[Engine] Cancelled order #%d (user requested)", orderID)
+
+	return nil
+}
+
 // CancelOCOLinkedOrder cancels the linked order when one OCO order fills
 func (e *Engine) CancelOCOLinkedOrder(ctx context.Context, orderID int64) error {
 	if e.orderRepo == nil {

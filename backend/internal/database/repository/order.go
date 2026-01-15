@@ -258,3 +258,25 @@ func (r *OrderRepository) UpdateOCOLink(ctx context.Context, orderID, linkedOrde
 
 	return nil
 }
+
+// UpdateModifiable updates modifiable fields of a pending order
+func (r *OrderRepository) UpdateModifiable(ctx context.Context, ord *Order) error {
+	query := `
+		UPDATE orders
+		SET trigger_price = $1, sl = $2, tp = $3, volume = $4, expiry_time = $5
+		WHERE id = $6 AND status = 'PENDING'
+	`
+
+	result, err := r.pool.Exec(ctx, query,
+		ord.TriggerPrice, ord.SL, ord.TP, ord.Volume, ord.ExpiryTime, ord.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update order: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("order not found or not pending: %d", ord.ID)
+	}
+
+	return nil
+}

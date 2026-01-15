@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/epic1st/rtx/backend/internal/core"
 )
@@ -140,6 +141,55 @@ func (h *APIHandler) HandlePlacePendingOrder(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// HandleModifyOrder modifies a pending order's parameters
+func (h *APIHandler) HandleModifyOrder(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Extract order ID from URL path or query
+	orderIDStr := r.URL.Query().Get("id")
+	if orderIDStr == "" {
+		http.Error(w, "Order ID is required", http.StatusBadRequest)
+		return
+	}
+
+	orderID, err := strconv.ParseInt(orderIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid order ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		TriggerPrice *float64   `json:"triggerPrice,omitempty"`
+		SL           *float64   `json:"sl,omitempty"`
+		TP           *float64   `json:"tp,omitempty"`
+		Volume       *float64   `json:"volume,omitempty"`
+		ExpiryTime   *time.Time `json:"expiryTime,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Modify the order
+	order, err := h.engine.ModifyOrder(orderID, req.TriggerPrice, req.SL, req.TP, req.Volume, req.ExpiryTime)
+	if err != nil {
+		log.Printf("[API] Order modification rejected: %v", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"order":   order,
+	})
+}
+
 // HandleCancelOrder cancels a pending order
 func (h *APIHandler) HandleCancelOrder(w http.ResponseWriter, r *http.Request) {
 	cors(w)
@@ -161,24 +211,13 @@ func (h *APIHandler) HandleCancelOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the order and cancel it
-	orders := h.engine.GetOrders(0, "PENDING") // Get all pending orders
-	var found bool
-	for _, order := range orders {
-		if order.ID == orderID {
-			found = true
-			// Mark as cancelled (we'll add this method next)
-			// For now, just acknowledge
-			break
-		}
-	}
-
-	if !found {
-		http.Error(w, "Order not found or not pending", http.StatusNotFound)
+	// Cancel the order
+	if err := h.engine.CancelOrder(orderID); err != nil {
+		log.Printf("[API] Order cancellation rejected: %v", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// TODO: Add CancelOrder method to engine
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,

@@ -96,11 +96,18 @@ func (om *OrderMonitor) checkPriceTriggers() {
 		return // No pending orders to monitor
 	}
 
+	// Check for expired orders FIRST
+	om.checkOrderExpiry(ctx, orders)
+
 	// Update trailing stops BEFORE checking triggers
 	om.updateTrailingStops(ctx, orders)
 
 	// Check each order for trigger conditions
 	for _, order := range orders {
+		// Skip if already expired (status changed in checkOrderExpiry)
+		if order.Status != "PENDING" {
+			continue
+		}
 		om.checkOrder(ctx, order)
 	}
 }
@@ -161,6 +168,35 @@ func (om *OrderMonitor) checkOrder(ctx context.Context, order *repository.Order)
 		// Execute the triggered order
 		if err := om.engine.ExecuteTriggeredOrder(ctx, order.ID); err != nil {
 			log.Printf("[OrderMonitor] Failed to execute triggered order #%d: %v", order.ID, err)
+		}
+	}
+}
+
+// checkOrderExpiry checks for expired orders and cancels them
+func (om *OrderMonitor) checkOrderExpiry(ctx context.Context, orders []*repository.Order) {
+	now := time.Now()
+
+	for _, order := range orders {
+		// Only process orders with expiry_time set
+		if order.ExpiryTime == nil {
+			continue
+		}
+
+		// Check if order has expired
+		if now.After(*order.ExpiryTime) {
+			// Cancel expired order
+			order.Status = "CANCELLED"
+			order.RejectReason = "Expired"
+
+			if err := om.orderRepo.UpdateStatus(ctx, order.ID, "CANCELLED", nil); err != nil {
+				log.Printf("[OrderMonitor] Failed to cancel expired order #%d: %v", order.ID, err)
+				continue
+			}
+
+			log.Printf("[OrderMonitor] Order #%d expired and cancelled (expiry: %s)",
+				order.ID, order.ExpiryTime.Format(time.RFC3339))
+
+			// TODO: Broadcast order update via WebSocket
 		}
 	}
 }
