@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-01-15)
 ## Current Position
 
 Phase: 5 of 15 (Advanced Order Types)
-Plan: 2 of 4 in current phase (05-01 and 05-03 complete)
+Plan: 2 of 4 in current phase
 Status: In Progress
-Last activity: 2026-01-16 — Completed 05-03-PLAN.md (Pending Order Types)
+Last activity: 2026-01-16 — Completed 05-02-PLAN.md (Trailing Stop Orders)
 
-Progress: ▓▓▓░░░░░░░ 30% (4/15 phases, 20/15 plans)
+Progress: ▓▓▓░░░░░░░ 27% (5/15 phases, 17/total plans)
 
 ## Performance Metrics
 
@@ -78,6 +78,9 @@ Recent decisions affecting current work:
 | 06-01 | ESMA leverage limits in seed data | Provides regulatory-compliant starting configuration (30:1 major pairs, 20:1 minors, 5:1 stocks, 2:1 crypto) |
 | 06-01 | Transaction-aware repository methods | Both standalone and tx-aware upsert methods for margin calculation atomicity |
 | 04-07 | Dual retention strategy (7-day local, 30-day artifacts) | Quick access for recent backups, long-term recovery capability via GitHub artifacts |
+| 05-02 | Trailing stop triggers move with favorable price only | BUY: trigger = ask - delta (rises with price). SELL: trigger = bid + delta (falls with price). Prevents moving against trader |
+| 05-02 | Update trailing stops before checking triggers | updateTrailingStops() called before checkPriceTriggers() ensures latest market price used for adjustment |
+| 05-02 | Max trailing delta = 10% of position price | Validation prevents unreasonable trailing distances that could trigger prematurely |
 | 04-07 | GitHub Actions artifacts for MVP backup storage | Simpler than S3/cloud storage for development, recommend migration to cloud for production |
 | 06-02 | Integrated govalues/decimal v0.1.36 for financial calculations | Eliminates float64 precision errors that caused LSE halt and €12M German bank fine |
 | 06-02 | Created wrapper utilities (MustParse, Parse, ToString) | Provides consistent decimal API across codebase with panic vs error handling patterns |
