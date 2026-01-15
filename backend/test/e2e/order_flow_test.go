@@ -5,9 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"trading-engine/backend/internal/database"
-	"trading-engine/backend/internal/database/repository"
-	"trading-engine/backend/internal/testutil"
+	"github.com/epic1st/rtx/backend/internal/database"
+	"github.com/epic1st/rtx/backend/internal/database/repository"
 )
 
 // TestE2E_OrderExecution verifies complete order flow:
@@ -19,11 +18,16 @@ import (
 func TestE2E_OrderExecution(t *testing.T) {
 	// Setup test database connection
 	ctx := context.Background()
-	pool, err := database.InitPool(ctx, getDatabaseURL(t))
+	err := database.InitPool(ctx, getDatabaseURL(t))
 	if err != nil {
 		t.Fatalf("database connect failed: %v", err)
 	}
 	defer database.Close()
+
+	pool := database.GetPool()
+	if pool == nil {
+		t.Fatal("database pool is nil")
+	}
 
 	// Clean up test data
 	defer cleanupTestData(t, pool)
@@ -32,7 +36,6 @@ func TestE2E_OrderExecution(t *testing.T) {
 	accountRepo := repository.NewAccountRepository(pool)
 	orderRepo := repository.NewOrderRepository(pool)
 	positionRepo := repository.NewPositionRepository(pool)
-	tradeRepo := repository.NewTradeRepository(pool)
 
 	// Step 1: Create test account
 	account := &repository.Account{
@@ -171,16 +174,21 @@ func TestE2E_OrderExecution(t *testing.T) {
 // 4. Verify trade recorded
 func TestE2E_PositionClose(t *testing.T) {
 	ctx := context.Background()
-	pool, err := database.InitPool(ctx, getDatabaseURL(t))
+	err := database.InitPool(ctx, getDatabaseURL(t))
 	if err != nil {
 		t.Fatalf("database connect failed: %v", err)
 	}
 	defer database.Close()
+
+	pool := database.GetPool()
+	if pool == nil {
+		t.Fatal("database pool is nil")
+	}
+
 	defer cleanupTestData(t, pool)
 
 	accountRepo := repository.NewAccountRepository(pool)
 	positionRepo := repository.NewPositionRepository(pool)
-	tradeRepo := repository.NewTradeRepository(pool)
 
 	// Create account
 	account := &repository.Account{

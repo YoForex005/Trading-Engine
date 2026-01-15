@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"trading-engine/backend/internal/database"
-	"trading-engine/backend/internal/database/repository"
+	"github.com/epic1st/rtx/backend/internal/database"
+	"github.com/epic1st/rtx/backend/internal/database/repository"
 )
 
 // TestE2E_PositionModify verifies modifying open positions:
@@ -15,11 +15,17 @@ import (
 // 3. Verify modifications persisted
 func TestE2E_PositionModify(t *testing.T) {
 	ctx := context.Background()
-	pool, err := database.InitPool(ctx, getDatabaseURL(t))
+	err := database.InitPool(ctx, getDatabaseURL(t))
 	if err != nil {
 		t.Fatalf("database connect failed: %v", err)
 	}
 	defer database.Close()
+
+	pool := database.GetPool()
+	if pool == nil {
+		t.Fatal("database pool is nil")
+	}
+
 	defer cleanupTestData(t, pool)
 
 	accountRepo := repository.NewAccountRepository(pool)
@@ -93,11 +99,17 @@ func TestE2E_PositionModify(t *testing.T) {
 // 4. Verify other positions unaffected
 func TestE2E_MultiplePositions(t *testing.T) {
 	ctx := context.Background()
-	pool, err := database.InitPool(ctx, getDatabaseURL(t))
+	err := database.InitPool(ctx, getDatabaseURL(t))
 	if err != nil {
 		t.Fatalf("database connect failed: %v", err)
 	}
 	defer database.Close()
+
+	pool := database.GetPool()
+	if pool == nil {
+		t.Fatal("database pool is nil")
+	}
+
 	defer cleanupTestData(t, pool)
 
 	accountRepo := repository.NewAccountRepository(pool)
@@ -248,11 +260,17 @@ func TestE2E_MultiplePositions(t *testing.T) {
 // 3. Verify updates persisted
 func TestE2E_PositionPriceUpdate(t *testing.T) {
 	ctx := context.Background()
-	pool, err := database.InitPool(ctx, getDatabaseURL(t))
+	err := database.InitPool(ctx, getDatabaseURL(t))
 	if err != nil {
 		t.Fatalf("database connect failed: %v", err)
 	}
 	defer database.Close()
+
+	pool := database.GetPool()
+	if pool == nil {
+		t.Fatal("database pool is nil")
+	}
+
 	defer cleanupTestData(t, pool)
 
 	accountRepo := repository.NewAccountRepository(pool)

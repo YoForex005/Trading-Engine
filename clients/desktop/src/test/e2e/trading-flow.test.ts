@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { renderWithProviders, createMockTick, createMockAccount } from '../utils'
+import { createMockTick, createMockAccount } from '../utils'
 
 /**
  * E2E Trading Flow Tests
@@ -86,9 +86,9 @@ describe('E2E: Trading Flow Integration', () => {
     const lots = 1.0
     const contractSize = 100000 // Standard lot for EURUSD
 
-    // Calculate profit (buy position)
+    // Calculate profit (buy position) for given lot size
     const pips = (currentPrice - entryPrice) * 10000 // 50 pips
-    const pipValue = (contractSize * 0.0001) // $10 per pip for EURUSD
+    const pipValue = (contractSize * 0.0001) * lots // $10 per pip per lot
     const profit = pips * pipValue
 
     expect(profit).toBeCloseTo(500, 2) // 50 pips * $10/pip = $500
@@ -165,12 +165,13 @@ describe('E2E: Trading Flow Integration', () => {
       tp: 1.0950  // 100 pips take profit
     }
 
+    const currentPrice = 1.0850
+
     // Validation rules
     expect(order.lots).toBeGreaterThan(0)
     expect(order.lots).toBeLessThanOrEqual(100) // Max lot size
 
     // For buy orders: SL < current < TP
-    const currentPrice = 1.0850
     if (order.sl > 0) {
       expect(order.sl).toBeLessThan(currentPrice)
     }
@@ -245,12 +246,12 @@ describe('E2E: Error Handling and Edge Cases', () => {
 
   it('Prevents invalid order submissions', () => {
     const invalidOrders = [
-      { lots: 0, reason: 'Zero lots' },
-      { lots: -1, reason: 'Negative lots' },
-      { lots: 1000, reason: 'Exceeds max lot size' },
+      { lots: 0 },
+      { lots: -1 },
+      { lots: 1000 },
     ]
 
-    invalidOrders.forEach(({ lots, reason }) => {
+    invalidOrders.forEach(({ lots }) => {
       const isValid = lots > 0 && lots <= 100
       expect(isValid).toBe(false)
     })
