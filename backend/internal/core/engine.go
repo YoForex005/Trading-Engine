@@ -1159,6 +1159,87 @@ func (e *Engine) ExecuteTriggeredOrder(ctx context.Context, orderID int64) error
 	return e.executePositionOpen(ctx, order, fillPrice)
 }
 
+// CreateTrailingStop creates a trailing stop order for an existing position
+func (e *Engine) CreateTrailingStop(ctx context.Context, positionID int64, trailingDelta float64) (*Order, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Get the position
+	position, ok := e.positions[positionID]
+	if !ok {
+		return nil, fmt.Errorf("position #%d not found", positionID)
+	}
+
+	if position.Status != "OPEN" {
+		return nil, errors.New("position is not open")
+	}
+
+	// Get current market price
+	if e.priceCallback == nil {
+		return nil, errors.New("price feed not available")
+	}
+
+	bid, ask, ok := e.priceCallback(position.Symbol)
+	if !ok {
+		return nil, fmt.Errorf("no price available for %s", position.Symbol)
+	}
+
+	// Calculate initial trigger price
+	var initialTrigger float64
+	if position.Side == "BUY" {
+		// For long positions: trigger = current_bid - delta
+		initialTrigger = bid - trailingDelta
+	} else {
+		// For short positions: trigger = current_ask + delta
+		initialTrigger = ask + trailingDelta
+	}
+
+	// Create order in database
+	if e.orderRepo == nil {
+		return nil, errors.New("order repository not available")
+	}
+
+	now := time.Now()
+	parentPosID := position.ID
+	repoOrder := &repository.Order{
+		AccountID:        position.AccountID,
+		Symbol:           position.Symbol,
+		Type:             "TRAILING_STOP",
+		Side:             position.Side, // Same side as position for closing
+		Volume:           position.Volume,
+		TriggerPrice:     initialTrigger,
+		TrailingDelta:    &trailingDelta,
+		ParentPositionID: &parentPosID,
+		Status:           "PENDING",
+		CreatedAt:        now,
+	}
+
+	if err := e.orderRepo.Create(ctx, repoOrder); err != nil {
+		return nil, fmt.Errorf("failed to create trailing stop order: %w", err)
+	}
+
+	// Create in-memory order
+	orderID := repoOrder.ID
+	order := &Order{
+		ID:           orderID,
+		AccountID:    position.AccountID,
+		Symbol:       position.Symbol,
+		Type:         "TRAILING_STOP",
+		Side:         position.Side,
+		Volume:       position.Volume,
+		TriggerPrice: initialTrigger,
+		Status:       "PENDING",
+		CreatedAt:    now,
+	}
+
+	e.orders[orderID] = order
+
+	log.Printf("[B-Book] Created trailing stop #%d for position #%d: trigger=%.5f delta=%.5f",
+		orderID, positionID, initialTrigger, trailingDelta)
+
+	return order, nil
+}
+
 // executePositionClose handles SL/TP execution by closing the parent position
 func (e *Engine) executePositionClose(ctx context.Context, order *repository.Order, closePrice float64) error {
 	parentPosID := *order.ParentPositionID

@@ -393,6 +393,7 @@ func main() {
 	// Position Management
 	http.HandleFunc("/api/positions/modify", apiHandler.HandleModifyPosition)
 	http.HandleFunc("/api/positions/sl-tp", apiHandler.HandleSetPositionSLTP) // New: Set SL/TP orders
+	http.HandleFunc("/api/positions/trailing-stop", apiHandler.HandleSetTrailingStop) // New: Set trailing stop
 
 	// ===== ADMIN ENDPOINTS =====
 	// For deposit/withdraw/adjust (Super	// Admin Endpoints

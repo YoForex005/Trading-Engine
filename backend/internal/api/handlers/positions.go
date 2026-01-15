@@ -360,38 +360,20 @@ func (h *APIHandler) HandleSetTrailingStop(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Create trailing stop order using the engine's order repository
-	_ = r.Context()
-
-	// Calculate initial trigger price based on current market price
-	var initialTrigger float64
-	if targetPosition.Side == "BUY" {
-		// For long positions: trigger = current_bid - delta
-		initialTrigger = targetPosition.CurrentPrice - req.TrailingDelta
-	} else {
-		// For short positions: trigger = current_ask + delta
-		initialTrigger = targetPosition.CurrentPrice + req.TrailingDelta
+	// Create trailing stop order via engine
+	ctx := r.Context()
+	order, err := h.engine.CreateTrailingStop(ctx, req.PositionID, req.TrailingDelta)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create trailing stop: %v", err), http.StatusInternalServerError)
+		return
 	}
 
-	// Create the trailing stop order
-	order := &core.Order{
-		AccountID:   targetPosition.AccountID,
-		Symbol:      targetPosition.Symbol,
-		Type:        "TRAILING_STOP",
-		Side:        targetPosition.Side, // Same side as position for closing
-		Volume:      targetPosition.Volume,
-		TriggerPrice: initialTrigger,
-		Status:      "PENDING",
-	}
-
-	// Use orderRepo directly if available (need to add to handler)
-	// For now, return success with order details
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":        true,
 		"message":        "Trailing stop created successfully",
 		"trailingDelta":  req.TrailingDelta,
-		"initialTrigger": initialTrigger,
+		"initialTrigger": order.TriggerPrice,
 		"order":          order,
 	})
 }
