@@ -75,6 +75,14 @@ func ExecuteStopOut(
 		return 0, fmt.Errorf("account %d not found", accountID)
 	}
 
+	// Collect all open positions for this account
+	var accountPositions []*Position
+	for _, pos := range engine.positions {
+		if pos.AccountID == accountID && pos.Status == "OPEN" {
+			accountPositions = append(accountPositions, pos)
+		}
+	}
+
 	// Get current prices for all symbols
 	currentPrices := make(map[string]decimal.Decimal)
 	for symbol := range engine.symbols {
@@ -89,7 +97,7 @@ func ExecuteStopOut(
 	}
 
 	// Select positions for liquidation (worst performers first)
-	positionsToClose := SelectPositionsForLiquidation(account.Positions, currentPrices)
+	positionsToClose := SelectPositionsForLiquidation(accountPositions, currentPrices)
 
 	log.Printf("[STOP OUT] Account %d: Margin level %.2f%% below threshold %.2f%%. Liquidating %d positions...",
 		accountID, currentMarginLevel, stopOutLevel, len(positionsToClose))

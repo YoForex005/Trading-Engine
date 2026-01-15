@@ -233,17 +233,16 @@ func ValidateSymbolExposure(
 	}
 
 	// Check account-specific exposure limit (if configured)
-	// TODO: Add MaxSymbolExposurePct field to risk_limits table
-	// if limits.MaxSymbolExposurePct != nil {
-	// 	maxExposure := decutil.MustParse(*limits.MaxSymbolExposurePct)
-	// 	if exposurePercent.Cmp(maxExposure) > 0 {
-	// 		return fmt.Errorf(
-	// 			"symbol exposure %s%% exceeds account limit %s%%",
-	// 			decutil.ToStringFixed(exposurePercent, 2),
-	// 			decutil.ToStringFixed(maxExposure, 2),
-	// 		)
-	// 	}
-	// }
+	if limits.MaxSymbolExposurePct != nil {
+		maxExposure := decutil.MustParse(*limits.MaxSymbolExposurePct)
+		if exposurePercent.Cmp(maxExposure) > 0 {
+			return fmt.Errorf(
+				"symbol exposure %s%% exceeds account limit %s%%",
+				decutil.ToStringFixed(exposurePercent, 2),
+				decutil.ToStringFixed(maxExposure, 2),
+			)
+		}
+	}
 
 	return nil
 }
@@ -309,17 +308,16 @@ func ValidateTotalExposure(
 	}
 
 	// Check account-specific total exposure limit
-	// TODO: Add MaxTotalExposurePct field to risk_limits table
-	// if limits.MaxTotalExposurePct != nil {
-	// 	maxExposure := decutil.MustParse(*limits.MaxTotalExposurePct)
-	// 	if exposurePercent.Cmp(maxExposure) > 0 {
-	// 		return fmt.Errorf(
-	// 			"total exposure %s%% exceeds account limit %s%%",
-	// 			decutil.ToStringFixed(exposurePercent, 2),
-	// 			decutil.ToStringFixed(maxExposure, 2),
-	// 		)
-	// 	}
-	// }
+	if limits.MaxTotalExposurePct != nil {
+		maxExposure := decutil.MustParse(*limits.MaxTotalExposurePct)
+		if exposurePercent.Cmp(maxExposure) > 0 {
+			return fmt.Errorf(
+				"total exposure %s%% exceeds account limit %s%%",
+				decutil.ToStringFixed(exposurePercent, 2),
+				decutil.ToStringFixed(maxExposure, 2),
+			)
+		}
+	}
 
 	return nil
 }
