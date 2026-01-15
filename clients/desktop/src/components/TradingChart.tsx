@@ -15,6 +15,11 @@ import { DrawingOverlay } from './TradingChart/DrawingOverlay';
 import type { Drawing } from './TradingChart/types';
 import { DataCache, type CachedCandle } from '../services/DataCache';
 import { ExternalDataService } from '../services/ExternalDataService';
+import { useIndicators } from '../hooks/useIndicators';
+import IndicatorManager from './IndicatorManager';
+import { IndicatorPane } from './TradingChart/IndicatorPane';
+import { IndicatorStorage } from '../services/IndicatorStorage';
+import type { IndicatorType, IndicatorParams } from '../indicators/core/IndicatorEngine';
 
 export type ChartType = 'candlestick' | 'heikinAshi' | 'bar' | 'line' | 'area';
 export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
@@ -61,6 +66,50 @@ export function TradingChart({
     // Drawing State
     const [activeTool, setActiveTool] = useState<DrawingType>('cursor');
     const [drawings, setDrawings] = useState<Drawing[]>([]);
+
+    // Indicator State
+    const [showIndicatorManager, setShowIndicatorManager] = useState(false);
+    const indicatorSeriesRef = useRef<Map<string, ISeriesApi<'Line'>>>(new Map());
+
+    // Convert candleRef OHLC to indicator OHLC format (Time -> number)
+    const indicatorOHLCData = candlesRef.current.map((c) => ({
+        time: typeof c.time === 'string' ? parseInt(c.time) : (c.time as number),
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+    }));
+
+    // Initialize indicators hook
+    const {
+        indicators,
+        overlayIndicators,
+        paneGroups,
+        addIndicator,
+    } = useIndicators({
+        ohlcData: indicatorOHLCData,
+        autoCalculate: true,
+    });
+
+    // Load saved indicators on symbol/timeframe change
+    useEffect(() => {
+        const savedIndicators = IndicatorStorage.load(symbol, timeframe);
+        for (const savedInd of savedIndicators) {
+            if (savedInd.type && savedInd.params) {
+                addIndicator(savedInd.type as IndicatorType, savedInd.params as IndicatorParams, {
+                    color: savedInd.color,
+                    lineWidth: savedInd.lineWidth,
+                    visible: savedInd.visible,
+                    paneIndex: savedInd.paneIndex,
+                });
+            }
+        }
+    }, [symbol, timeframe]);
+
+    // Save indicators whenever they change
+    useEffect(() => {
+        IndicatorStorage.save(symbol, timeframe, indicators);
+    }, [indicators, symbol, timeframe]);
 
     // Fetch drawings on load
     useEffect(() => {
@@ -462,10 +511,72 @@ export function TradingChart({
         };
     }, [oneClickEnabled, onPlacePendingOrder, currentPrice]);
 
+    // Manage indicator series rendering
+    useEffect(() => {
+        if (!isChartReady || !chartRef.current) return;
+
+        const chart = chartRef.current;
+        const seriesMap = indicatorSeriesRef.current;
+
+        // Get indicator types currently on chart
+        const currentIndicatorIds = new Set(overlayIndicators.map(ind => ind.id));
+
+        // Remove series for indicators no longer on chart
+        for (const [id, series] of seriesMap.entries()) {
+            if (!currentIndicatorIds.has(id)) {
+                try {
+                    chart.removeSeries(series);
+                    seriesMap.delete(id);
+                } catch (err) {
+                    console.error('Failed to remove indicator series:', err);
+                }
+            }
+        }
+
+        // Add or update series for overlay indicators
+        for (const indicator of overlayIndicators) {
+            if (!indicator.visible) continue;
+
+            try {
+                let series = seriesMap.get(indicator.id);
+
+                // Create series if it doesn't exist
+                if (!series) {
+                    series = chart.addSeries(LineSeries, {
+                        color: indicator.color,
+                        lineWidth: indicator.lineWidth as 1 | 2 | 3 | 4,
+                    });
+                    seriesMap.set(indicator.id, series);
+                }
+
+                // Update series data for single-value indicators
+                if (Array.isArray(indicator.data) && indicator.data.length > 0) {
+                    const firstValue = indicator.data[0].value;
+
+                    // Handle single-value indicators (e.g., SMA, EMA, RSI)
+                    if (typeof firstValue === 'number') {
+                        const lineData = indicator.data.map((point) => ({
+                            time: point.time as Time,
+                            value: point.value as number,
+                        }));
+                        series.setData(lineData);
+                    }
+                }
+            } catch (err) {
+                console.error(`Failed to render indicator ${indicator.type}:`, err);
+            }
+        }
+    }, [overlayIndicators, isChartReady]);
+
+
+    const handleAddIndicator = (type: IndicatorType, params?: IndicatorParams) => {
+        addIndicator(type, params);
+        setShowIndicatorManager(false);
+    };
 
     return (
-        <div className="relative w-full h-full bg-[#131722]">
-            <div ref={chartContainerRef} className="w-full h-full" />
+        <div className="relative w-full h-full bg-[#131722] flex flex-col" role="region" aria-label="Trading Chart">
+            <div ref={chartContainerRef} className="w-full flex-1" />
 
             <DrawingTools
                 activeTool={activeTool}
@@ -522,11 +633,38 @@ export function TradingChart({
                 )}
             </div>
 
-            {/* Legend */}
-            <div className="absolute top-4 left-4 z-10 pointer-events-none">
-                <div className="text-2xl font-bold text-zinc-100">{symbol}</div>
-                <div className="text-sm text-zinc-500 font-medium">{timeframe}</div>
+            {/* Legend and Controls */}
+            <div className="absolute top-4 left-4 z-10 flex items-start gap-4">
+                <div className="pointer-events-none">
+                    <div className="text-2xl font-bold text-zinc-100">{symbol}</div>
+                    <div className="text-sm text-zinc-500 font-medium">{timeframe}</div>
+                </div>
+                <button
+                    onClick={() => setShowIndicatorManager(true)}
+                    className="pointer-events-auto px-3 py-1.5 text-xs font-medium rounded bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-zinc-700 hover:border-zinc-600 transition-colors"
+                    title="Add technical indicators"
+                >
+                    📊 Indicators
+                </button>
             </div>
+
+            {/* Indicator Manager Modal */}
+            <IndicatorManager
+                isOpen={showIndicatorManager}
+                onClose={() => setShowIndicatorManager(false)}
+                onAddIndicator={handleAddIndicator}
+                currentIndicators={indicators.map(ind => ind.type)}
+            />
+
+            {/* Indicator Panes - Render each pane group */}
+            {Array.from(paneGroups.entries()).map(([paneIndex, paneIndicators]) => (
+                <IndicatorPane
+                    key={paneIndex}
+                    indicators={paneIndicators}
+                    height={150}
+                    mainChartRef={chartRef.current}
+                />
+            ))}
         </div>
     );
 }
@@ -701,7 +839,7 @@ function toHeikinAshi(candle: OHLC, prevCandle?: OHLC): OHLC {
 // Chart Controls Component
 // Chart Controls Component
 export function ChartControls({
-    chartType, timeframe, onChartTypeChange, onTimeframeChange, isMaximized, onToggleMaximize, oneClickEnabled, onToggleOneClick, onDownloadData
+    chartType, timeframe, onChartTypeChange, onTimeframeChange, isMaximized, onToggleMaximize, oneClickEnabled, onToggleOneClick, onDownloadData, onOpenIndicators
 }: {
     chartType: ChartType;
     timeframe: Timeframe;
@@ -712,6 +850,7 @@ export function ChartControls({
     oneClickEnabled?: boolean;
     onToggleOneClick?: () => void;
     onDownloadData?: () => void;
+    onOpenIndicators?: () => void;
 }) {
     const chartTypes: { value: ChartType; label: string }[] = [
         { value: 'candlestick', label: 'Candles' },
@@ -770,6 +909,17 @@ export function ChartControls({
                     title="Download chart data as CSV"
                 >
                     ⬇ CSV
+                </button>
+            )}
+
+            {/* Indicators Button */}
+            {onOpenIndicators && (
+                <button
+                    onClick={onOpenIndicators}
+                    className="px-2 py-1 text-[10px] font-medium rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors mr-2"
+                    title="Add technical indicators"
+                >
+                    📊 Indicators
                 </button>
             )}
 
