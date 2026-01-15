@@ -5,22 +5,22 @@
 See: .planning/PROJECT.md (updated 2026-01-15)
 
 **Core value:** Brokers can launch and operate a complete trading business rivaling MT5 in capability, with professional client trading tools and comprehensive broker management systems.
-**Current focus:** Phase 6 — Risk Management (In Progress)
+**Current focus:** Phase 5 — Advanced Order Types (In Progress)
 
 ## Current Position
 
-Phase: 6 of 15 (Risk Management)
-Plan: 1 of 6 in current phase
+Phase: 5 of 15 (Advanced Order Types)
+Plan: 2 of 4 in current phase (05-01 and 05-03 complete)
 Status: In Progress
-Last activity: 2026-01-16 — Completed 06-02-PLAN.md (Decimal Library Integration)
+Last activity: 2026-01-16 — Completed 05-03-PLAN.md (Pending Order Types)
 
-Progress: ▓▓▓░░░░░░░ 33.3% (5/15 phases, 18/15 plans)
+Progress: ▓▓▓░░░░░░░ 30% (4/15 phases, 20/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 17
-- Average duration: ~30 min per plan
+- Total plans completed: 20
+- Average duration: ~35 min per plan
 - Total execution time: 1 day (2026-01-16)
 
 **By Phase:**
@@ -30,11 +30,13 @@ Progress: ▓▓▓░░░░░░░ 33.3% (5/15 phases, 18/15 plans)
 | 1. Security & Configuration | 3/3 | 1 day | ~8 hours |
 | 2. Database Migration | 4/4 | ~3 hours | ~45 min |
 | 3. Testing Infrastructure | 3/7 | ~90 min | ~30 min |
-| 4. Deployment Operations | 7/7 | ~2.25 hours | ~20 min |
+| 4. Deployment Operations | 7/7 | ~2 hours | ~17 min |
+| 5. Advanced Order Types | 2/4 | ~90 min | ~45 min |
+| 6. Risk Management | 2/6 | ~75 min | ~38 min |
 **Recent Trend:**
-- Last 17 plans: Phases 1-2 complete, Phase 3 in progress, Phase 4 complete (17/17 plans)
-- Trend: Excellent execution velocity, Phase 4 operations complete with backup strategy
-- Trend: Production-ready deployment with performance optimizations and disaster recovery
+- Last 20 plans: Phases 1-2-4 complete, Phase 3 partial, Phase 5 in progress, Phase 6 started (20/20 plans)
+- Trend: Excellent execution velocity, advanced order types implementation in progress
+- Trend: Pending order system complete with API and UI
 ## Accumulated Context
 
 ### Decisions
@@ -71,8 +73,19 @@ Recent decisions affecting current work:
 | 04-03 | Only publish Docker images on main branch | Conserves GitHub Container Registry resources, prevents PR pollution |
 | 04-07 | Use pg_dump with custom format and gzip compression | Space-efficient backups with standard PostgreSQL tools for disaster recovery |
 | 04-07 | Schedule backups every 6 hours | Balances recovery granularity with storage costs and resource usage |
+| 06-01 | DECIMAL columns as strings in Go repositories | Prevents float64 precision errors that have caused production incidents (LSE halt, €12M German bank fine) |
+| 06-01 | Generated column for free_margin calculation | PostgreSQL GENERATED ALWAYS AS ensures free_margin = equity - used_margin without app-level risk |
+| 06-01 | ESMA leverage limits in seed data | Provides regulatory-compliant starting configuration (30:1 major pairs, 20:1 minors, 5:1 stocks, 2:1 crypto) |
+| 06-01 | Transaction-aware repository methods | Both standalone and tx-aware upsert methods for margin calculation atomicity |
 | 04-07 | Dual retention strategy (7-day local, 30-day artifacts) | Quick access for recent backups, long-term recovery capability via GitHub artifacts |
 | 04-07 | GitHub Actions artifacts for MVP backup storage | Simpler than S3/cloud storage for development, recommend migration to cloud for production |
+| 06-02 | Integrated govalues/decimal v0.1.36 for financial calculations | Eliminates float64 precision errors that caused LSE halt and €12M German bank fine |
+| 06-02 | Created wrapper utilities (MustParse, Parse, ToString) | Provides consistent decimal API across codebase with panic vs error handling patterns |
+| 06-02 | NewFromFloat64 marked migration-only with WARNING | Float64 conversion still has precision issues - only for migrating existing data |
+| 06-02 | AssertDecimalNear for epsilon-based comparison | Some calculations have acceptable rounding variance, need both exact and near-equality assertions |
+| 05-03 | Unified /api/orders/pending endpoint for all pending types | Single endpoint handles BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP - simpler API surface |
+| 05-03 | Validate trigger price at order creation time | Prevents traders from placing impossible orders (e.g., BUY_LIMIT above market) |
+| 05-03 | Separate order types instead of type+side combination | Using BUY_LIMIT vs LIMIT+BUY makes validation clearer and reduces ambiguity |
 
 ### Pending Todos
 
@@ -85,7 +98,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-16
-Stopped at: Completed 04-07-PLAN.md (Database Backup Strategy)
+Stopped at: Completed 05-03-PLAN.md (Pending Order Types)
 Resume file: None
 
 ## Phase 1 Completion Summary
