@@ -156,6 +156,26 @@ func (r *PositionRepository) UpdatePrice(ctx context.Context, id int64, currentP
 	return nil
 }
 
+// UpdateSLTP updates stop-loss and take-profit levels
+func (r *PositionRepository) UpdateSLTP(ctx context.Context, id int64, sl, tp float64) error {
+	query := `
+		UPDATE positions
+		SET sl = $1, tp = $2
+		WHERE id = $3 AND status = 'OPEN'
+	`
+
+	result, err := r.pool.Exec(ctx, query, sl, tp, id)
+	if err != nil {
+		return fmt.Errorf("failed to update SL/TP: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("position not found or not open: %d", id)
+	}
+
+	return nil
+}
+
 // Close marks position as closed
 func (r *PositionRepository) Close(ctx context.Context, id int64, closePrice float64, closeReason string) error {
 	// Use transaction for financial consistency
