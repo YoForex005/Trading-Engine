@@ -31,21 +31,21 @@ Requirements for v1.0 - Production-ready foundation with core trading and admin 
 - [ ] **SCALE-02**: Migrate account data from file storage to database
 - [ ] **SCALE-03**: Migrate position data from file storage to database
 - [ ] **SCALE-04**: Migrate trade history from file storage to database
-- [ ] **SCALE-05**: Implement caching layer for tick data (Redis or similar)
-- [ ] **SCALE-06**: Implement caching layer for OHLC data
-- [ ] **SCALE-07**: Optimize LP manager for O(1) lookups (map-based instead of linear search)
+- [x] **SCALE-05**: Implement caching layer for tick data (Redis or similar)
+- [x] **SCALE-06**: Implement caching layer for OHLC data
+- [x] **SCALE-07**: Optimize LP manager for O(1) lookups (map-based instead of linear search)
 
 ### Deployment & Operations (DEPLOY)
 
-- [ ] **DEPLOY-01**: Create Docker container for Go backend
-- [ ] **DEPLOY-02**: Create Docker container for React frontend
-- [ ] **DEPLOY-03**: Docker Compose setup for local development
-- [ ] **DEPLOY-04**: Implement CI/CD pipeline (GitHub Actions or similar)
-- [ ] **DEPLOY-05**: Add structured logging with log levels
-- [ ] **DEPLOY-06**: Implement monitoring (Prometheus metrics or similar)
-- [ ] **DEPLOY-07**: Add health check endpoints
-- [ ] **DEPLOY-08**: Implement automated backups for database
-- [ ] **DEPLOY-09**: Create deployment documentation
+- [x] **DEPLOY-01**: Create Docker container for Go backend
+- [x] **DEPLOY-02**: Create Docker container for React frontend
+- [x] **DEPLOY-03**: Docker Compose setup for local development
+- [x] **DEPLOY-04**: Implement CI/CD pipeline (GitHub Actions or similar)
+- [x] **DEPLOY-05**: Add structured logging with log levels
+- [x] **DEPLOY-06**: Implement monitoring (Prometheus metrics or similar)
+- [x] **DEPLOY-07**: Add health check endpoints
+- [x] **DEPLOY-08**: Implement automated backups for database
+- [x] **DEPLOY-09**: Create deployment documentation
 
 ### Advanced Order Types (ORDER)
 
