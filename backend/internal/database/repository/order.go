@@ -238,3 +238,23 @@ func (r *OrderRepository) UpdateTriggerPrice(ctx context.Context, id int64, newT
 
 	return nil
 }
+
+// UpdateOCOLink updates the oco_link_id for an order to create bidirectional OCO relationship
+func (r *OrderRepository) UpdateOCOLink(ctx context.Context, orderID, linkedOrderID int64) error {
+	query := `
+		UPDATE orders
+		SET oco_link_id = $1
+		WHERE id = $2 AND status = 'PENDING'
+	`
+
+	result, err := r.pool.Exec(ctx, query, linkedOrderID, orderID)
+	if err != nil {
+		return fmt.Errorf("failed to update OCO link: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("order not found or not pending: %d", orderID)
+	}
+
+	return nil
+}

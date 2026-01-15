@@ -687,8 +687,8 @@ func (e *Engine) ExecuteMarketOrder(accountID int64, symbol, side string, volume
 	return position, nil
 }
 
-// CreatePendingOrder creates a pending order (BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP)
-func (e *Engine) CreatePendingOrder(accountID int64, orderType, symbol string, volume, triggerPrice, sl, tp float64) (*Order, error) {
+// CreatePendingOrderWithOCO creates a pending order with optional OCO linking
+func (e *Engine) CreatePendingOrderWithOCO(accountID int64, orderType, symbol string, volume, triggerPrice, sl, tp float64, ocoLinkID *int64) (*Order, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -780,6 +780,23 @@ func (e *Engine) CreatePendingOrder(accountID int64, orderType, symbol string, v
 		}
 	}
 
+	// Validate OCO link if provided
+	if ocoLinkID != nil && *ocoLinkID > 0 {
+		if e.orderRepo == nil {
+			return nil, errors.New("order repository required for OCO linking")
+		}
+
+		// Verify linked order exists and is PENDING
+		linkedOrder, err := e.orderRepo.GetByID(ctx, *ocoLinkID)
+		if err != nil {
+			return nil, fmt.Errorf("OCO linked order #%d not found: %w", *ocoLinkID, err)
+		}
+
+		if linkedOrder.Status != "PENDING" {
+			return nil, fmt.Errorf("OCO linked order #%d is not PENDING (status: %s)", *ocoLinkID, linkedOrder.Status)
+		}
+	}
+
 	// Create order (in-memory)
 	orderID := e.nextOrderID
 	e.nextOrderID++
@@ -811,22 +828,45 @@ func (e *Engine) CreatePendingOrder(accountID int64, orderType, symbol string, v
 			TriggerPrice: triggerPrice,
 			SL:           sl,
 			TP:           tp,
+			OCOLinkID:    ocoLinkID,
 			Status:       "PENDING",
 			CreatedAt:    now,
 		}
 		if err := e.orderRepo.Create(ctx, repoOrder); err != nil {
 			log.Printf("[ERROR] Failed to persist pending order: %v", err)
-		} else {
-			// Update in-memory order with database-generated ID
-			order.ID = repoOrder.ID
-			e.orders[repoOrder.ID] = order
-			delete(e.orders, orderID)
+			return nil, fmt.Errorf("failed to persist order: %w", err)
+		}
+
+		// Update in-memory order with database-generated ID
+		order.ID = repoOrder.ID
+		e.orders[repoOrder.ID] = order
+		delete(e.orders, orderID)
+
+		// If OCO link specified, update the linked order's OCOLinkID to point back
+		if ocoLinkID != nil && *ocoLinkID > 0 {
+			// Create bidirectional OCO link
+			newOrderID := repoOrder.ID
+			if err := e.orderRepo.UpdateOCOLink(ctx, *ocoLinkID, newOrderID); err != nil {
+				log.Printf("[ERROR] Failed to update OCO bidirectional link: %v", err)
+				// Don't fail the order creation, just log the error
+			} else {
+				log.Printf("[B-Book] OCO: Linked orders #%d ↔ #%d", newOrderID, *ocoLinkID)
+			}
 		}
 	}
 
-	log.Printf("[B-Book] PENDING ORDER CREATED: %s %s %.2f lots @ %.5f (Order #%d)", orderType, symbol, volume, triggerPrice, order.ID)
+	logMsg := fmt.Sprintf("[B-Book] PENDING ORDER CREATED: %s %s %.2f lots @ %.5f (Order #%d)", orderType, symbol, volume, triggerPrice, order.ID)
+	if ocoLinkID != nil && *ocoLinkID > 0 {
+		logMsg += fmt.Sprintf(" OCO→#%d", *ocoLinkID)
+	}
+	log.Println(logMsg)
 
 	return order, nil
+}
+
+// CreatePendingOrder creates a pending order without OCO linking (backward compatibility)
+func (e *Engine) CreatePendingOrder(accountID int64, orderType, symbol string, volume, triggerPrice, sl, tp float64) (*Order, error) {
+	return e.CreatePendingOrderWithOCO(accountID, orderType, symbol, volume, triggerPrice, sl, tp, nil)
 }
 
 // ClosePosition closes a position
@@ -1360,6 +1400,11 @@ func (e *Engine) executePositionClose(ctx context.Context, order *repository.Ord
 	log.Printf("[B-Book] %s TRIGGERED: Closed Position #%d @ %.5f | P/L: %.2f",
 		order.Type, parentPosID, closePrice, realizedPnL)
 
+	// Cancel OCO linked order if exists
+	if err := e.CancelOCOLinkedOrder(ctx, order.ID); err != nil {
+		log.Printf("[Engine] Failed to cancel OCO linked order for #%d: %v", order.ID, err)
+	}
+
 	return nil
 }
 
@@ -1465,6 +1510,66 @@ func (e *Engine) executePositionOpen(ctx context.Context, order *repository.Orde
 
 	log.Printf("[B-Book] %s TRIGGERED: Opened Position #%d (%s %s %.2f lots @ %.5f)",
 		order.Type, positionID, order.Side, order.Symbol, order.Volume, fillPrice)
+
+	// Cancel OCO linked order if exists
+	if err := e.CancelOCOLinkedOrder(ctx, order.ID); err != nil {
+		log.Printf("[Engine] Failed to cancel OCO linked order for #%d: %v", order.ID, err)
+	}
+
+	return nil
+}
+
+// CancelOCOLinkedOrder cancels the linked order when one OCO order fills
+func (e *Engine) CancelOCOLinkedOrder(ctx context.Context, orderID int64) error {
+	if e.orderRepo == nil {
+		return errors.New("order repository not available")
+	}
+
+	// Load the order that just filled
+	order, err := e.orderRepo.GetByID(ctx, orderID)
+	if err != nil {
+		return fmt.Errorf("failed to load order: %w", err)
+	}
+
+	// Check if this order has an OCO link
+	if order.OCOLinkID == nil || *order.OCOLinkID == 0 {
+		// No OCO link, nothing to cancel
+		return nil
+	}
+
+	linkedOrderID := *order.OCOLinkID
+
+	// Load the linked order
+	linkedOrder, err := e.orderRepo.GetByID(ctx, linkedOrderID)
+	if err != nil {
+		log.Printf("[Engine] Failed to load OCO linked order #%d: %v", linkedOrderID, err)
+		return fmt.Errorf("failed to load linked order: %w", err)
+	}
+
+	// Only cancel if the linked order is still PENDING
+	if linkedOrder.Status != "PENDING" {
+		log.Printf("[Engine] OCO linked order #%d already %s, skipping cancellation", linkedOrderID, linkedOrder.Status)
+		return nil
+	}
+
+	// Update linked order status to CANCELLED
+	linkedOrder.Status = "CANCELLED"
+	linkedOrder.RejectReason = "OCO order filled"
+
+	if err := e.orderRepo.UpdateStatus(ctx, linkedOrder.ID, "CANCELLED", nil); err != nil {
+		log.Printf("[Engine] Failed to cancel OCO linked order #%d: %v", linkedOrderID, err)
+		return fmt.Errorf("failed to cancel linked order: %w", err)
+	}
+
+	// Update in-memory cache if exists
+	if memOrder, ok := e.orders[linkedOrder.ID]; ok {
+		memOrder.Status = "CANCELLED"
+		memOrder.RejectReason = "OCO order filled"
+	}
+
+	log.Printf("[Engine] OCO: Cancelled order #%d (linked to filled order #%d)", linkedOrderID, orderID)
+
+	// TODO: Broadcast WebSocket update for cancelled order
 
 	return nil
 }

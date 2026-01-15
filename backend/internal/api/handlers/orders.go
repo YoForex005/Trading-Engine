@@ -95,6 +95,7 @@ func (h *APIHandler) HandlePlacePendingOrder(w http.ResponseWriter, r *http.Requ
 		TriggerPrice float64 `json:"triggerPrice"`
 		SL           float64 `json:"sl,omitempty"`
 		TP           float64 `json:"tp,omitempty"`
+		OCOLinkID    *int64  `json:"ocoLinkId,omitempty"` // ID of order to link for OCO
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -124,7 +125,7 @@ func (h *APIHandler) HandlePlacePendingOrder(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	order, err := h.engine.CreatePendingOrder(req.AccountID, req.Type, req.Symbol, req.Volume, req.TriggerPrice, req.SL, req.TP)
+	order, err := h.engine.CreatePendingOrderWithOCO(req.AccountID, req.Type, req.Symbol, req.Volume, req.TriggerPrice, req.SL, req.TP, req.OCOLinkID)
 	if err != nil {
 		log.Printf("[API] Pending order rejected: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
