@@ -1,0 +1,23 @@
+[
+  {
+    "symbol": "EURUSD",
+    "bid": "1.0850",
+    "ask": "1.0852",
+    "spread": 2,
+    "timestamp": "2026-01-16T00:00:00Z"
+  },
+  {
+    "symbol": "GBPUSD",
+    "bid": "1.2650",
+    "ask": "1.2653",
+    "spread": 3,
+    "timestamp": "2026-01-16T00:00:00Z"
+  },
+  {
+    "symbol": "USDJPY",
+    "bid": "148.50",
+    "ask": "148.52",
+    "spread": 2,
+    "timestamp": "2026-01-16T00:00:00Z"
+  }
+]

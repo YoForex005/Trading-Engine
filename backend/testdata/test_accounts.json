@@ -1,0 +1,22 @@
+[
+  {
+    "account_number": "TEST001",
+    "balance": "10000.00",
+    "equity": "10000.00",
+    "margin": "0.00",
+    "free_margin": "10000.00",
+    "margin_level": "0.00",
+    "currency": "USD",
+    "leverage": 100
+  },
+  {
+    "account_number": "TEST002",
+    "balance": "5000.00",
+    "equity": "5000.00",
+    "margin": "0.00",
+    "free_margin": "5000.00",
+    "margin_level": "0.00",
+    "currency": "USD",
+    "leverage": 50
+  }
+]
