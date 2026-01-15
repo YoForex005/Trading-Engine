@@ -132,10 +132,13 @@ Plans:
   6. Trader can modify existing orders (price, SL, TP)
   7. Orders expire automatically when time limit reached
 **Research**: Unlikely (order types are standard, implementation patterns clear)
-**Plans**: TBD
+**Plans**: 4 plans ready for execution
 
 Plans:
-- [ ] TBD (to be planned)
+- [x] 05-01-PLAN.md — Stop-Loss and Take-Profit Orders (Wave 1) ✅
+- [ ] 05-02-PLAN.md — Trailing Stop Orders (Wave 2)
+- [ ] 05-03-PLAN.md — Pending Orders (Buy/Sell Limit and Stop) (Wave 2)
+- [ ] 05-04-PLAN.md — OCO Linking, Order Modification, and Expiration (Wave 3)
 
 ### Phase 6: Risk Management
 **Goal**: Platform enforces margin requirements, position limits, and automatic risk controls
@@ -372,9 +375,9 @@ Phases execute in numeric order: 1 → 2 → 3 → ... → 15
 |-------|----------------|--------|-----------|
 | 1. Security & Configuration | 3/3 | ✅ Complete | 2026-01-16 |
 | 2. Database Migration | 4/4 | ✅ Complete | 2026-01-16 |
-| 3. Testing Infrastructure | 0/TBD | Not started | - |
-| 4. Deployment & Operations | 0/TBD | Not started | - |
-| 5. Advanced Order Types | 0/TBD | Not started | - |
+| 3. Testing Infrastructure | 3/7 | In progress | - |
+| 4. Deployment & Operations | 0/8 | Not started | - |
+| 5. Advanced Order Types | 1/4 | In progress | - |
 | 6. Risk Management | 0/TBD | Not started | - |
 | 7. Multi-Asset Support | 0/TBD | Not started | - |
 | 8. Client Trading Terminal | 0/TBD | Not started | - |
