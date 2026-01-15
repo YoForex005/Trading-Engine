@@ -246,13 +246,154 @@ Which phases cover which requirements. Updated by create-roadmap workflow.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (To be populated by create-roadmap) | - | - |
+| SECURITY-01 | Phase 1 | Pending |
+| SECURITY-02 | Phase 1 | Pending |
+| SECURITY-03 | Phase 1 | Pending |
+| SECURITY-04 | Phase 1 | Pending |
+| SECURITY-05 | Phase 1 | Pending |
+| SCALE-01 | Phase 2 | Pending |
+| SCALE-02 | Phase 2 | Pending |
+| SCALE-03 | Phase 2 | Pending |
+| SCALE-04 | Phase 2 | Pending |
+| TEST-01 | Phase 3 | Pending |
+| TEST-02 | Phase 3 | Pending |
+| TEST-03 | Phase 3 | Pending |
+| TEST-04 | Phase 3 | Pending |
+| TEST-05 | Phase 3 | Pending |
+| TEST-06 | Phase 3 | Pending |
+| TEST-07 | Phase 3 | Pending |
+| DEPLOY-01 | Phase 4 | Pending |
+| DEPLOY-02 | Phase 4 | Pending |
+| DEPLOY-03 | Phase 4 | Pending |
+| DEPLOY-04 | Phase 4 | Pending |
+| DEPLOY-05 | Phase 4 | Pending |
+| DEPLOY-06 | Phase 4 | Pending |
+| DEPLOY-07 | Phase 4 | Pending |
+| DEPLOY-08 | Phase 4 | Pending |
+| DEPLOY-09 | Phase 4 | Pending |
+| SCALE-05 | Phase 4 | Pending |
+| SCALE-06 | Phase 4 | Pending |
+| SCALE-07 | Phase 4 | Pending |
+| ORDER-01 | Phase 5 | Pending |
+| ORDER-02 | Phase 5 | Pending |
+| ORDER-03 | Phase 5 | Pending |
+| ORDER-04 | Phase 5 | Pending |
+| ORDER-05 | Phase 5 | Pending |
+| ORDER-06 | Phase 5 | Pending |
+| ORDER-07 | Phase 5 | Pending |
+| ORDER-08 | Phase 5 | Pending |
+| ORDER-09 | Phase 5 | Pending |
+| ORDER-10 | Phase 5 | Pending |
+| RISK-01 | Phase 6 | Pending |
+| RISK-02 | Phase 6 | Pending |
+| RISK-03 | Phase 6 | Pending |
+| RISK-04 | Phase 6 | Pending |
+| RISK-05 | Phase 6 | Pending |
+| RISK-06 | Phase 6 | Pending |
+| RISK-07 | Phase 6 | Pending |
+| RISK-08 | Phase 6 | Pending |
+| RISK-09 | Phase 6 | Pending |
+| RISK-10 | Phase 6 | Pending |
+| ASSET-01 | Phase 7 | Pending |
+| ASSET-02 | Phase 7 | Pending |
+| ASSET-03 | Phase 7 | Pending |
+| ASSET-04 | Phase 7 | Pending |
+| ASSET-05 | Phase 7 | Pending |
+| ASSET-06 | Phase 7 | Pending |
+| ASSET-07 | Phase 7 | Pending |
+| ASSET-08 | Phase 7 | Pending |
+| TERMINAL-01 | Phase 8 | Pending |
+| TERMINAL-02 | Phase 8 | Pending |
+| TERMINAL-03 | Phase 8 | Pending |
+| TERMINAL-04 | Phase 8 | Pending |
+| TERMINAL-05 | Phase 8 | Pending |
+| TERMINAL-06 | Phase 8 | Pending |
+| TERMINAL-07 | Phase 8 | Pending |
+| TERMINAL-08 | Phase 8 | Pending |
+| TERMINAL-09 | Phase 8 | Pending |
+| TERMINAL-10 | Phase 8 | Pending |
+| USER-01 | Phase 9 | Pending |
+| USER-02 | Phase 9 | Pending |
+| USER-03 | Phase 9 | Pending |
+| USER-04 | Phase 9 | Pending |
+| USER-05 | Phase 9 | Pending |
+| USER-06 | Phase 9 | Pending |
+| USER-07 | Phase 9 | Pending |
+| USER-08 | Phase 9 | Pending |
+| USER-09 | Phase 9 | Pending |
+| USER-10 | Phase 9 | Pending |
+| USER-11 | Phase 9 | Pending |
+| USER-12 | Phase 9 | Pending |
+| MONITOR-01 | Phase 10 | Pending |
+| MONITOR-02 | Phase 10 | Pending |
+| MONITOR-03 | Phase 10 | Pending |
+| MONITOR-04 | Phase 10 | Pending |
+| MONITOR-05 | Phase 10 | Pending |
+| MONITOR-06 | Phase 10 | Pending |
+| MONITOR-07 | Phase 10 | Pending |
+| MONITOR-08 | Phase 10 | Pending |
+| MONITOR-09 | Phase 10 | Pending |
+| MONITOR-10 | Phase 10 | Pending |
+| MARKET-01 | Phase 11 | Pending |
+| MARKET-02 | Phase 11 | Pending |
+| MARKET-03 | Phase 11 | Pending |
+| MARKET-04 | Phase 11 | Pending |
+| MARKET-05 | Phase 11 | Pending |
+| MARKET-06 | Phase 11 | Pending |
+| MARKET-07 | Phase 11 | Pending |
+| MARKET-08 | Phase 11 | Pending |
+| MARKET-09 | Phase 11 | Pending |
+| MARKET-10 | Phase 11 | Pending |
+| MARKET-11 | Phase 11 | Pending |
+| REPORT-01 | Phase 12 | Pending |
+| REPORT-02 | Phase 12 | Pending |
+| REPORT-03 | Phase 12 | Pending |
+| REPORT-04 | Phase 12 | Pending |
+| REPORT-05 | Phase 12 | Pending |
+| REPORT-06 | Phase 12 | Pending |
+| REPORT-07 | Phase 12 | Pending |
+| REPORT-08 | Phase 12 | Pending |
+| REPORT-09 | Phase 12 | Pending |
+| REPORT-10 | Phase 12 | Pending |
+| REPORT-11 | Phase 12 | Pending |
+| MANAGER-01 | Phase 13 | Pending |
+| MANAGER-02 | Phase 13 | Pending |
+| MANAGER-03 | Phase 13 | Pending |
+| MANAGER-04 | Phase 13 | Pending |
+| MANAGER-05 | Phase 13 | Pending |
+| MANAGER-06 | Phase 13 | Pending |
+| MANAGER-07 | Phase 13 | Pending |
+| MANAGER-08 | Phase 13 | Pending |
+| MANAGER-09 | Phase 13 | Pending |
+| MANAGER-10 | Phase 13 | Pending |
+| API-CLIENT-01 | Phase 14 | Pending |
+| API-CLIENT-02 | Phase 14 | Pending |
+| API-CLIENT-03 | Phase 14 | Pending |
+| API-CLIENT-04 | Phase 14 | Pending |
+| API-CLIENT-05 | Phase 14 | Pending |
+| API-CLIENT-06 | Phase 14 | Pending |
+| API-CLIENT-07 | Phase 14 | Pending |
+| API-CLIENT-08 | Phase 14 | Pending |
+| API-CLIENT-09 | Phase 14 | Pending |
+| API-CLIENT-10 | Phase 14 | Pending |
+| API-CLIENT-11 | Phase 14 | Pending |
+| API-ADMIN-01 | Phase 15 | Pending |
+| API-ADMIN-02 | Phase 15 | Pending |
+| API-ADMIN-03 | Phase 15 | Pending |
+| API-ADMIN-04 | Phase 15 | Pending |
+| API-ADMIN-05 | Phase 15 | Pending |
+| API-ADMIN-06 | Phase 15 | Pending |
+| API-ADMIN-07 | Phase 15 | Pending |
+| API-ADMIN-08 | Phase 15 | Pending |
+| API-ADMIN-09 | Phase 15 | Pending |
+| API-ADMIN-10 | Phase 15 | Pending |
+| API-ADMIN-11 | Phase 15 | Pending |
 
 **Coverage:**
 - v1 requirements: 116 total
-- Mapped to phases: 0 (not yet mapped)
-- Unmapped: 116 ⚠️
+- Mapped to phases: 116
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-01-15*
-*Last updated: 2026-01-15 after initial definition*
+*Last updated: 2026-01-15 after roadmap creation*
