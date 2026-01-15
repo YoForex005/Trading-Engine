@@ -1,12 +1,14 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	"github.com/epic1st/rtx/backend/internal/database/repository"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -143,11 +145,20 @@ type AccountSummary struct {
 // Engine is the B-Book execution engine
 type Engine struct {
 	mu             sync.RWMutex
+
+	// Repository layer (database persistence)
+	accountRepo  *repository.AccountRepository
+	positionRepo *repository.PositionRepository
+	orderRepo    *repository.OrderRepository
+	tradeRepo    *repository.TradeRepository
+
+	// In-memory caches for hot data (performance optimization)
 	accounts       map[int64]*Account
 	positions      map[int64]*Position
 	orders         map[int64]*Order
 	trades         []Trade
 	symbols        map[string]*SymbolSpec
+
 	nextPositionID int64
 	nextOrderID    int64
 	nextTradeID    int64
@@ -171,9 +182,21 @@ type SymbolSpec struct {
 	AvailableLPs     []string `json:"availableLPs"`
 }
 
-// NewEngine creates a new B-Book engine
-func NewEngine() *Engine {
+// NewEngine creates a new B-Book engine with repository dependencies
+func NewEngine(
+	accountRepo *repository.AccountRepository,
+	positionRepo *repository.PositionRepository,
+	orderRepo *repository.OrderRepository,
+	tradeRepo *repository.TradeRepository,
+) *Engine {
 	e := &Engine{
+		// Inject repositories
+		accountRepo:  accountRepo,
+		positionRepo: positionRepo,
+		orderRepo:    orderRepo,
+		tradeRepo:    tradeRepo,
+
+		// Initialize in-memory caches
 		accounts:       make(map[int64]*Account),
 		positions:      make(map[int64]*Position),
 		orders:         make(map[int64]*Order),
@@ -188,8 +211,55 @@ func NewEngine() *Engine {
 	// Initialize default symbols
 	e.initDefaultSymbols()
 
-	log.Println("[B-Book Engine] Initialized")
+	log.Println("[B-Book Engine] Initialized with database repositories")
 	return e
+}
+
+// LoadAccounts loads all accounts from database into cache on startup
+func (e *Engine) LoadAccounts(ctx context.Context) error {
+	if e.accountRepo == nil {
+		log.Println("[Engine] No account repository, skipping database load")
+		return nil
+	}
+
+	accounts, err := e.accountRepo.List(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load accounts from database: %w", err)
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Convert repository.Account to core.Account and cache
+	for _, repoAcc := range accounts {
+		acc := &Account{
+			ID:            repoAcc.ID,
+			AccountNumber: repoAcc.AccountNumber,
+			UserID:        repoAcc.UserID,
+			Username:      repoAcc.Username,
+			Password:      repoAcc.Password,
+			Balance:       repoAcc.Balance,
+			Equity:        repoAcc.Equity,
+			Margin:        repoAcc.Margin,
+			FreeMargin:    repoAcc.FreeMargin,
+			MarginLevel:   repoAcc.MarginLevel,
+			Leverage:      repoAcc.Leverage,
+			MarginMode:    repoAcc.MarginMode,
+			Currency:      repoAcc.Currency,
+			Status:        repoAcc.Status,
+			IsDemo:        repoAcc.IsDemo,
+			CreatedAt:     repoAcc.CreatedAt.Unix(),
+		}
+		e.accounts[acc.ID] = acc
+
+		// Update next ID counters
+		if acc.ID >= e.nextPositionID {
+			e.nextPositionID = acc.ID + 1
+		}
+	}
+
+	log.Printf("[Engine] Loaded %d accounts from database", len(accounts))
+	return nil
 }
 
 func (e *Engine) initDefaultSymbols() {
@@ -379,7 +449,37 @@ func (e *Engine) CreateAccount(userID, username, password string, isDemo bool) *
 		IsDemo:        isDemo,
 	}
 
-	e.accounts[id] = account
+	// Persist to database if repository is available
+	if e.accountRepo != nil {
+		repoAcc := &repository.Account{
+			AccountNumber: account.AccountNumber,
+			UserID:        account.UserID,
+			Username:      account.Username,
+			Password:      account.Password,
+			Balance:       account.Balance,
+			Equity:        0,
+			Margin:        0,
+			FreeMargin:    0,
+			MarginLevel:   0,
+			Leverage:      account.Leverage,
+			MarginMode:    account.MarginMode,
+			Currency:      account.Currency,
+			Status:        account.Status,
+			IsDemo:        account.IsDemo,
+		}
+
+		ctx := context.Background()
+		if err := e.accountRepo.Create(ctx, repoAcc); err != nil {
+			log.Printf("[ERROR] Failed to persist account to database: %v", err)
+			return nil
+		}
+
+		// Update ID from database
+		account.ID = repoAcc.ID
+		account.CreatedAt = repoAcc.CreatedAt.Unix()
+	}
+
+	e.accounts[account.ID] = account
 	log.Printf("[Account] Created account %s with bcrypt-hashed password (User: %s, Username: %s)", account.AccountNumber, userID, username)
 	return account
 }
