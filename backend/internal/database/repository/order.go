@@ -11,22 +11,26 @@ import (
 
 // Order matches bbook.Order structure
 type Order struct {
-	ID           int64
-	AccountID    int64
-	Symbol       string
-	Type         string
-	Side         string
-	Volume       float64
-	Price        float64
-	TriggerPrice float64
-	SL           float64
-	TP           float64
-	Status       string
-	FilledPrice  float64
-	FilledAt     *time.Time
-	PositionID   int64
-	RejectReason string
-	CreatedAt    time.Time
+	ID               int64
+	AccountID        int64
+	Symbol           string
+	Type             string
+	Side             string
+	Volume           float64
+	Price            float64
+	TriggerPrice     float64
+	SL               float64
+	TP               float64
+	Status           string
+	FilledPrice      float64
+	FilledAt         *time.Time
+	PositionID       int64
+	RejectReason     string
+	CreatedAt        time.Time
+	ParentPositionID *int64     // Links SL/TP to position (NULL for standalone)
+	TrailingDelta    *float64   // Distance for trailing stops (NULL for non-trailing)
+	ExpiryTime       *time.Time // Auto-cancel after this time (NULL for GTC)
+	OCOLinkID        *int64     // References another order for OCO (NULL if no link)
 }
 
 type OrderRepository struct {
@@ -42,14 +46,16 @@ func (r *OrderRepository) Create(ctx context.Context, ord *Order) error {
 	query := `
 		INSERT INTO orders (
 			account_id, symbol, type, side, volume, price, trigger_price,
-			sl, tp, status, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			sl, tp, status, created_at, parent_position_id, trailing_delta,
+			expiry_time, oco_link_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING id, created_at
 	`
 
 	err := r.pool.QueryRow(ctx, query,
 		ord.AccountID, ord.Symbol, ord.Type, ord.Side, ord.Volume,
 		ord.Price, ord.TriggerPrice, ord.SL, ord.TP, ord.Status, ord.CreatedAt,
+		ord.ParentPositionID, ord.TrailingDelta, ord.ExpiryTime, ord.OCOLinkID,
 	).Scan(&ord.ID, &ord.CreatedAt)
 
 	if err != nil {
@@ -62,7 +68,8 @@ func (r *OrderRepository) Create(ctx context.Context, ord *Order) error {
 func (r *OrderRepository) GetByID(ctx context.Context, id int64) (*Order, error) {
 	query := `
 		SELECT id, account_id, symbol, type, side, volume, price, trigger_price,
-		       sl, tp, status, filled_price, filled_at, position_id, reject_reason, created_at
+		       sl, tp, status, filled_price, filled_at, position_id, reject_reason, created_at,
+		       parent_position_id, trailing_delta, expiry_time, oco_link_id
 		FROM orders WHERE id = $1
 	`
 
@@ -71,6 +78,7 @@ func (r *OrderRepository) GetByID(ctx context.Context, id int64) (*Order, error)
 		&ord.ID, &ord.AccountID, &ord.Symbol, &ord.Type, &ord.Side, &ord.Volume,
 		&ord.Price, &ord.TriggerPrice, &ord.SL, &ord.TP, &ord.Status,
 		&ord.FilledPrice, &ord.FilledAt, &ord.PositionID, &ord.RejectReason, &ord.CreatedAt,
+		&ord.ParentPositionID, &ord.TrailingDelta, &ord.ExpiryTime, &ord.OCOLinkID,
 	)
 
 	if err == pgx.ErrNoRows {
@@ -86,7 +94,8 @@ func (r *OrderRepository) GetByID(ctx context.Context, id int64) (*Order, error)
 func (r *OrderRepository) ListByAccount(ctx context.Context, accountID int64) ([]*Order, error) {
 	query := `
 		SELECT id, account_id, symbol, type, side, volume, price, trigger_price,
-		       sl, tp, status, filled_price, filled_at, position_id, reject_reason, created_at
+		       sl, tp, status, filled_price, filled_at, position_id, reject_reason, created_at,
+		       parent_position_id, trailing_delta, expiry_time, oco_link_id
 		FROM orders
 		WHERE account_id = $1
 		ORDER BY created_at DESC
@@ -105,6 +114,7 @@ func (r *OrderRepository) ListByAccount(ctx context.Context, accountID int64) ([
 			&ord.ID, &ord.AccountID, &ord.Symbol, &ord.Type, &ord.Side, &ord.Volume,
 			&ord.Price, &ord.TriggerPrice, &ord.SL, &ord.TP, &ord.Status,
 			&ord.FilledPrice, &ord.FilledAt, &ord.PositionID, &ord.RejectReason, &ord.CreatedAt,
+			&ord.ParentPositionID, &ord.TrailingDelta, &ord.ExpiryTime, &ord.OCOLinkID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan order: %w", err)
@@ -159,6 +169,67 @@ func (r *OrderRepository) Delete(ctx context.Context, id int64) error {
 	result, err := r.pool.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete order: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("order not found: %d", id)
+	}
+
+	return nil
+}
+
+// ListPendingWithTriggers retrieves all pending orders that have trigger prices set
+// Used by OrderMonitor to check for price-triggered executions
+func (r *OrderRepository) ListPendingWithTriggers(ctx context.Context) ([]*Order, error) {
+	query := `
+		SELECT id, account_id, symbol, type, side, volume, price, trigger_price,
+		       sl, tp, status, filled_price, filled_at, position_id, reject_reason, created_at,
+		       parent_position_id, trailing_delta, expiry_time, oco_link_id
+		FROM orders
+		WHERE status = 'PENDING' AND trigger_price IS NOT NULL
+		ORDER BY created_at ASC
+	`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pending orders: %w", err)
+	}
+	defer rows.Close()
+
+	var orders []*Order
+	for rows.Next() {
+		var ord Order
+		err := rows.Scan(
+			&ord.ID, &ord.AccountID, &ord.Symbol, &ord.Type, &ord.Side, &ord.Volume,
+			&ord.Price, &ord.TriggerPrice, &ord.SL, &ord.TP, &ord.Status,
+			&ord.FilledPrice, &ord.FilledAt, &ord.PositionID, &ord.RejectReason, &ord.CreatedAt,
+			&ord.ParentPositionID, &ord.TrailingDelta, &ord.ExpiryTime, &ord.OCOLinkID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan order: %w", err)
+		}
+		orders = append(orders, &ord)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating orders: %w", err)
+	}
+
+	return orders, nil
+}
+
+// UpdateTriggerPrice updates the trigger price for a trailing stop order
+// Used by OrderMonitor to adjust trailing stops as market moves favorably
+func (r *OrderRepository) UpdateTriggerPrice(ctx context.Context, id int64, newTriggerPrice float64) error {
+	query := `
+		UPDATE orders
+		SET trigger_price = $1
+		WHERE id = $2
+	`
+
+	result, err := r.pool.Exec(ctx, query, newTriggerPrice, id)
+	if err != nil {
+		return fmt.Errorf("failed to update trigger price: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {
