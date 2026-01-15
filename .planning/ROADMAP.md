@@ -78,11 +78,18 @@ Plans:
   5. Frontend tests cover critical components
   6. End-to-end tests verify order flow
   7. Load tests validate platform handles concurrent users
-**Research**: Unlikely (testing patterns well-established for Go and React)
-**Plans**: TBD
+**Research**: Completed (03-RESEARCH.md)
+**Research topics**: Go testing best practices, WebSocket testing, load testing tools, financial calculations
+**Plans**: 7 plans ready for execution
 
 Plans:
-- [ ] TBD (to be planned)
+- [ ] 03-01-PLAN.md — Backend Test Infrastructure (Wave 1)
+- [ ] 03-02-PLAN.md — Frontend Test Infrastructure (Wave 1)
+- [ ] 03-03-PLAN.md — Core Engine Unit Tests (Wave 2)
+- [ ] 03-04-PLAN.md — Frontend Component Tests (Wave 2)
+- [ ] 03-05-PLAN.md — LP Manager & WebSocket Integration Tests (Wave 3)
+- [ ] 03-06-PLAN.md — End-to-End Tests (Wave 3)
+- [ ] 03-07-PLAN.md — Load Testing Infrastructure (Wave 4)
 
 ### Phase 4: Deployment & Operations
 **Goal**: Platform deployable to production with automated CI/CD, monitoring, and operational visibility
