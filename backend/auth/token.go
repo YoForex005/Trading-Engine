@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"log"
 	"os"
 	"time"
 
@@ -9,14 +10,15 @@ import (
 
 var jwtKey = []byte(os.Getenv("JWT_SECRET"))
 
+// init validates JWT_SECRET is set and cryptographically secure
 func init() {
 	if len(jwtKey) == 0 {
-		// Fallback for development only - strictly speaking this violates "No hidden randomness/globals"
-		// but we need a default if env is missing to run at all.
-		// "Determinism Rule" says assume explicit.
-		// Ideally we panic if missing in prod.
-		jwtKey = []byte("super_secret_dev_key_do_not_use_in_prod")
+		log.Fatal("[CRITICAL] JWT_SECRET environment variable not set. Generate with: openssl rand -base64 32")
 	}
+	if len(jwtKey) < 32 {
+		log.Fatal("[CRITICAL] JWT_SECRET too short (minimum 32 bytes required)")
+	}
+	log.Printf("[Auth] JWT secret loaded (%d bytes)", len(jwtKey))
 }
 
 type Claims struct {
