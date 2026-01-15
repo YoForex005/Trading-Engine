@@ -130,3 +130,47 @@ FOR EACH ROW EXECUTE FUNCTION audit.if_modified_func('t');
 -- Audit trail would duplicate data with no value
 
 COMMIT;
+
+-- ============================================================================
+-- EXAMPLE AUDIT QUERIES
+-- ============================================================================
+-- These queries demonstrate how to use the audit trail for compliance,
+-- debugging, and forensic analysis.
+
+-- 1. View all changes to a specific account
+-- SELECT
+--     event_id,
+--     action,
+--     action_tstamp_tx,
+--     session_user_name,
+--     row_data,
+--     changed_fields
+-- FROM audit.logged_actions
+-- WHERE table_name = 'accounts'
+--   AND (row_data->>'id')::BIGINT = 12345
+-- ORDER BY action_tstamp_tx DESC;
+
+-- 2. View all balance changes
+-- SELECT
+--     event_id,
+--     action_tstamp_tx,
+--     (row_data->>'account_number') AS account,
+--     (row_data->>'balance')::NUMERIC AS old_balance,
+--     (changed_fields->>'balance')::NUMERIC AS new_balance
+-- FROM audit.logged_actions
+-- WHERE table_name = 'accounts'
+--   AND action = 'U'
+--   AND changed_fields ? 'balance'
+-- ORDER BY action_tstamp_tx DESC;
+
+-- 3. Audit trail for compliance report (all financial changes in date range)
+-- SELECT
+--     table_name,
+--     action,
+--     action_tstamp_tx,
+--     session_user_name,
+--     row_data
+-- FROM audit.logged_actions
+-- WHERE table_name IN ('accounts', 'positions', 'orders')
+--   AND action_tstamp_tx BETWEEN '2024-01-01' AND '2024-12-31'
+-- ORDER BY action_tstamp_tx DESC;
