@@ -1,4 +1,4 @@
-import { Component, ErrorInfo, ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 interface Props {
     children?: ReactNode;
@@ -24,6 +24,10 @@ export class ErrorBoundary extends Component<Props, State> {
         console.error("Uncaught error:", error, errorInfo);
     }
 
+    private handleReload = () => {
+        window.location.reload();
+    };
+
     public render() {
         if (this.state.hasError) {
             if (this.props.fallback) {
@@ -32,9 +36,15 @@ export class ErrorBoundary extends Component<Props, State> {
             return (
                 <div className="flex flex-col items-center justify-center p-4 bg-zinc-900 text-red-500 rounded border border-red-500/20">
                     <h2 className="text-lg font-bold mb-2">Something went wrong</h2>
-                    <pre className="text-xs bg-black/50 p-2 rounded max-w-full overflow-auto">
+                    <pre className="text-xs bg-black/50 p-2 rounded max-w-full overflow-auto mb-4">
                         {this.state.error?.message}
                     </pre>
+                    <button
+                        onClick={this.handleReload}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
+                    >
+                        Reload Page
+                    </button>
                 </div>
             );
         }
