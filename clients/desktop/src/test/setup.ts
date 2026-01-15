@@ -100,12 +100,22 @@ globalThis.ResizeObserver = class ResizeObserver {
 type MockWebSocketEventHandler = (event?: any) => void;
 
 class MockWebSocket {
+  static lastInstance: MockWebSocket | null = null;
+
   url: string;
   readyState: number = 0; // CONNECTING
   private handlers: Map<string, MockWebSocketEventHandler[]> = new Map();
 
+  // Property-based event handlers (used by useWebSocket hook)
+  onopen: MockWebSocketEventHandler | null = null;
+  onmessage: MockWebSocketEventHandler | null = null;
+  onclose: MockWebSocketEventHandler | null = null;
+  onerror: MockWebSocketEventHandler | null = null;
+
   constructor(url: string) {
     this.url = url;
+    MockWebSocket.lastInstance = this;
+
     // Simulate async connection
     setTimeout(() => {
       this.readyState = 1; // OPEN
@@ -140,6 +150,13 @@ class MockWebSocket {
   }
 
   private triggerEvent(event: string, data?: any) {
+    // Trigger property-based handler
+    const propertyHandler = this[`on${event}` as keyof MockWebSocket] as MockWebSocketEventHandler | null;
+    if (propertyHandler) {
+      propertyHandler(data);
+    }
+
+    // Trigger addEventListener handlers
     const eventHandlers = this.handlers.get(event);
     if (eventHandlers) {
       eventHandlers.forEach((handler) => handler(data));
