@@ -110,4 +110,23 @@ Example:
     FOR EACH ROW EXECUTE FUNCTION audit.if_modified_func('t', '{updated_at}');
 $body$;
 
+-- Attach audit triggers to accounts table
+CREATE TRIGGER accounts_audit_trigger
+AFTER INSERT OR UPDATE OR DELETE ON accounts
+FOR EACH ROW EXECUTE FUNCTION audit.if_modified_func('t', '{updated_at}');
+
+-- Attach audit triggers to positions table
+CREATE TRIGGER positions_audit_trigger
+AFTER INSERT OR UPDATE OR DELETE ON positions
+FOR EACH ROW EXECUTE FUNCTION audit.if_modified_func('t', '{updated_at}');
+
+-- Attach audit triggers to orders table
+CREATE TRIGGER orders_audit_trigger
+AFTER INSERT OR UPDATE OR DELETE ON orders
+FOR EACH ROW EXECUTE FUNCTION audit.if_modified_func('t');
+
+-- DO NOT attach trigger to trades table
+-- Trades are immutable (insert-only), no updates or deletes allowed
+-- Audit trail would duplicate data with no value
+
 COMMIT;
