@@ -113,7 +113,7 @@ class MockWebSocket {
     }, 0);
   }
 
-  send(data: string) {
+  send(_data: string) {
     // Mock implementation - stores sent data for verification in tests
   }
 
