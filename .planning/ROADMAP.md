@@ -15,7 +15,7 @@ Transform the existing Trading Engine into a complete, production-ready broker p
 - [ ] **Phase 3: Testing Infrastructure** - Establish comprehensive test coverage
 - [x] **Phase 4: Deployment & Operations** - Production deployment with CI/CD and monitoring
 - [x] **Phase 5: Advanced Order Types** - Complete order management system
-- [ ] **Phase 6: Risk Management** - Margin and risk controls
+- [x] **Phase 6: Risk Management** - Margin and risk controls
 - [ ] **Phase 7: Multi-Asset Support** - Multiple asset classes beyond FX/crypto
 - [ ] **Phase 8: Client Trading Terminal** - Desktop executable for traders
 - [ ] **Phase 9: User & Account Management** - Complete user lifecycle operations
@@ -405,8 +405,8 @@ Phases execute in numeric order: 1 → 2 → 3 → ... → 16
 | 2. Database Migration | 4/4 | ✅ Complete | 2026-01-16 |
 | 3. Testing Infrastructure | 3/7 | In progress | - |
 | 4. Deployment & Operations | 8/8 | ✅ Complete | 2026-01-16 |
-| 5. Advanced Order Types | 1/4 | In progress | - |
-| 6. Risk Management | 7/7 | ⚠️ Gaps found | - |
+| 5. Advanced Order Types | 4/4 | ✅ Complete | 2026-01-16 |
+| 6. Risk Management | 7/7 | ✅ Complete | 2026-01-16 |
 | 7. Multi-Asset Support | 0/TBD | Not started | - |
 | 8. Client Trading Terminal | 0/TBD | Not started | - |
 | 9. User & Account Management | 0/TBD | Not started | - |
