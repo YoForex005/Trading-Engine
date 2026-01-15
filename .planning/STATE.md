@@ -5,22 +5,22 @@
 See: .planning/PROJECT.md (updated 2026-01-15)
 
 **Core value:** Brokers can launch and operate a complete trading business rivaling MT5 in capability, with professional client trading tools and comprehensive broker management systems.
-**Current focus:** Phase 5 — Advanced Order Types (In Progress)
+**Current focus:** Phase 6 — Risk Management (In Progress)
 
 ## Current Position
 
 Phase: 6 of 15 (Risk Management)
 Plan: 4 of 6 in current phase (06-01, 06-02, 06-03, 06-04 complete)
 Status: In Progress
-Last activity: 2026-01-16 — Completed 06-04-PLAN.md (Pre-Trade Risk Validation)
+Last activity: 2026-01-16 — Completed 05-04-PLAN.md (OCO, Modification, Expiry)
 
-Progress: ▓▓▓░░░░░░░ 28% (5/15 phases, 23/total plans)
+Progress: ▓▓▓▓░░░░░░ 33% (5/15 phases complete, 27/total plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 22
-- Average duration: ~35 min per plan
+- Total plans completed: 27
+- Average duration: ~37 min per plan
 - Total execution time: 1 day (2026-01-16)
 
 **By Phase:**
@@ -31,12 +31,12 @@ Progress: ▓▓▓░░░░░░░ 28% (5/15 phases, 23/total plans)
 | 2. Database Migration | 4/4 | ~3 hours | ~45 min |
 | 3. Testing Infrastructure | 3/7 | ~90 min | ~30 min |
 | 4. Deployment Operations | 8/8 | ~2.3 hours | ~17 min |
-| 5. Advanced Order Types | 2/4 | ~90 min | ~45 min |
-| 6. Risk Management | 3/6 | ~115 min | ~38 min |
+| 5. Advanced Order Types | 4/4 | ~180 min | ~45 min |
+| 6. Risk Management | 4/6 | ~160 min | ~40 min |
 **Recent Trend:**
-- Last 22 plans: Phase 4 complete with documentation, Phase 3 partial, Phase 5 partial, Phase 6 in progress (22/22 plans)
-- Trend: Excellent execution velocity, Phase 4 fully documented (3,148 lines)
-- Trend: Deployment documentation provides comprehensive operations runbook with troubleshooting
+- Last 27 plans: Phase 4 complete, Phase 3 partial, Phase 5 complete, Phase 6 in progress (27/27 plans)
+- Trend: Excellent execution velocity, Phase 5 advanced orders complete
+- Trend: Pre-trade validation prevents ESMA violations (margin call prevention)
 ## Accumulated Context
 
 ### Decisions
@@ -90,8 +90,16 @@ Recent decisions affecting current work:
 | 05-03 | Validate trigger price at order creation time | Prevents traders from placing impossible orders (e.g., BUY_LIMIT above market) |
 | 05-03 | Separate order types instead of type+side combination | Using BUY_LIMIT vs LIMIT+BUY makes validation clearer and reduces ambiguity |
 | 06-03 | Panic on decimal arithmetic overflow | Financial calculations shouldn't silently fail - overflow is a programming error requiring immediate attention |
+| 06-04 | Pre-trade validation prevents order execution | Orders rejected BEFORE execution if margin/position limits breached - ESMA regulatory requirement |
+| 06-04 | Projected margin level validation (not just free margin) | Check (equity / projected_used_margin) prevents margin level dropping below threshold |
+| 06-04 | Graceful repository fallback in validation | If repositories not initialized, fallback to old margin check - ensures backward compatibility |
 | 06-03 | Event-driven margin calculation (not periodic) | Calculate on every position change per ESMA requirements - prevents negative balance scenarios |
 | 06-03 | Optional repository injection in bbook.Engine | Maintains backward compatibility with tests while enabling real-time margin updates in production |
+| 05-04 | OCO creates bidirectional links | Both orders point to each other via oco_link_id for automatic cancellation when either fills |
+| 05-04 | Filling one OCO order cancels the linked order | CancelOCOLinkedOrder() called after executePositionClose() and executePositionOpen() |
+| 05-04 | Order modification validates trigger price | ModifyOrder() validates trigger price changes against current market to prevent invalid orders |
+| 05-04 | Expiry checking runs before trigger checking | checkOrderExpiry() runs BEFORE checkPriceTriggers() to prevent expired orders from triggering |
+| 05-04 | Expired orders cancelled with 'Expired' reject reason | Auto-cancellation tracks expiry vs manual cancellation for analytics |
 
 ### Pending Todos
 
@@ -104,7 +112,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-16
-Stopped at: Completed 06-03-PLAN.md (Real-Time Margin Calculation Engine)
+Stopped at: Completed 05-04-PLAN.md (OCO, Modification, and Expiry)
 Resume file: None
 
 ## Phase 1 Completion Summary
@@ -199,3 +207,36 @@ All 8 plans executed successfully:
 - Operations runbook with troubleshooting, security checklist (28 items), and incident response procedures
 
 **Ready for:** Phase 5 - Advanced Order Types
+
+## Phase 5 Completion Summary
+
+**Phase 5: Advanced Order Types** ✅ Complete (2026-01-16)
+
+All 4 plans executed successfully:
+1. ✅ Stop-Loss and Take-Profit Orders (05-01)
+2. ✅ Trailing Stop Orders (05-02)
+3. ✅ Pending Order Types (05-03)
+4. ✅ OCO, Modification, and Expiry (05-04)
+
+**Success Criteria Verification:**
+- ✅ Traders can place stop-loss and take-profit orders
+- ✅ Trailing stops adjust with favorable price movement
+- ✅ Pending orders (BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP) trigger at specified price
+- ✅ OCO order linking cancels linked order when one fills
+- ✅ Traders can modify pending order parameters
+- ✅ Orders expire automatically at specified time
+
+**Key Achievements:**
+- Complete advanced order management system
+- SL/TP orders with database persistence (parent_position_id linking)
+- Trailing stop orders that adjust trigger price automatically
+- Four pending order types with market validation
+- One-Cancels-Other linking with bidirectional relationships
+- Order modification API with trigger price validation
+- Time-based order expiration with automatic cancellation
+- OrderMonitor service with 100ms tick interval for real-time monitoring
+- Complete UI for all order management features (entry, modification, OCO)
+
+**Verification:** All must-haves verified in 05-04-SUMMARY.md
+
+**Ready for:** Phase 6 - Risk Management (in progress)
