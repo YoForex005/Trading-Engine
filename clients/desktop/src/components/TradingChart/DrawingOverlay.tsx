@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { Drawing, Point } from './types';
-import { Trash2 } from 'lucide-react';
 
 interface DrawingOverlayProps {
     chart: IChartApi | null;
@@ -24,12 +23,12 @@ export function DrawingOverlay({
     symbol,
     accountId,
     onUpdateDrawing,
-    onDeleteDrawing,
+    // onDeleteDrawing, // TODO: Implement delete functionality
     onFinishDrawing,
     containerRef
 }: DrawingOverlayProps) {
     const [activeDrawing, setActiveDrawing] = useState<Drawing | null>(null);
-    const [hoveredDrawingId, setHoveredDrawingId] = useState<string | null>(null);
+    const [hoveredDrawingId] = useState<string | null>(null);
     const [mousePos, setMousePos] = useState<{ x: number, y: number } | null>(null);
 
     // Coordinate conversion helpers

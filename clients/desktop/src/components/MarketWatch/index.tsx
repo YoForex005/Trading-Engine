@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Search, Filter, Star, MoreHorizontal } from 'lucide-react';
+import { Search, Star } from 'lucide-react';
 import { MarketWatchRow } from './MarketWatchRow';
 import { getSymbolCategory } from './utils';
-import { Check, X } from 'lucide-react'; // For Context Menu icons if needed
 
 interface Tick {
     symbol: string;

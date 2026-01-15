@@ -65,9 +65,9 @@ function App() {
     const saved = localStorage.getItem('dockHeight');
     return saved ? parseInt(saved, 10) : 250;
   });
-  const [accountId, setAccountId] = useState<string>("1");
-  const [tradeHistory, setTradeHistory] = useState<any[]>([]);
-  const [ledger, setLedger] = useState<any[]>([]);
+  const [accountId] = useState<string>("1");
+  const [, setTradeHistory] = useState<any[]>([]);
+  const [, setLedger] = useState<any[]>([]);
   const [wsStatus, setWsStatus] = useState<string>('DISCONNECTED');
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -125,10 +125,11 @@ function App() {
     return () => clearInterval(interval);
   }, [isAuthenticated, accountId]);
 
-  const handleLogin = (id: string) => {
-    setAccountId(id);
-    setIsAuthenticated(true);
-  };
+  // Login handler for future authentication UI
+  // const handleLogin = (id: string) => {
+  //   setAccountId(id);
+  //   setIsAuthenticated(true);
+  // };
 
   // Tick buffer for throttled updates (prevents UI lag)
   const tickBuffer = useRef<Record<string, Tick>>({});

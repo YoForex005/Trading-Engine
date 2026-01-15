@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { ArrowUpDown, MoreHorizontal, TrendingUp, TrendingDown, Info, BarChart2 } from 'lucide-react';
+import React from 'react';
 import { Sparkline } from './Sparkline';
 
 interface Tick {
