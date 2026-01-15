@@ -1,3 +1,11 @@
+// Package bbook - persistence.go
+// DEPRECATED: This file implements JSON file-based persistence.
+// As of Phase 2 (Database Migration - Plan 02-03), all persistence is handled by the repository layer.
+// This code is kept for reference but should not be used in production.
+//
+// See: backend/internal/database/repository/
+// Migration: backend/internal/migration/migrate_data.go
+
 package bbook
 
 import (
@@ -13,15 +21,14 @@ const dataDir = "./data/bbook"
 
 // PersistenceData holds all data to be persisted
 type PersistenceData struct {
-	Accounts       map[int64]*Account   `json:"accounts"`
-	Positions      map[int64]*Position  `json:"positions"`
-	Orders         map[int64]*Order     `json:"orders"`
-	Trades         []Trade              `json:"trades"`
-	NextPositionID int64                `json:"nextPositionId"`
-	NextOrderID    int64                `json:"nextOrderId"`
-	NextTradeID    int64                `json:"nextTradeId"`
-	Drawings       map[int64][]*Drawing `json:"drawings"`
-	SavedAt        time.Time            `json:"savedAt"`
+	Accounts       map[int64]*Account  `json:"accounts"`
+	Positions      map[int64]*Position `json:"positions"`
+	Orders         map[int64]*Order    `json:"orders"`
+	Trades         []Trade             `json:"trades"`
+	NextPositionID int64               `json:"nextPositionId"`
+	NextOrderID    int64               `json:"nextOrderId"`
+	NextTradeID    int64               `json:"nextTradeId"`
+	SavedAt        time.Time           `json:"savedAt"`
 }
 
 // Save persists engine state to disk
@@ -37,7 +44,6 @@ func (e *Engine) Save() error {
 		NextPositionID: e.nextPositionID,
 		NextOrderID:    e.nextOrderID,
 		NextTradeID:    e.nextTradeID,
-		Drawings:       e.drawings,
 		SavedAt:        time.Now(),
 	}
 
@@ -94,7 +100,6 @@ func (e *Engine) Load() error {
 	e.nextPositionID = data.NextPositionID
 	e.nextOrderID = data.NextOrderID
 	e.nextTradeID = data.NextTradeID
-	e.drawings = data.Drawings
 
 	// Initialize nil maps
 	if e.accounts == nil {
@@ -108,9 +113,6 @@ func (e *Engine) Load() error {
 	}
 	if e.trades == nil {
 		e.trades = make([]Trade, 0)
-	}
-	if e.drawings == nil {
-		e.drawings = make(map[int64][]*Drawing)
 	}
 
 	log.Printf("[B-Book] State loaded: %d accounts, %d positions, %d trades (saved at %s)",
