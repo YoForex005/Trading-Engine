@@ -46,6 +46,21 @@ var brokerConfig = BrokerConfig{
 var executionMode = "BBOOK"
 
 func main() {
+	// Load .env file (ignore error in production where env vars are set directly)
+	_ = godotenv.Load()
+
+	// Load OANDA credentials from environment
+	oandaAPIKey := os.Getenv("OANDA_API_KEY")
+	oandaAccountID := os.Getenv("OANDA_ACCOUNT_ID")
+
+	// Validate critical credentials
+	if oandaAPIKey == "" {
+		log.Println("[WARN] OANDA_API_KEY not set - OANDA adapter will fail to connect")
+	}
+	if oandaAccountID == "" {
+		log.Println("[WARN] OANDA_ACCOUNT_ID not set - OANDA adapter will fail to connect")
+	}
+
 	log.Println("╔═══════════════════════════════════════════════════════════╗")
 	log.Printf("║          %s - Backend v3.0                ║", brokerConfig.BrokerName)
 	log.Printf("║        %s Mode + %s LP                 ║", brokerConfig.ExecutionMode, brokerConfig.PriceFeedLP)
@@ -101,7 +116,12 @@ func main() {
 
 	// Register Adapters
 	lpMgr.RegisterAdapter(adapters.NewBinanceAdapter())
-	lpMgr.RegisterAdapter(adapters.NewOANDAAdapter(OANDA_API_KEY, OANDA_ACCOUNT_ID))
+	if oandaAPIKey != "" && oandaAccountID != "" {
+		lpMgr.RegisterAdapter(adapters.NewOANDAAdapter(oandaAPIKey, oandaAccountID))
+		log.Println("[LP Manager] OANDA adapter registered")
+	} else {
+		log.Println("[LP Manager] OANDA adapter skipped (credentials not configured)")
+	}
 	lpMgr.RegisterAdapter(adapters.NewFlexyAdapter())
 
 	// Load Config
