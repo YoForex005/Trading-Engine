@@ -152,12 +152,18 @@ Plans:
   8. Maximum drawdown protection stops trading when limit hit
   9. Daily loss limits enforced
   10. Leverage controls applied per symbol and account group
-**Research**: Likely (margin calculation formulas, industry standard thresholds)
+**Research**: Completed (06-RESEARCH.md)
 **Research topics**: Margin calculation for different asset classes, stop-out best practices, risk management standards
-**Plans**: TBD
+**Plans**: 7 plans ready for execution
 
 Plans:
-- [ ] TBD (to be planned)
+- [ ] 06-01-PLAN.md — PostgreSQL Schema & Repositories (Wave 1)
+- [ ] 06-02-PLAN.md — Decimal Precision Integration (Wave 1)
+- [ ] 06-03-PLAN.md — Real-Time Margin Calculation Engine (Wave 2)
+- [ ] 06-04-PLAN.md — Pre-Trade Risk Validation (Wave 2)
+- [ ] 06-05-PLAN.md — Automatic Stop-Out Liquidation (Wave 3)
+- [ ] 06-06-PLAN.md — Position & Leverage Limits (Wave 3)
+- [ ] 06-07-PLAN.md — Daily Loss & Drawdown Protection (Wave 4)
 
 ### Phase 7: Multi-Asset Support
 **Goal**: Platform supports trading across all major asset classes (FX, crypto, stocks, commodities, indices, CFDs)
