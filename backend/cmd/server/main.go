@@ -17,7 +17,6 @@ import (
 	"github.com/epic1st/rtx/backend/lpmanager/adapters"
 	"github.com/epic1st/rtx/backend/tickstore"
 	"github.com/epic1st/rtx/backend/ws"
-	"github.com/joho/godotenv"
 )
 
 type BrokerConfig struct {
@@ -46,8 +45,6 @@ var brokerConfig = BrokerConfig{
 var executionMode = "BBOOK"
 
 func main() {
-	// Load .env file (ignore error in production where env vars are set directly)
-	_ = godotenv.Load()
 
 	// Load OANDA credentials from environment
 	oandaAPIKey := os.Getenv("OANDA_API_KEY")

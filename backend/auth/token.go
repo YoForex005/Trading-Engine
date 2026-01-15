@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	_ "github.com/epic1st/rtx/backend/config" // Load .env before reading JWT_SECRET
 	"github.com/golang-jwt/jwt/v5"
 )
 
