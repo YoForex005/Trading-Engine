@@ -27,7 +27,7 @@ export function PendingOrdersPanel({ symbol }: PendingOrdersPanelProps) {
     useEffect(() => {
         const fetchOrders = async () => {
             try {
-                const res = await fetch('http://localhost:8080/orders/pending');
+                const res = await fetch('http://localhost:8080/api/orders?status=PENDING');
                 if (res.ok) {
                     const data = await res.json();
                     setOrders(data || []);
@@ -45,10 +45,8 @@ export function PendingOrdersPanel({ symbol }: PendingOrdersPanelProps) {
     const handleCancel = async (orderId: string) => {
         setLoading(true);
         try {
-            await fetch('http://localhost:8080/order/cancel', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orderId }),
+            await fetch(`http://localhost:8080/api/orders/cancel?id=${orderId}`, {
+                method: 'DELETE',
             });
             setOrders(orders.filter(o => o.id !== orderId));
         } catch (err) {
@@ -81,7 +79,7 @@ export function PendingOrdersPanel({ symbol }: PendingOrdersPanelProps) {
                         <div className="flex items-center gap-2">
                             <span className={`text-xs font-semibold ${order.side === 'BUY' ? 'text-emerald-400' : 'text-red-400'
                                 }`}>
-                                {order.subtype}
+                                {order.type}
                             </span>
                             <span className="text-xs text-zinc-400">{order.symbol}</span>
                         </div>
