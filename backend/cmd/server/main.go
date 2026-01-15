@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -16,12 +17,15 @@ import (
 	"github.com/epic1st/rtx/backend/internal/core"
 	"github.com/epic1st/rtx/backend/internal/database"
 	"github.com/epic1st/rtx/backend/internal/database/repository"
+	"github.com/epic1st/rtx/backend/internal/health"
+	"github.com/epic1st/rtx/backend/internal/logging"
 	"github.com/epic1st/rtx/backend/internal/migration"
 	"github.com/epic1st/rtx/backend/lpmanager"
 	"github.com/epic1st/rtx/backend/lpmanager/adapters"
 	"github.com/epic1st/rtx/backend/tickstore"
 	"github.com/epic1st/rtx/backend/ws"
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type BrokerConfig struct {
@@ -52,9 +56,13 @@ var executionMode = "BBOOK"
 func main() {
 	ctx := context.Background()
 
+	// Initialize structured JSON logging
+	logger := logging.NewLogger()
+	slog.SetDefault(logger)
+
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
-		log.Println("[WARN] No .env file found, using environment variables")
+		slog.Warn("No .env file found, using environment variables")
 	}
 
 	// Load OANDA credentials from environment
@@ -277,7 +285,12 @@ func main() {
 	// REGISTER API ROUTES
 	// ============================================
 
-	// Health
+	// Observability endpoints
+	http.HandleFunc("/health/live", health.LivenessHandler)
+	http.HandleFunc("/health/ready", health.ReadinessHandler(pool))
+	http.Handle("/metrics", promhttp.Handler())
+
+	// Health (legacy - keep for backward compatibility)
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -377,6 +390,7 @@ func main() {
 
 	// Position Management
 	http.HandleFunc("/api/positions/modify", apiHandler.HandleModifyPosition)
+	http.HandleFunc("/api/positions/sl-tp", apiHandler.HandleSetPositionSLTP) // New: Set SL/TP orders
 
 	// ===== ADMIN ENDPOINTS =====
 	// For deposit/withdraw/adjust (Super	// Admin Endpoints
@@ -563,12 +577,28 @@ func main() {
 		ws.ServeWs(hub, w, r)
 	})
 
+	slog.Info("server ready", "mode", "B-BOOK")
+	slog.Info("http api", "url", "http://localhost:8080")
+	slog.Info("websocket", "url", "ws://localhost:8080/ws")
+	slog.Info("observability endpoints ready",
+		"metrics", "http://localhost:8080/metrics",
+		"liveness", "http://localhost:8080/health/live",
+		"readiness", "http://localhost:8080/health/ready")
+	slog.Info("demo account created",
+		"account_number", demoAccount.AccountNumber,
+		"balance", brokerConfig.DefaultBalance)
+
 	log.Println("")
 	log.Println("═══════════════════════════════════════════════════════════")
 	log.Println("  SERVER READY - B-BOOK TRADING ENGINE")
 	log.Println("═══════════════════════════════════════════════════════════")
 	log.Println("  HTTP API:    http://localhost:8080")
 	log.Println("  WebSocket:   ws://localhost:8080/ws")
+	log.Println("")
+	log.Println("  OBSERVABILITY:")
+	log.Println("    GET  /metrics               - Prometheus Metrics")
+	log.Println("    GET  /health/live           - Liveness Probe")
+	log.Println("    GET  /health/ready          - Readiness Probe")
 	log.Println("")
 	log.Println("  B-BOOK API (RTX Internal Balance):")
 	log.Println("    GET  /api/account/summary   - RTX Balance/Equity/Margin")
