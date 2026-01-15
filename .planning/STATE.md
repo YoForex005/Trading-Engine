@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-01-15)
 ## Current Position
 
 Phase: 3 of 15 (Testing Infrastructure)
-Plan: 2 of 7 in current phase
+Plan: 3 of 7 in current phase
 Status: In progress
-Last activity: 2026-01-16 — Completed 03-01-PLAN.md (Backend Testing Foundation)
+Last activity: 2026-01-16 — Completed 03-03-PLAN.md (Core Engine Unit Tests)
 
-Progress: ▓▓░░░░░░░░ 13.3% (2/15 phases, 9/15 plans)
+Progress: ▓▓░░░░░░░░ 20.0% (3/15 phases, 10/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
+- Total plans completed: 10
 - Average duration: ~30 min per plan
 - Total execution time: 1 day (2026-01-16)
 
@@ -29,12 +29,12 @@ Progress: ▓▓░░░░░░░░ 13.3% (2/15 phases, 9/15 plans)
 |-------|-------|-------|----------|
 | 1. Security & Configuration | 3/3 | 1 day | ~8 hours |
 | 2. Database Migration | 4/4 | ~3 hours | ~45 min |
-| 3. Testing Infrastructure | 2/7 | ~30 min | ~15 min |
+| 3. Testing Infrastructure | 3/7 | ~90 min | ~30 min |
 
 **Recent Trend:**
-- Last 9 plans: Phase 1-2 complete, Phase 3 in progress (9/9 plans)
-- Trend: Strong execution velocity, maintaining ~15 min per plan in Phase 3
-- Trend: Consistent autonomous execution, improving velocity
+- Last 10 plans: Phase 1-2 complete, Phase 3 in progress (10/10 plans)
+- Trend: Strong execution velocity, maintaining ~30 min per plan in Phase 3
+- Trend: Consistent autonomous execution, high quality tests
 
 ## Accumulated Context
 
@@ -63,6 +63,9 @@ Recent decisions affecting current work:
 | 03-02 | Mock WebSocket for testing | Prevents actual connections during tests, includes simulateMessage helper for controlled testing |
 | 03-02 | Reusable mock data generators | createMock* functions provide consistent test data for OHLC, ticks, and accounts |
 | 03-02 | Type-only imports for TypeScript types | Required for verbatimModuleSyntax compatibility |
+| 03-03 | Used float64 for tests matching current codebase | Tests written for actual implementation, decimal migration deferred |
+| 03-03 | Repository tests skip pending database setup | Full integration tests with actual database in Plan 03-05 |
+| 03-03 | All tests use table-driven pattern with t.Parallel() | Go idiom for concurrent test execution and maintainability |
 
 ### Pending Todos
 
@@ -75,7 +78,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-16
-Stopped at: Completed 03-01-PLAN.md (Backend Testing Foundation)
+Stopped at: Completed 03-03-PLAN.md (Core Engine Unit Tests)
 Resume file: None
 
 ## Phase 1 Completion Summary
