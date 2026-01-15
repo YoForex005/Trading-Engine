@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -13,10 +14,14 @@ import (
 	"github.com/epic1st/rtx/backend/auth"
 	"github.com/epic1st/rtx/backend/internal/api/handlers"
 	"github.com/epic1st/rtx/backend/internal/core"
+	"github.com/epic1st/rtx/backend/internal/database"
+	"github.com/epic1st/rtx/backend/internal/database/repository"
+	"github.com/epic1st/rtx/backend/internal/migration"
 	"github.com/epic1st/rtx/backend/lpmanager"
 	"github.com/epic1st/rtx/backend/lpmanager/adapters"
 	"github.com/epic1st/rtx/backend/tickstore"
 	"github.com/epic1st/rtx/backend/ws"
+	"github.com/joho/godotenv"
 )
 
 type BrokerConfig struct {
@@ -45,6 +50,12 @@ var brokerConfig = BrokerConfig{
 var executionMode = "BBOOK"
 
 func main() {
+	ctx := context.Background()
+
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("[WARN] No .env file found, using environment variables")
+	}
 
 	// Load OANDA credentials from environment
 	oandaAPIKey := os.Getenv("OANDA_API_KEY")
@@ -63,11 +74,43 @@ func main() {
 	log.Printf("║        %s Mode + %s LP                 ║", brokerConfig.ExecutionMode, brokerConfig.PriceFeedLP)
 	log.Println("╚═══════════════════════════════════════════════════════════╝")
 
+	// 1. Initialize database connection pool
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL environment variable required")
+	}
+
+	if err := database.InitPool(ctx, dbURL); err != nil {
+		log.Fatalf("Failed to initialize database pool: %v", err)
+	}
+	defer database.Close()
+
+	pool := database.GetPool()
+	log.Println("Database connection pool initialized")
+
+	// 2. Create repositories
+	accountRepo := repository.NewAccountRepository(pool)
+	positionRepo := repository.NewPositionRepository(pool)
+	orderRepo := repository.NewOrderRepository(pool)
+	tradeRepo := repository.NewTradeRepository(pool)
+
+	// 3. Run one-time data migration (safe to run on every startup - idempotent)
+	jsonPath := "./data/bbook/engine_state.json"
+	if err := migration.MigrateFromJSON(ctx, jsonPath, accountRepo, positionRepo, orderRepo, tradeRepo); err != nil {
+		log.Fatalf("Failed to migrate data: %v", err)
+	}
+
 	// Initialize tick storage using config
 	tickStore := tickstore.NewTickStore("default", brokerConfig.MaxTicksPerSymbol)
 
-	// Initialize B-Book engine
-	bbookEngine := core.NewEngine()
+	// Initialize B-Book engine with repository dependencies
+	bbookEngine := core.NewEngine(accountRepo, positionRepo, orderRepo, tradeRepo)
+
+	// Load accounts from database into cache
+	if err := bbookEngine.LoadAccounts(ctx); err != nil {
+		log.Fatalf("Failed to load accounts from database: %v", err)
+	}
+	log.Printf("Engine initialized with accounts from database")
 
 	// Initialize P/L engine
 	pnlEngine := core.NewPnLEngine(bbookEngine)
