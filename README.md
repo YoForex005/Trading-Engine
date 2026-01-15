@@ -78,6 +78,48 @@ npm run dev
 
 Open `http://localhost:3001` (adjust port if needed).
 
+## Code Quality
+
+### Backend Linting (Go)
+
+The backend uses `golangci-lint` for code quality checks.
+
+```bash
+cd backend
+golangci-lint run                 # Lint all code
+golangci-lint run --new          # Lint uncommitted changes only
+```
+
+**Enabled Linters:**
+- `govet` - Critical syntax and type checking
+- `ineffassign` - Detect ineffectual assignments
+- `unused` - Find unused code
+- `misspell` - Spell check
+
+### Frontend Linting (TypeScript)
+
+The desktop client uses ESLint with TypeScript support.
+
+```bash
+cd clients/desktop
+bun run lint                      # Check for issues
+bun run lint --fix               # Auto-fix issues
+```
+
+**Key Rules:**
+- Prefer `type` over `interface` (per CLAUDE.md)
+- Enforce type imports with `@typescript-eslint/consistent-type-imports`
+- Warn on `console.log` (use `console.warn` or `console.error`)
+- Allow unused vars prefixed with `_`
+
+### CI/CD
+
+Linting runs automatically on every commit via GitHub Actions. Pull requests with linting violations will be blocked.
+
+**Workflow:** `.github/workflows/lint.yml`
+- Backend: golangci-lint
+- Frontend: ESLint with Bun
+
 ## API Endpoints
 
 | Endpoint | Method | Description |

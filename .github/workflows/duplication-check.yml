@@ -1,0 +1,100 @@
+name: Code Duplication Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+jobs:
+  check-duplication:
+    name: Check Code Duplication
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install jscpd
+        run: bun add -g jscpd
+
+      - name: Run duplication check
+        id: duplication
+        run: |
+          echo "Running jscpd with 5% threshold..."
+          jscpd . --threshold 5 --exitCode 1 || echo "duplication_failed=true" >> $GITHUB_OUTPUT
+
+      - name: Upload duplication report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jscpd-report-${{ github.sha }}
+          path: .jscpd-report/
+          retention-days: 7
+
+      - name: Comment on PR with results
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read the JSON report
+            let reportData;
+            try {
+              const reportContent = fs.readFileSync('.jscpd-report/jscpd-report.json', 'utf8');
+              reportData = JSON.parse(reportContent);
+            } catch (error) {
+              console.log('Could not read report file:', error);
+              return;
+            }
+
+            const statistics = reportData.statistics;
+            const totalDuplication = statistics.total.percentage;
+
+            const comment = `## Code Duplication Check Failed ❌
+
+            Code duplication (${totalDuplication.toFixed(2)}%) exceeds the threshold of 5%.
+
+            ### Duplication by Language
+
+            | Language | Duplicated Lines | Percentage |
+            |----------|------------------|------------|
+            ${Object.entries(statistics.formats || {})
+              .map(([format, stats]) =>
+                `| ${format} | ${stats.duplicatedLines} | ${stats.percentage.toFixed(2)}% |`
+              )
+              .join('\n')}
+
+            **Total Clones Found:** ${statistics.total.clones}
+
+            ### What to do?
+
+            1. Download the detailed report from the workflow artifacts
+            2. Review duplicated code blocks
+            3. Extract common logic into shared utilities:
+               - Backend: \`backend/internal/shared/\`
+               - Frontend: \`clients/desktop/src/shared/\`
+            4. Re-run the check locally: \`npx jscpd .\`
+
+            View the full HTML report in the workflow artifacts.
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Fail if duplication exceeds threshold
+        if: steps.duplication.outputs.duplication_failed == 'true'
+        run: |
+          echo "❌ Code duplication exceeds 5% threshold"
+          echo "View the report artifact for details"
+          exit 1

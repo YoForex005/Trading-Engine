@@ -2,11 +2,14 @@ package repository
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/epic1st/rtx/backend/internal/shared/errors"
 )
 
 // Order matches bbook.Order structure
@@ -59,7 +62,7 @@ func (r *OrderRepository) Create(ctx context.Context, ord *Order) error {
 	).Scan(&ord.ID, &ord.CreatedAt)
 
 	if err != nil {
-		return fmt.Errorf("failed to create order: %w", err)
+		return fmt.Errorf("failed to create order for account %d symbol %s: %w", ord.AccountID, ord.Symbol, err)
 	}
 	return nil
 }
@@ -81,11 +84,11 @@ func (r *OrderRepository) GetByID(ctx context.Context, id int64) (*Order, error)
 		&ord.ParentPositionID, &ord.TrailingDelta, &ord.ExpiryTime, &ord.OCOLinkID,
 	)
 
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("order not found: %d", id)
-	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get order: %w", err)
+		if stderrors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.NewNotFound("order", fmt.Sprintf("%d", id))
+		}
+		return nil, fmt.Errorf("failed to get order %d: %w", id, err)
 	}
 	return &ord, nil
 }
@@ -103,7 +106,7 @@ func (r *OrderRepository) ListByAccount(ctx context.Context, accountID int64) ([
 
 	rows, err := r.pool.Query(ctx, query, accountID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list orders: %w", err)
+		return nil, fmt.Errorf("failed to list orders for account %d: %w", accountID, err)
 	}
 	defer rows.Close()
 
@@ -152,11 +155,11 @@ func (r *OrderRepository) UpdateStatus(ctx context.Context, id int64, status str
 
 	result, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("failed to update order status: %w", err)
+		return fmt.Errorf("failed to update order %d status to %s: %w", id, status, err)
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("order not found: %d", id)
+		return errors.NewNotFound("order", fmt.Sprintf("%d", id))
 	}
 
 	return nil
@@ -168,11 +171,11 @@ func (r *OrderRepository) Delete(ctx context.Context, id int64) error {
 
 	result, err := r.pool.Exec(ctx, query, id)
 	if err != nil {
-		return fmt.Errorf("failed to delete order: %w", err)
+		return fmt.Errorf("failed to delete order %d: %w", id, err)
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("order not found: %d", id)
+		return errors.NewNotFound("order", fmt.Sprintf("%d", id))
 	}
 
 	return nil
@@ -229,11 +232,11 @@ func (r *OrderRepository) UpdateTriggerPrice(ctx context.Context, id int64, newT
 
 	result, err := r.pool.Exec(ctx, query, newTriggerPrice, id)
 	if err != nil {
-		return fmt.Errorf("failed to update trigger price: %w", err)
+		return fmt.Errorf("failed to update trigger price for order %d: %w", id, err)
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("order not found: %d", id)
+		return errors.NewNotFound("order", fmt.Sprintf("%d", id))
 	}
 
 	return nil
@@ -249,11 +252,11 @@ func (r *OrderRepository) UpdateOCOLink(ctx context.Context, orderID, linkedOrde
 
 	result, err := r.pool.Exec(ctx, query, linkedOrderID, orderID)
 	if err != nil {
-		return fmt.Errorf("failed to update OCO link: %w", err)
+		return fmt.Errorf("failed to update OCO link for order %d: %w", orderID, err)
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("order not found or not pending: %d", orderID)
+		return errors.NewNotFound("order or not pending", fmt.Sprintf("%d", orderID))
 	}
 
 	return nil
@@ -271,11 +274,11 @@ func (r *OrderRepository) UpdateModifiable(ctx context.Context, ord *Order) erro
 		ord.TriggerPrice, ord.SL, ord.TP, ord.Volume, ord.ExpiryTime, ord.ID,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update order: %w", err)
+		return fmt.Errorf("failed to update order %d: %w", ord.ID, err)
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("order not found or not pending: %d", ord.ID)
+		return errors.NewNotFound("order or not pending", fmt.Sprintf("%d", ord.ID))
 	}
 
 	return nil

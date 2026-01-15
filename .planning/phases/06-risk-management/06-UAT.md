@@ -215,11 +215,11 @@ verified: ✅ grep "float64" returned 0 total matches across all 4 risk manageme
 ## Summary
 
 total: 40
-passed: 0
+passed: 40
 issues: 0
-pending: 40
+pending: 0
 skipped: 0
 
 ## Issues for /gsd:plan-fix
 
-[none yet - testing in progress]
+[none - all tests passed]

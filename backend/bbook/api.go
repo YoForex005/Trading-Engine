@@ -2,12 +2,14 @@ package bbook
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/epic1st/rtx/backend/internal/logging"
+	"github.com/epic1st/rtx/backend/internal/shared/errors"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -50,7 +52,23 @@ func (h *APIHandler) HandleGetAccountSummary(w http.ResponseWriter, r *http.Requ
 
 	summary, err := h.engine.GetAccountSummary(accountID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		// Check error type for appropriate status code
+		var notFoundErr *errors.NotFoundError
+		if stderrors.As(err, &notFoundErr) {
+			logging.Default.Warn("account not found",
+				"account_id", accountID,
+				"error", err,
+			)
+			http.Error(w, "account not found", http.StatusNotFound)
+			return
+		}
+
+		// Generic error
+		logging.Default.Error("failed to get account summary",
+			"account_id", accountID,
+			"error", err,
+		)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -135,14 +153,57 @@ func (h *APIHandler) HandlePlaceMarketOrder(w http.ResponseWriter, r *http.Reque
 
 	position, err := h.engine.ExecuteMarketOrder(req.AccountID, req.Symbol, req.Side, req.Volume, req.SL, req.TP)
 	if err != nil {
-		logging.Default.Warn("order rejected",
+		// Check for validation errors
+		var valErr *errors.ValidationError
+		if stderrors.As(err, &valErr) {
+			logging.Default.Warn("order validation failed",
+				"account_id", req.AccountID,
+				"symbol", req.Symbol,
+				"field", valErr.Field,
+				"error", valErr.Message,
+			)
+			http.Error(w, valErr.Message, http.StatusBadRequest)
+			return
+		}
+
+		// Check for not found errors
+		var notFoundErr *errors.NotFoundError
+		if stderrors.As(err, &notFoundErr) {
+			logging.Default.Warn("resource not found",
+				"account_id", req.AccountID,
+				"symbol", req.Symbol,
+				"resource", notFoundErr.Resource,
+				"id", notFoundErr.ID,
+			)
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		// Check for insufficient funds
+		var fundsErr *errors.InsufficientFundsError
+		if stderrors.As(err, &fundsErr) {
+			logging.Default.Warn("insufficient funds",
+				"account_id", fundsErr.AccountID,
+				"required", fundsErr.Required,
+				"available", fundsErr.Available,
+			)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":     "insufficient funds",
+				"required":  fundsErr.Required,
+				"available": fundsErr.Available,
+			})
+			return
+		}
+
+		// Generic error
+		logging.Default.Error("order execution failed",
 			"account_id", req.AccountID,
 			"symbol", req.Symbol,
-			"side", req.Side,
-			"volume", req.Volume,
 			"error", err,
 		)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 

@@ -2,11 +2,14 @@ package repository
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/epic1st/rtx/backend/internal/shared/errors"
 )
 
 // MarginState represents real-time margin state per account
@@ -51,11 +54,11 @@ func (r *MarginStateRepository) GetByAccountID(ctx context.Context, accountID in
 		&state.LastUpdated,
 	)
 
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("margin state not found for account: %d", accountID)
-	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get margin state: %w", err)
+		if stderrors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.NewNotFound("margin_state", fmt.Sprintf("account_%d", accountID))
+		}
+		return nil, fmt.Errorf("failed to get margin state for account %d: %w", accountID, err)
 	}
 
 	return &state, nil

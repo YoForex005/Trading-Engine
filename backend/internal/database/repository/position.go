@@ -2,11 +2,14 @@ package repository
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/epic1st/rtx/backend/internal/shared/errors"
 )
 
 // Position matches bbook.Position structure
@@ -54,7 +57,7 @@ func (r *PositionRepository) Create(ctx context.Context, pos *Position) error {
 	).Scan(&pos.ID, &pos.OpenTime)
 
 	if err != nil {
-		return fmt.Errorf("failed to create position: %w", err)
+		return fmt.Errorf("failed to create position for account %d symbol %s: %w", pos.AccountID, pos.Symbol, err)
 	}
 	return nil
 }
@@ -77,11 +80,11 @@ func (r *PositionRepository) GetByID(ctx context.Context, id int64) (*Position, 
 		&pos.ClosePrice, &closeTime, &pos.CloseReason,
 	)
 
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("position not found: %d", id)
-	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get position: %w", err)
+		if stderrors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.NewNotFound("position", fmt.Sprintf("%d", id))
+		}
+		return nil, fmt.Errorf("failed to get position %d: %w", id, err)
 	}
 
 	if closeTime != nil {
@@ -104,7 +107,7 @@ func (r *PositionRepository) ListByAccount(ctx context.Context, accountID int64)
 
 	rows, err := r.pool.Query(ctx, query, accountID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list positions: %w", err)
+		return nil, fmt.Errorf("failed to list positions for account %d: %w", accountID, err)
 	}
 	defer rows.Close()
 
@@ -146,11 +149,11 @@ func (r *PositionRepository) UpdatePrice(ctx context.Context, id int64, currentP
 
 	result, err := r.pool.Exec(ctx, query, currentPrice, unrealizedPnL, id)
 	if err != nil {
-		return fmt.Errorf("failed to update price: %w", err)
+		return fmt.Errorf("failed to update price for position %d: %w", id, err)
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("position not found or not open: %d", id)
+		return errors.NewNotFound("position or not open", fmt.Sprintf("%d", id))
 	}
 
 	return nil
@@ -166,11 +169,11 @@ func (r *PositionRepository) UpdateSLTP(ctx context.Context, id int64, sl, tp fl
 
 	result, err := r.pool.Exec(ctx, query, sl, tp, id)
 	if err != nil {
-		return fmt.Errorf("failed to update SL/TP: %w", err)
+		return fmt.Errorf("failed to update SL/TP for position %d: %w", id, err)
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("position not found or not open: %d", id)
+		return errors.NewNotFound("position or not open", fmt.Sprintf("%d", id))
 	}
 
 	return nil
@@ -195,15 +198,15 @@ func (r *PositionRepository) Close(ctx context.Context, id int64, closePrice flo
 
 	result, err := tx.Exec(ctx, query, closePrice, closeReason, id)
 	if err != nil {
-		return fmt.Errorf("failed to close position: %w", err)
+		return fmt.Errorf("failed to close position %d: %w", id, err)
 	}
 
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("position not found or already closed: %d", id)
+		return errors.NewNotFound("position or already closed", fmt.Sprintf("%d", id))
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("failed to commit position close for position %d: %w", id, err)
 	}
 
 	return nil

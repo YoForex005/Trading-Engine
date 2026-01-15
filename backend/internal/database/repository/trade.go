@@ -47,7 +47,7 @@ func (r *TradeRepository) Create(ctx context.Context, trade *Trade) error {
 	).Scan(&trade.ID, &trade.ExecutedAt)
 
 	if err != nil {
-		return fmt.Errorf("failed to create trade: %w", err)
+		return fmt.Errorf("failed to create trade for account %d symbol %s: %w", trade.AccountID, trade.Symbol, err)
 	}
 	return nil
 }
@@ -65,7 +65,7 @@ func (r *TradeRepository) ListByAccount(ctx context.Context, accountID int64, li
 
 	rows, err := r.pool.Query(ctx, query, accountID, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list trades: %w", err)
+		return nil, fmt.Errorf("failed to list trades for account %d: %w", accountID, err)
 	}
 	defer rows.Close()
 
@@ -103,7 +103,7 @@ func (r *TradeRepository) ListBySymbol(ctx context.Context, symbol string, start
 
 	rows, err := r.pool.Query(ctx, query, symbol, startTime, endTime, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list trades by symbol: %w", err)
+		return nil, fmt.Errorf("failed to list trades for symbol %s: %w", symbol, err)
 	}
 	defer rows.Close()
 

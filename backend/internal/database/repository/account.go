@@ -2,11 +2,14 @@ package repository
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/epic1st/rtx/backend/internal/shared/errors"
 )
 
 // Account matches bbook.Account structure
@@ -56,7 +59,7 @@ func (r *AccountRepository) Create(ctx context.Context, acc *Account) error {
 	).Scan(&acc.ID, &acc.CreatedAt, &acc.UpdatedAt)
 
 	if err != nil {
-		return fmt.Errorf("failed to create account: %w", err)
+		return fmt.Errorf("failed to create account %s: %w", acc.AccountNumber, err)
 	}
 	return nil
 }
@@ -78,11 +81,11 @@ func (r *AccountRepository) GetByID(ctx context.Context, id int64) (*Account, er
 		&acc.CreatedAt, &acc.UpdatedAt,
 	)
 
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("account not found: %d", id)
-	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get account: %w", err)
+		if stderrors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.NewNotFound("account", fmt.Sprintf("%d", id))
+		}
+		return nil, fmt.Errorf("failed to get account %d: %w", id, err)
 	}
 	return &acc, nil
 }
@@ -104,11 +107,11 @@ func (r *AccountRepository) GetByAccountNumber(ctx context.Context, accountNumbe
 		&acc.CreatedAt, &acc.UpdatedAt,
 	)
 
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("account not found: %s", accountNumber)
-	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get account: %w", err)
+		if stderrors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.NewNotFound("account", accountNumber)
+		}
+		return nil, fmt.Errorf("failed to get account %s: %w", accountNumber, err)
 	}
 	return &acc, nil
 }
@@ -133,11 +136,11 @@ func (r *AccountRepository) UpdateBalance(ctx context.Context, id int64, balance
 
 	_, err = tx.Exec(ctx, query, balance, equity, margin, freeMargin, marginLevel, id)
 	if err != nil {
-		return fmt.Errorf("failed to update balance: %w", err)
+		return fmt.Errorf("failed to update balance for account %d: %w", id, err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("failed to commit balance update for account %d: %w", id, err)
 	}
 	return nil
 }

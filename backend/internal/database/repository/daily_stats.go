@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -107,7 +108,10 @@ func (r *DailyStatsRepository) Upsert(ctx context.Context, stats *DailyAccountSt
 		stats.DrawdownLimitBreached, stats.AccountDisabledAt,
 	)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to upsert daily stats for account %d: %w", stats.AccountID, err)
+	}
+	return nil
 }
 
 // GetHistoricalHighWaterMark retrieves the highest high-water mark ever recorded for an account
@@ -120,5 +124,8 @@ func (r *DailyStatsRepository) GetHistoricalHighWaterMark(ctx context.Context, a
 
 	var highWaterMark string
 	err := r.pool.QueryRow(ctx, query, accountID).Scan(&highWaterMark)
-	return highWaterMark, err
+	if err != nil {
+		return "", fmt.Errorf("failed to get historical high water mark for account %d: %w", accountID, err)
+	}
+	return highWaterMark, nil
 }

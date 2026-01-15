@@ -2,7 +2,6 @@ package bbook
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -10,6 +9,7 @@ import (
 	decutil "github.com/epic1st/rtx/backend/internal/decimal"
 	"github.com/epic1st/rtx/backend/internal/database/repository"
 	"github.com/epic1st/rtx/backend/internal/logging"
+	"github.com/epic1st/rtx/backend/internal/shared/errors"
 )
 
 // Account represents a trading account
@@ -41,7 +41,7 @@ func (e *Engine) UpdatePassword(accountID int64, newPassword string) error {
 
 	account, ok := e.accounts[accountID]
 	if !ok {
-		return errors.New("account not found")
+		return errors.NewNotFound("account", fmt.Sprintf("%d", accountID))
 	}
 
 	account.Password = newPassword
@@ -59,7 +59,7 @@ func (e *Engine) UpdateAccount(accountID int64, leverage float64, marginMode str
 
 	account, ok := e.accounts[accountID]
 	if !ok {
-		return errors.New("account not found")
+		return errors.NewNotFound("account", fmt.Sprintf("%d", accountID))
 	}
 
 	if leverage > 0 {
@@ -335,7 +335,7 @@ func (e *Engine) GetAccountSummary(accountID int64) (*AccountSummary, error) {
 
 	account, ok := e.accounts[accountID]
 	if !ok {
-		return nil, errors.New("account not found")
+		return nil, errors.NewNotFound("account", fmt.Sprintf("%d", accountID))
 	}
 
 	// Calculate unrealized P/L and margin
@@ -387,32 +387,32 @@ func (e *Engine) ExecuteMarketOrder(accountID int64, symbol, side string, volume
 	// Get account
 	account, ok := e.accounts[accountID]
 	if !ok {
-		return nil, errors.New("account not found")
+		return nil, errors.NewNotFound("account", fmt.Sprintf("%d", accountID))
 	}
 
 	if account.Status != "ACTIVE" {
-		return nil, errors.New("account is not active")
+		return nil, errors.NewValidation("account_status", fmt.Sprintf("account %d is not active", accountID))
 	}
 
 	// Get symbol specs
 	spec, ok := e.symbols[symbol]
 	if !ok {
-		return nil, fmt.Errorf("symbol %s not found", symbol)
+		return nil, errors.NewNotFound("symbol", symbol)
 	}
 
 	// Validate volume
 	if volume < spec.MinVolume || volume > spec.MaxVolume {
-		return nil, fmt.Errorf("volume must be between %.2f and %.2f", spec.MinVolume, spec.MaxVolume)
+		return nil, errors.NewValidation("volume", fmt.Sprintf("volume %.2f must be between %.2f and %.2f for symbol %s", volume, spec.MinVolume, spec.MaxVolume, symbol))
 	}
 
 	// Get current price
 	if e.priceCallback == nil {
-		return nil, errors.New("price feed not available")
+		return nil, fmt.Errorf("price feed not available for symbol %s", symbol)
 	}
 
 	bid, ask, ok := e.priceCallback(symbol)
 	if !ok {
-		return nil, fmt.Errorf("no price available for %s", symbol)
+		return nil, fmt.Errorf("no price available for symbol %s", symbol)
 	}
 
 	// Determine fill price
@@ -422,7 +422,7 @@ func (e *Engine) ExecuteMarketOrder(accountID int64, symbol, side string, volume
 	} else if side == "SELL" {
 		fillPrice = bid
 	} else {
-		return nil, errors.New("invalid side: must be BUY or SELL")
+		return nil, errors.NewValidation("side", fmt.Sprintf("invalid side '%s': must be BUY or SELL", side))
 	}
 
 	// Check daily loss and drawdown limits FIRST (if repositories available)
@@ -649,21 +649,21 @@ func (e *Engine) ClosePosition(positionID int64, closeVolume float64) (*Trade, e
 
 	position, ok := e.positions[positionID]
 	if !ok {
-		return nil, errors.New("position not found")
+		return nil, errors.NewNotFound("position", fmt.Sprintf("%d", positionID))
 	}
 
 	if position.Status != "OPEN" {
-		return nil, errors.New("position is not open")
+		return nil, errors.NewValidation("position_status", fmt.Sprintf("position %d is not open", positionID))
 	}
 
 	// Get current price
 	if e.priceCallback == nil {
-		return nil, errors.New("price feed not available")
+		return nil, fmt.Errorf("price feed not available for position %d symbol %s", positionID, position.Symbol)
 	}
 
 	bid, ask, ok := e.priceCallback(position.Symbol)
 	if !ok {
-		return nil, errors.New("no price available")
+		return nil, fmt.Errorf("no price available for position %d symbol %s", positionID, position.Symbol)
 	}
 
 	// Determine close price (opposite of entry)
@@ -778,11 +778,11 @@ func (e *Engine) ModifyPosition(positionID int64, sl, tp float64) (*Position, er
 
 	position, ok := e.positions[positionID]
 	if !ok {
-		return nil, errors.New("position not found")
+		return nil, errors.NewNotFound("position", fmt.Sprintf("%d", positionID))
 	}
 
 	if position.Status != "OPEN" {
-		return nil, errors.New("position is not open")
+		return nil, errors.NewValidation("position_status", fmt.Sprintf("position %d is not open", positionID))
 	}
 
 	position.SL = sl
@@ -931,7 +931,7 @@ func (e *Engine) calculatePnL(pos *Position, currentPrice, volume float64, spec 
 func (e *Engine) getAccountSummaryUnlocked(accountID int64) (*AccountSummary, error) {
 	account, ok := e.accounts[accountID]
 	if !ok {
-		return nil, errors.New("account not found")
+		return nil, errors.NewNotFound("account", fmt.Sprintf("%d", accountID))
 	}
 
 	var unrealizedPnL float64

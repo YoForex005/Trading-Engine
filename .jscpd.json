@@ -1,0 +1,23 @@
+{
+  "threshold": 5,
+  "reporters": ["console", "html", "json"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.test.go",
+    "**/testdata/**",
+    "**/vendor/**",
+    "**/*.pb.go",
+    "**/.jscpd-report/**",
+    "**/bun.lock",
+    "**/*.lock"
+  ],
+  "format": ["go", "typescript", "tsx"],
+  "mode": "strict",
+  "minLines": 5,
+  "minTokens": 50,
+  "output": ".jscpd-report"
+}

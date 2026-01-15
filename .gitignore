@@ -29,3 +29,6 @@ Thumbs.db
 
 # Backend Data
 backend/data/
+
+# Code duplication reports
+.jscpd-report/

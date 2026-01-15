@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -56,9 +55,15 @@ var executionMode = "BBOOK"
 func main() {
 	ctx := context.Background()
 
+	// Determine log level from environment
+	logLevel := slog.LevelInfo
+	if os.Getenv("DEBUG") == "true" {
+		logLevel = slog.LevelDebug
+	}
+
 	// Initialize structured JSON logging
-	logger := logging.NewLogger()
-	slog.SetDefault(logger)
+	logging.Init(logLevel)
+	logging.Default.Info("Trading Engine starting", "version", "3.0")
 
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
@@ -71,16 +76,18 @@ func main() {
 
 	// Validate critical credentials
 	if oandaAPIKey == "" {
-		log.Println("[WARN] OANDA_API_KEY not set - OANDA adapter will fail to connect")
+		slog.Warn("OANDA_API_KEY not set - OANDA adapter will fail to connect")
 	}
 	if oandaAccountID == "" {
-		log.Println("[WARN] OANDA_ACCOUNT_ID not set - OANDA adapter will fail to connect")
+		slog.Warn("OANDA_ACCOUNT_ID not set - OANDA adapter will fail to connect")
 	}
 
-	log.Println("╔═══════════════════════════════════════════════════════════╗")
-	log.Printf("║          %s - Backend v3.0                ║", brokerConfig.BrokerName)
-	log.Printf("║        %s Mode + %s LP                 ║", brokerConfig.ExecutionMode, brokerConfig.PriceFeedLP)
-	log.Println("╚═══════════════════════════════════════════════════════════╝")
+	slog.Info("Trading Engine initializing",
+		"broker_name", brokerConfig.BrokerName,
+		"version", "3.0",
+		"execution_mode", brokerConfig.ExecutionMode,
+		"price_feed_lp", brokerConfig.PriceFeedLP,
+	)
 
 	// 1. Initialize database connection pool
 	dbURL := os.Getenv("DATABASE_URL")
@@ -94,7 +101,7 @@ func main() {
 	defer database.Close()
 
 	pool := database.GetPool()
-	log.Println("Database connection pool initialized")
+	slog.Info("database connection pool initialized")
 
 	// 2. Create repositories
 	accountRepo := repository.NewAccountRepository(pool)
@@ -118,7 +125,7 @@ func main() {
 	if err := bbookEngine.LoadAccounts(ctx); err != nil {
 		log.Fatalf("Failed to load accounts from database: %v", err)
 	}
-	log.Printf("Engine initialized with accounts from database")
+	slog.Info("engine initialized with accounts from database")
 
 	// Initialize P/L engine
 	pnlEngine := core.NewPnLEngine(bbookEngine)
@@ -137,7 +144,10 @@ func main() {
 	demoAccount := bbookEngine.CreateAccount("demo-user", "Demo User", "password", true)
 	bbookEngine.GetLedger().SetBalance(demoAccount.ID, brokerConfig.DefaultBalance)
 	demoAccount.Balance = brokerConfig.DefaultBalance
-	log.Printf("[B-Book] Demo account created: %s with $%.2f", demoAccount.AccountNumber, brokerConfig.DefaultBalance)
+	slog.Info("demo account created",
+		"account_number", demoAccount.AccountNumber,
+		"balance", brokerConfig.DefaultBalance,
+	)
 	hub := ws.NewHub()
 
 	// Set tick store on hub for storing incoming ticks
@@ -164,7 +174,7 @@ func main() {
 	orderMonitor := core.NewOrderMonitor(orderRepo, bbookEngine, priceCallback)
 	orderMonitor.Start()
 	defer orderMonitor.Stop()
-	log.Println("OrderMonitor started - monitoring SL/TP/pending orders every 100ms")
+	slog.Info("order monitor started", "interval_ms", 100)
 
 	// Initialize LP Manager
 	lpMgr := lpmanager.NewManager("data/lp_config.json")
@@ -173,15 +183,15 @@ func main() {
 	lpMgr.RegisterAdapter(adapters.NewBinanceAdapter())
 	if oandaAPIKey != "" && oandaAccountID != "" {
 		lpMgr.RegisterAdapter(adapters.NewOANDAAdapter(oandaAPIKey, oandaAccountID))
-		log.Println("[LP Manager] OANDA adapter registered")
+		slog.Info("lp adapter registered", "provider", "OANDA")
 	} else {
-		log.Println("[LP Manager] OANDA adapter skipped (credentials not configured)")
+		slog.Warn("lp adapter skipped - credentials not configured", "provider", "OANDA")
 	}
 	lpMgr.RegisterAdapter(adapters.NewFlexyAdapter())
 
 	// Load Config
 	if err := lpMgr.LoadConfig(); err != nil {
-		log.Printf("[LPManager] Failed to load config: %v", err)
+		slog.Error("failed to load lp config", "error", err)
 	}
 
 	// Load LP priorities from config and set them on Hub
@@ -189,8 +199,11 @@ func main() {
 		for _, lp := range config.LPs {
 			hub.SetLPPriority(lp.ID, lp.Priority)
 		}
-		log.Printf("[Main] Loaded LP priorities: Binance=%d, OANDA=%d, FlexyMarkets=%d",
-			config.LPs[0].Priority, config.LPs[1].Priority, config.LPs[2].Priority)
+		slog.Info("lp priorities loaded",
+			"binance", config.LPs[0].Priority,
+			"oanda", config.LPs[1].Priority,
+			"flexy", config.LPs[2].Priority,
+		)
 	}
 
 	// Pass hub to server
@@ -633,8 +646,4 @@ func main() {
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func parseFloat(s string) (float64, error) {
-	return strconv.ParseFloat(s, 64)
 }

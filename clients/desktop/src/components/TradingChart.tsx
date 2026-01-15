@@ -222,7 +222,7 @@ export function TradingChart({
 
         try {
             if (seriesRef.current) {
-                try { chartRef.current.removeSeries(seriesRef.current); } catch (e) { }
+                try { chartRef.current.removeSeries(seriesRef.current); } catch { }
                 seriesRef.current = null;
             }
 

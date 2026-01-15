@@ -1,0 +1,91 @@
+version: "2"
+
+linters:
+  # Start with critical linters only, expand later
+  enable:
+    - govet           # Go vet - critical syntax and type checking
+    - ineffassign     # Detect ineffectual assignments - catches bugs
+    - unused          # Find unused code - dead code detection
+    - misspell        # Spell check - documentation quality
+    - errcheck        # Now enabled - error wrapping standardized
+
+  # Disabled for initial setup - will enable gradually
+  disable:
+    - staticcheck     # Too many style suggestions - address in refactoring phase
+    - gocritic        # Too opinionated for initial setup
+    - gocyclo         # Complexity checks - address in refactoring phase
+    - bodyclose       # WebSocket patterns trigger false positives
+    - errorlint       # Error wrapping - address in refactoring phase
+    - gosec           # Security - address separately with focused review
+    - noctx           # Context usage - address in refactoring phase
+
+linters-settings:
+  errcheck:
+    check-blank: true           # Catch _ = err (intentional ignore)
+    check-type-assertions: true # Catch unchecked type assertions
+    exclude-functions:
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - (io.Closer).Close                 # Allow defer file.Close() without check
+      - encoding/json.(*Encoder).Encode   # HTTP response encoding - logged at higher level
+      - encoding/json.(*Decoder).Decode   # Request parsing - already handled with error check
+
+  staticcheck:
+    checks: ["all", "-ST1*", "-QF1*", "-SA9003", "-SA4006"]  # Disable style checks
+
+  gocyclo:
+    min-complexity: 15  # Allow reasonable complexity
+
+  gocritic:
+    enabled-checks:
+      - appendAssign
+      - assignOp
+      - captLocal
+      - commentFormatting
+      - dupImport
+      - emptyStringTest
+      - ifElseChain
+      - methodExprCall
+      - singleCaseSwitch
+      - typeUnparen
+      - underef
+      - unlambda
+      - unnamedResult
+
+run:
+  timeout: 5m
+  tests: true
+  skip-dirs:
+    - vendor
+    - testdata
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  # Exclude non-critical issues to allow gradual improvement
+  exclude:
+    - "QF1003:"  # could use tagged switch
+    - "QF1004:"  # could use strings.ReplaceAll
+    - "QF1007:"  # could merge conditional assignment
+    - "S1005:"   # unnecessary assignment to blank identifier
+    - "ST1023:"  # should omit type from declaration
+    - "SA9003:"  # empty branch
+    - "SA4006:"  # this value is never used
+
+  exclude-rules:
+    # Allow unused code in cmd/ directory (may have utility functions)
+    - linters:
+        - unused
+      path: "cmd/"
+
+    # Allow unchecked JSON encoding in HTTP handlers (non-critical, logged at higher level)
+    - linters:
+        - errcheck
+      source: "json\\.NewEncoder.*\\.Encode"
+
+    # Allow unchecked JSON decoding for optional request bodies
+    - linters:
+        - errcheck
+      source: "json\\.NewDecoder.*\\.Decode"

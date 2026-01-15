@@ -163,7 +163,7 @@ func (l *Ledger) RecordRealizedPnL(accountID int64, amount float64, tradeID int6
 	newBalance := currentBalance + amount
 	l.balances[accountID] = newBalance
 
-	description := "Trading P/L"
+	var description string
 	if amount >= 0 {
 		description = "Trading Profit"
 	} else {

@@ -2,7 +2,7 @@ package ws
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/epic1st/rtx/backend/internal/core"
+	"github.com/epic1st/rtx/backend/internal/logging"
 	"github.com/epic1st/rtx/backend/tickstore"
 	"github.com/gorilla/websocket"
 )
@@ -29,7 +30,10 @@ var upgrader = websocket.Upgrader{
 		}
 
 		// Reject unauthorized origin
-		log.Printf("[WebSocket] REJECTED connection from unauthorized origin: %s (client: %s)", origin, r.RemoteAddr)
+		logging.Default.Warn("websocket connection rejected - unauthorized origin",
+			"origin", origin,
+			"client", r.RemoteAddr,
+		)
 		return false
 	},
 }
@@ -60,8 +64,8 @@ func init() {
 	// Load allowed origins from environment variable
 	originsEnv := os.Getenv("ALLOWED_ORIGINS")
 	if originsEnv == "" {
-		log.Println("[WARN] ALLOWED_ORIGINS not set - WebSocket will reject all connections")
-		log.Println("[WARN] Set ALLOWED_ORIGINS=http://localhost:5173,... in .env for development")
+		slog.Warn("ALLOWED_ORIGINS not set - WebSocket will reject all connections")
+		slog.Warn("Set ALLOWED_ORIGINS=http://localhost:5173,... in .env for development")
 		allowedOrigins = []string{} // Empty whitelist = reject all
 		return
 	}
@@ -75,7 +79,7 @@ func init() {
 		}
 	}
 
-	log.Printf("[WebSocket] CORS allowed origins: %v", allowedOrigins)
+	slog.Info("websocket CORS configured", "allowed_origins", allowedOrigins)
 }
 
 // Client represents a connected WebSocket client
@@ -83,7 +87,7 @@ type Client struct {
 	conn    *websocket.Conn
 	send    chan []byte
 	symbols map[string]bool
-	mu      sync.Mutex
+	// mu      sync.Mutex  // Reserved for future concurrent access to symbols map
 }
 
 // Hub maintains the set of active clients and broadcasts messages
@@ -143,7 +147,10 @@ func (h *Hub) SetLPPriority(lpID string, priority int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.lpPriority[lpID] = priority
-	log.Printf("[Hub] Set LP priority: %s = %d", lpID, priority)
+	logging.Default.Info("lp priority set",
+		"lp_id", lpID,
+		"priority", priority,
+	)
 }
 
 // BroadcastTick broadcasts a market tick to all clients
@@ -157,8 +164,12 @@ func (h *Hub) BroadcastTick(tick *MarketTick) {
 		h.mu.RLock()
 		clientCount := len(h.clients)
 		h.mu.RUnlock()
-		log.Printf("[Hub] Pipeline check: %d ticks received, %d clients connected, latest: %s @ %.5f",
-			counter, clientCount, tick.Symbol, tick.Bid)
+		logging.Default.Debug("tick pipeline status",
+			"ticks_received", counter,
+			"clients_connected", clientCount,
+			"latest_symbol", tick.Symbol,
+			"latest_bid", tick.Bid,
+		)
 	}
 
 	h.mu.Lock()
@@ -244,7 +255,9 @@ func (h *Hub) Run() {
 			h.clients[client] = true
 			clientCount := len(h.clients)
 			h.mu.Unlock()
-			log.Printf("[Hub] Client connected. Total clients: %d", clientCount)
+			logging.Default.Info("websocket client connected",
+				"total_clients", clientCount,
+			)
 
 			// Send latest prices for all symbols upon connection
 			h.mu.RLock()
@@ -266,7 +279,9 @@ func (h *Hub) Run() {
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
-				log.Printf("[Hub] Client disconnected. Total clients: %d", len(h.clients))
+				logging.Default.Info("websocket client disconnected",
+					"total_clients", len(h.clients),
+				)
 			}
 			h.mu.Unlock()
 
@@ -296,15 +311,23 @@ func (h *Hub) Run() {
 // ServeWs handles websocket requests from the peer.
 func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
-	log.Printf("[WS] Connection request from %s (origin: %s)", r.RemoteAddr, origin)
+	logging.Default.Debug("websocket connection request",
+		"remote_addr", r.RemoteAddr,
+		"origin", origin,
+	)
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[WS] Upgrade FAILED for %s: %v", r.RemoteAddr, err)
+		logging.Default.Warn("websocket upgrade failed",
+			"remote_addr", r.RemoteAddr,
+			"error", err,
+		)
 		return
 	}
 
-	log.Printf("[WS] Upgrade SUCCESS for %s", r.RemoteAddr)
+	logging.Default.Info("websocket connection established",
+		"remote_addr", r.RemoteAddr,
+	)
 
 	client := &Client{
 		conn:    conn,
@@ -319,7 +342,10 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		for message := range client.send {
 			err := conn.WriteMessage(websocket.TextMessage, message)
 			if err != nil {
-				log.Printf("[WS] Write error for %s: %v", r.RemoteAddr, err)
+				logging.Default.Error("websocket write error",
+					"remote_addr", r.RemoteAddr,
+					"error", err,
+				)
 				break
 			}
 		}
@@ -330,7 +356,9 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			hub.unregister <- client
 			conn.Close()
-			log.Printf("[WS] Connection closed for %s", r.RemoteAddr)
+			logging.Default.Info("websocket connection closed",
+				"remote_addr", r.RemoteAddr,
+			)
 		}()
 		for {
 			_, _, err := conn.ReadMessage()
