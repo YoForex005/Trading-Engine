@@ -754,3 +754,101 @@ func (h *APIHandler) HandleGetSymbols(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(symbols)
 }
+
+// HandleSetPositionSLTP creates SL/TP orders for a position
+// PATCH /api/positions/:id/sl-tp
+func (h *APIHandler) HandleSetPositionSLTP(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var req struct {
+		PositionID int64   `json:"positionId"`
+		SL         float64 `json:"sl"`
+		TP         float64 `json:"tp"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Extract position ID from URL path if not in body
+	if req.PositionID == 0 {
+		parts := strings.Split(r.URL.Path, "/")
+		for i, p := range parts {
+			if p == "positions" && i+1 < len(parts) {
+				// Next part should be position ID, then "sl-tp"
+				if id, err := strconv.ParseInt(parts[i+1], 10, 64); err == nil {
+					req.PositionID = id
+				}
+			}
+		}
+	}
+
+	// Get the position to validate and extract info
+	positions := h.engine.GetPositions(0) // Get all positions
+	var targetPosition *Position
+	for _, pos := range positions {
+		if pos.ID == req.PositionID {
+			targetPosition = pos
+			break
+		}
+	}
+
+	if targetPosition == nil {
+		http.Error(w, "Position not found", http.StatusNotFound)
+		return
+	}
+
+	if targetPosition.Status != "OPEN" {
+		http.Error(w, "Position is not open", http.StatusBadRequest)
+		return
+	}
+
+	// Validate SL/TP levels
+	if req.SL > 0 {
+		// For BUY positions: SL must be below open price
+		// For SELL positions: SL must be above open price
+		if targetPosition.Side == "BUY" && req.SL >= targetPosition.OpenPrice {
+			http.Error(w, "Stop loss for BUY position must be below open price", http.StatusBadRequest)
+			return
+		}
+		if targetPosition.Side == "SELL" && req.SL <= targetPosition.OpenPrice {
+			http.Error(w, "Stop loss for SELL position must be above open price", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if req.TP > 0 {
+		// For BUY positions: TP must be above open price
+		// For SELL positions: TP must be below open price
+		if targetPosition.Side == "BUY" && req.TP <= targetPosition.OpenPrice {
+			http.Error(w, "Take profit for BUY position must be above open price", http.StatusBadRequest)
+			return
+		}
+		if targetPosition.Side == "SELL" && req.TP >= targetPosition.OpenPrice {
+			http.Error(w, "Take profit for SELL position must be below open price", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Also update the position's SL/TP fields for immediate display
+	_, err := h.engine.ModifyPosition(req.PositionID, req.SL, req.TP)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update position: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("[API] Set SL/TP for Position #%d: SL=%.5f TP=%.5f", req.PositionID, req.SL, req.TP)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "SL/TP levels set successfully",
+		"sl":      req.SL,
+		"tp":      req.TP,
+	})
+}

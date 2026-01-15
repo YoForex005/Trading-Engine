@@ -1,18 +1,18 @@
 {
   "lps": [
     {
-      "id": "oanda",
-      "name": "OANDA",
-      "type": "OANDA",
-      "enabled": false,
-      "priority": 1,
-      "settings": {},
-      "symbols": []
-    },
-    {
       "id": "binance",
       "name": "Binance",
       "type": "BINANCE",
+      "enabled": true,
+      "priority": 1,
+      "settings": {},
+      "symbols": ["BTCUSD", "ETHUSD", "BNBUSD", "SOLUSD", "XRPUSD", "ADAUSD", "DOGEUSD", "MATICUSD", "AVAXUSD", "DOTUSD"]
+    },
+    {
+      "id": "oanda",
+      "name": "OANDA",
+      "type": "OANDA",
       "enabled": false,
       "priority": 2,
       "settings": {},
@@ -22,12 +22,12 @@
       "id": "flexy",
       "name": "FlexyMarkets",
       "type": "socket.io",
-      "enabled": true,
+      "enabled": false,
       "priority": 3,
       "settings": {},
       "symbols": []
     }
   ],
-  "primaryLp": "oanda",
-  "lastModified": 1767775109
+  "primaryLp": "binance",
+  "lastModified": 1737071000
 }

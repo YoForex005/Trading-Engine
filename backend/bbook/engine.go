@@ -1,11 +1,15 @@
 package bbook
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"sync"
 	"time"
+
+	decutil "github.com/epic1st/rtx/backend/internal/decimal"
+	"github.com/epic1st/rtx/backend/internal/database/repository"
 )
 
 // Account represents a trading account
@@ -140,17 +144,21 @@ type AccountSummary struct {
 
 // Engine is the B-Book execution engine
 type Engine struct {
-	mu             sync.RWMutex
-	accounts       map[int64]*Account
-	positions      map[int64]*Position
-	orders         map[int64]*Order
-	trades         []Trade
-	symbols        map[string]*SymbolSpec
-	nextPositionID int64
-	nextOrderID    int64
-	nextTradeID    int64
-	priceCallback  func(symbol string) (bid, ask float64, ok bool)
-	ledger         *Ledger
+	mu                     sync.RWMutex
+	accounts               map[int64]*Account
+	positions              map[int64]*Position
+	orders                 map[int64]*Order
+	trades                 []Trade
+	symbols                map[string]*SymbolSpec
+	nextPositionID         int64
+	nextOrderID            int64
+	nextTradeID            int64
+	priceCallback          func(symbol string) (bid, ask float64, ok bool)
+	ledger                 *Ledger
+	marginStateRepo        *repository.MarginStateRepository
+	riskLimitRepo          *repository.RiskLimitRepository
+	symbolMarginConfigRepo *repository.SymbolMarginConfigRepository
+	dailyStatsRepo         *repository.DailyStatsRepository
 }
 
 // SymbolSpec contains symbol specifications
@@ -168,16 +176,30 @@ type SymbolSpec struct {
 
 // NewEngine creates a new B-Book engine
 func NewEngine() *Engine {
+	return NewEngineWithRepos(nil, nil, nil, nil)
+}
+
+// NewEngineWithRepos creates a new B-Book engine with optional repository dependencies
+func NewEngineWithRepos(
+	marginStateRepo *repository.MarginStateRepository,
+	riskLimitRepo *repository.RiskLimitRepository,
+	symbolMarginConfigRepo *repository.SymbolMarginConfigRepository,
+	dailyStatsRepo *repository.DailyStatsRepository,
+) *Engine {
 	e := &Engine{
-		accounts:       make(map[int64]*Account),
-		positions:      make(map[int64]*Position),
-		orders:         make(map[int64]*Order),
-		trades:         make([]Trade, 0),
-		symbols:        make(map[string]*SymbolSpec),
-		nextPositionID: 1,
-		nextOrderID:    1,
-		nextTradeID:    1,
-		ledger:         NewLedger(),
+		accounts:               make(map[int64]*Account),
+		positions:              make(map[int64]*Position),
+		orders:                 make(map[int64]*Order),
+		trades:                 make([]Trade, 0),
+		symbols:                make(map[string]*SymbolSpec),
+		nextPositionID:         1,
+		nextOrderID:            1,
+		nextTradeID:            1,
+		ledger:                 NewLedger(),
+		marginStateRepo:        marginStateRepo,
+		riskLimitRepo:          riskLimitRepo,
+		symbolMarginConfigRepo: symbolMarginConfigRepo,
+		dailyStatsRepo:         dailyStatsRepo,
 	}
 
 	// Initialize default symbols
@@ -387,13 +409,127 @@ func (e *Engine) ExecuteMarketOrder(accountID int64, symbol, side string, volume
 		return nil, errors.New("invalid side: must be BUY or SELL")
 	}
 
-	// Calculate required margin
-	requiredMargin := e.calculateMargin(symbol, volume, fillPrice, account.Leverage)
+	// Check daily loss and drawdown limits FIRST (if repositories available)
+	if e.dailyStatsRepo != nil && e.riskLimitRepo != nil {
+		ctx := context.Background()
+		currentBalance := decutil.NewFromFloat64(account.Balance)
 
-	// Check free margin
-	summary, _ := e.getAccountSummaryUnlocked(accountID)
-	if summary.FreeMargin < requiredMargin {
-		return nil, fmt.Errorf("insufficient margin: required %.2f, available %.2f", requiredMargin, summary.FreeMargin)
+		// Check daily loss limit
+		if err := CheckDailyLossLimit(
+			ctx,
+			accountID,
+			currentBalance,
+			e.dailyStatsRepo,
+			e.riskLimitRepo,
+		); err != nil {
+			return nil, fmt.Errorf("daily loss limit check failed: %w", err)
+		}
+
+		// Check drawdown limit
+		if err := CheckDrawdownLimit(
+			ctx,
+			accountID,
+			currentBalance,
+			e.dailyStatsRepo,
+			e.riskLimitRepo,
+		); err != nil {
+			return nil, fmt.Errorf("drawdown limit check failed: %w", err)
+		}
+	}
+
+	// Pre-trade risk validation (if repositories available)
+	if e.marginStateRepo != nil && e.riskLimitRepo != nil && e.symbolMarginConfigRepo != nil {
+		ctx := context.Background()
+
+		// Get current margin state for validation
+		marginState, err := e.marginStateRepo.GetByAccountID(ctx, accountID)
+		var currentEquity, currentUsedMargin float64
+		if err != nil {
+			// Initialize default margin state if not exists
+			currentEquity = account.Balance
+			currentUsedMargin = 0.0
+		} else {
+			// Parse string values to float64 for validation
+			fmt.Sscanf(marginState.Equity, "%f", &currentEquity)
+			fmt.Sscanf(marginState.UsedMargin, "%f", &currentUsedMargin)
+		}
+
+
+		// Validate margin requirement
+		if err := ValidateMarginRequirement(
+			ctx,
+			accountID,
+			symbol,
+			decutil.NewFromFloat64(volume),
+			side,
+			decutil.NewFromFloat64(fillPrice),
+			decutil.NewFromFloat64(currentEquity),
+			decutil.NewFromFloat64(currentUsedMargin),
+			e.symbolMarginConfigRepo,
+			e.riskLimitRepo,
+		); err != nil {
+			return nil, fmt.Errorf("margin validation failed: %w", err)
+		}
+
+		// Validate position limits
+		openPositionCount := 0
+		for _, pos := range e.positions {
+			if pos.AccountID == accountID && pos.Status == "OPEN" {
+				openPositionCount++
+			}
+		}
+
+		if err := ValidatePositionLimits(
+			ctx,
+			accountID,
+			symbol,
+			decutil.NewFromFloat64(volume),
+			openPositionCount,
+			e.riskLimitRepo,
+		); err != nil {
+			return nil, fmt.Errorf("position limit validation failed: %w", err)
+		}
+
+		// Collect account positions for exposure validation
+		var accountPositions []*Position
+		for _, pos := range e.positions {
+			if pos.AccountID == accountID {
+				accountPositions = append(accountPositions, pos)
+			}
+		}
+
+		// Validate symbol exposure (concentration risk)
+		if err := ValidateSymbolExposure(
+			ctx,
+			accountID,
+			symbol,
+			decutil.NewFromFloat64(volume),
+			decutil.NewFromFloat64(fillPrice),
+			decutil.NewFromFloat64(currentEquity),
+			accountPositions,
+			e.symbolMarginConfigRepo,
+			e.riskLimitRepo,
+		); err != nil {
+			return nil, fmt.Errorf("symbol exposure validation failed: %w", err)
+		}
+
+		// Validate total account exposure
+		if err := ValidateTotalExposure(
+			ctx,
+			accountID,
+			decutil.NewFromFloat64(currentEquity),
+			accountPositions,
+			e.riskLimitRepo,
+		); err != nil {
+			return nil, fmt.Errorf("total exposure validation failed: %w", err)
+		}
+	} else {
+		// Fallback to old margin check if repositories not available
+		requiredMargin := e.calculateMargin(symbol, volume, fillPrice, account.Leverage)
+		summary, _ := e.getAccountSummaryUnlocked(accountID)
+		if summary.FreeMargin < requiredMargin {
+			return nil, fmt.Errorf("insufficient margin: required %.2f, available %.2f", requiredMargin, summary.FreeMargin)
+		}
 	}
 
 	// Calculate commission
@@ -467,6 +603,14 @@ func (e *Engine) ExecuteMarketOrder(accountID int64, symbol, side string, volume
 	}
 
 	log.Printf("[B-Book] EXECUTED: %s %s %.2f lots @ %.5f (Position #%d)", side, symbol, volume, fillPrice, positionID)
+
+	// Recalculate margin after order execution
+	if e.marginStateRepo != nil {
+		ctx := context.Background()
+		if err := e.UpdateMarginState(ctx, accountID); err != nil {
+			log.Printf("[Margin] Failed to update margin state: %v", err)
+		}
+	}
 
 	return position, nil
 }
@@ -553,6 +697,36 @@ func (e *Engine) ClosePosition(positionID int64, closeVolume float64) (*Trade, e
 	}
 
 	log.Printf("[B-Book] CLOSED: %s Position #%d %.2f lots @ %.5f | P/L: %.2f", position.Symbol, positionID, closeVolume, closePrice, realizedPnL)
+
+	// Recalculate margin after position close
+	if e.marginStateRepo != nil {
+		ctx := context.Background()
+		if err := e.UpdateMarginState(ctx, account.ID); err != nil {
+			log.Printf("[Margin] Failed to update margin state: %v", err)
+		}
+	}
+
+	// Update daily statistics
+	if e.dailyStatsRepo != nil && e.riskLimitRepo != nil {
+		ctx := context.Background()
+		currentBalance := decutil.NewFromFloat64(account.Balance)
+		realizedPLDecimal := decutil.NewFromFloat64(realizedPnL)
+		tradeWon := realizedPnL > 0
+
+		if err := UpdateDailyStats(
+			ctx,
+			account.ID,
+			currentBalance,
+			realizedPLDecimal,
+			decutil.Zero(), // unrealized P&L = 0 after position closed
+			true,           // trade closed
+			tradeWon,
+			e.dailyStatsRepo,
+			e.riskLimitRepo,
+		); err != nil {
+			log.Printf("[DailyStats] Failed to update stats: %v", err)
+		}
+	}
 
 	return &trade, nil
 }

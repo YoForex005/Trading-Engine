@@ -1,0 +1,7 @@
+BEGIN;
+
+DROP TABLE IF EXISTS symbol_margin_config CASCADE;
+DROP TABLE IF EXISTS risk_limits CASCADE;
+DROP TABLE IF EXISTS margin_state CASCADE;
+
+COMMIT;

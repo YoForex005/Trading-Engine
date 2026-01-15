@@ -61,7 +61,8 @@ describe('IndicatorManager', () => {
       />
     )
 
-    expect(screen.getByText(/Add Indicator/i)).toBeInTheDocument()
+    // Check for the header text
+    expect(screen.getByRole('heading', { name: /Add Indicator/i })).toBeInTheDocument()
   })
 
   it('does not render when closed', () => {
@@ -237,9 +238,9 @@ describe('IndicatorManager', () => {
       />
     )
 
-    expect(screen.getByText(/All Indicators/i)).toBeInTheDocument()
-    expect(screen.getByText(/Trend/i)).toBeInTheDocument()
-    expect(screen.getByText(/Momentum/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /All Indicators/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Trend$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Momentum$/i })).toBeInTheDocument()
   })
 
   it('filters by category when category tab clicked', async () => {
