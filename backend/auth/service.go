@@ -74,23 +74,14 @@ func (s *Service) Login(username, password string) (string, *User, error) {
 		// "User Enumeration" prevention: return same error as password fail.
 	}
 
-	// 3. Verify Password
-	// We treat account.Password as a Hash.
+	// 3. Verify Password (bcrypt only - no plaintext fallback)
 	err := bcrypt.CompareHashAndPassword([]byte(account.Password), []byte(password))
 	if err != nil {
-		// Fallback: Check if it's plaintext "password" (Legacy Dev Mode)
-		// ONLY if it doesn't look like a hash (bcrypt starts with $2)
-		// And check if password is correct plaintext.
-		if len(account.Password) > 0 && account.Password[0] != '$' && account.Password == password {
-			log.Printf("[WARN] Auto-upgrading password for user %s to bcrypt", account.Username)
-			newHash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-			s.engine.UpdatePassword(account.ID, string(newHash))
-			// Proceed
-		} else {
-			log.Printf("[WARN] Login failed for user %s (invalid password)", username)
-			return "", nil, errors.New("invalid credentials")
-		}
+		log.Printf("[WARN] Login failed for user %s (invalid password)", username)
+		return "", nil, errors.New("invalid credentials")
 	}
+
+	// Password valid - continue to JWT generation
 
 	// Success
 	user := &User{
