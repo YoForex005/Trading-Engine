@@ -1,0 +1,37 @@
+name: Database Backup
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Compose
+        run: docker-compose up -d db
+
+      - name: Wait for database
+        run: sleep 10
+
+      - name: Run backup script
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: bash scripts/backup-db.sh
+
+      - name: Upload backup to artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-backup-${{ github.run_number }}
+          path: /backups/postgres/*.sql.gz
+          retention-days: 30
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "Backup failed - check logs"
