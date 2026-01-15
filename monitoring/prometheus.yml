@@ -1,0 +1,27 @@
+# Prometheus configuration for Trading Engine monitoring
+# Scrapes metrics from backend service for observability
+
+global:
+  scrape_interval: 10s      # Scrape targets every 10 seconds
+  evaluation_interval: 10s  # Evaluate rules every 10 seconds
+  external_labels:
+    cluster: 'trading-engine-local'
+    environment: 'development'
+
+# Scrape configurations
+scrape_configs:
+  # Trading Engine Backend
+  - job_name: 'trading-engine-backend'
+    static_configs:
+      - targets: ['backend:8080']  # Service name from docker-compose
+    metrics_path: '/metrics'        # Standard Prometheus endpoint
+    scrape_interval: 5s             # More frequent scraping for trading platform
+    scrape_timeout: 4s
+    scheme: http
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
