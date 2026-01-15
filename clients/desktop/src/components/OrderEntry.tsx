@@ -14,13 +14,36 @@ export function OrderEntry({ symbol, currentPrice, onOrderPlaced }: OrderEntryPr
     const [triggerPrice, setTriggerPrice] = useState('');
     const [sl, setSL] = useState('');
     const [tp, setTP] = useState('');
+    const [ocoLinkId, setOcoLinkId] = useState<number | null>(null);
+    const [expiryTime, setExpiryTime] = useState('');
+    const [pendingOrders, setPendingOrders] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    // Fetch pending orders for OCO linking
+    useEffect(() => {
+        const fetchPendingOrders = async () => {
+            try {
+                const response = await fetch('http://localhost:8080/api/orders?status=PENDING');
+                if (response.ok) {
+                    const orders = await response.json();
+                    setPendingOrders(orders || []);
+                }
+            } catch (err) {
+                console.error('Failed to fetch pending orders:', err);
+            }
+        };
+        if (orderType !== 'MARKET') {
+            fetchPendingOrders();
+        }
+    }, [orderType]);
 
     // Reset trigger price when order type changes
     useEffect(() => {
         if (orderType === 'MARKET') {
             setTriggerPrice('');
+            setOcoLinkId(null);
+            setExpiryTime('');
         } else if (currentPrice && !triggerPrice) {
             // Set default trigger price based on order type
             const defaultPrice = orderType.startsWith('BUY') ? currentPrice.ask : currentPrice.bid;
@@ -100,17 +123,29 @@ export function OrderEntry({ symbol, currentPrice, onOrderPlaced }: OrderEntryPr
                 onOrderPlaced?.();
             } else {
                 // Pending order
+                const requestBody: any = {
+                    type: orderType,
+                    symbol,
+                    volume: parseFloat(volume),
+                    triggerPrice: parseFloat(triggerPrice),
+                    sl: sl ? parseFloat(sl) : 0,
+                    tp: tp ? parseFloat(tp) : 0,
+                };
+
+                // Add OCO link if selected
+                if (ocoLinkId) {
+                    requestBody.ocoLinkId = ocoLinkId;
+                }
+
+                // Add expiry time if set
+                if (expiryTime) {
+                    requestBody.expiryTime = new Date(expiryTime).toISOString();
+                }
+
                 const response = await fetch('http://localhost:8080/api/orders/pending', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        type: orderType,
-                        symbol,
-                        volume: parseFloat(volume),
-                        triggerPrice: parseFloat(triggerPrice),
-                        sl: sl ? parseFloat(sl) : 0,
-                        tp: tp ? parseFloat(tp) : 0,
-                    }),
+                    body: JSON.stringify(requestBody),
                 });
 
                 if (!response.ok) {
@@ -215,7 +250,7 @@ export function OrderEntry({ symbol, currentPrice, onOrderPlaced }: OrderEntryPr
             </div>
 
             {/* Take Profit */}
-            <div className="mb-4">
+            <div className="mb-3">
                 <label className="text-xs text-zinc-500 mb-1 block">Take Profit (optional)</label>
                 <input
                     type="number"
@@ -226,6 +261,48 @@ export function OrderEntry({ symbol, currentPrice, onOrderPlaced }: OrderEntryPr
                     placeholder="0.00000"
                 />
             </div>
+
+            {/* OCO Link (for pending orders only) */}
+            {orderType !== 'MARKET' && (
+                <div className="mb-3">
+                    <label className="text-xs text-zinc-500 mb-1 block">Link to OCO Order (optional)</label>
+                    <select
+                        value={ocoLinkId || ''}
+                        onChange={(e) => setOcoLinkId(e.target.value ? parseInt(e.target.value) : null)}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-200"
+                    >
+                        <option value="">No OCO link</option>
+                        {pendingOrders.map((order) => (
+                            <option key={order.id} value={order.id}>
+                                #{order.id} - {order.type} {order.symbol} @ {order.triggerPrice.toFixed(5)}
+                            </option>
+                        ))}
+                    </select>
+                    {ocoLinkId && (
+                        <p className="text-xs text-emerald-400 mt-1">
+                            One-Cancels-Other: If this order fills, order #{ocoLinkId} will cancel automatically
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {/* Expiry Time (for pending orders only) */}
+            {orderType !== 'MARKET' && (
+                <div className="mb-4">
+                    <label className="text-xs text-zinc-500 mb-1 block">Expiry Time (optional)</label>
+                    <input
+                        type="datetime-local"
+                        value={expiryTime}
+                        onChange={(e) => setExpiryTime(e.target.value)}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-200"
+                    />
+                    {expiryTime && (
+                        <p className="text-xs text-orange-400 mt-1">
+                            Order will cancel automatically after {new Date(expiryTime).toLocaleString()}
+                        </p>
+                    )}
+                </div>
+            )}
 
             {/* Error Display */}
             {error && (
