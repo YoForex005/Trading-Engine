@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/epic1st/rtx/backend/internal/core"
@@ -146,18 +147,18 @@ func (h *Hub) SetLPPriority(lpID string, priority int) {
 }
 
 // BroadcastTick broadcasts a market tick to all clients
-var tickCounter int64 = 0
+var tickCounter atomic.Int64
 
 func (h *Hub) BroadcastTick(tick *MarketTick) {
-	tickCounter++
+	counter := tickCounter.Add(1)
 
 	// Log every 1000 ticks to show pipeline is working
-	if tickCounter%1000 == 0 {
+	if counter%1000 == 0 {
 		h.mu.RLock()
 		clientCount := len(h.clients)
 		h.mu.RUnlock()
 		log.Printf("[Hub] Pipeline check: %d ticks received, %d clients connected, latest: %s @ %.5f",
-			tickCounter, clientCount, tick.Symbol, tick.Bid)
+			counter, clientCount, tick.Symbol, tick.Bid)
 	}
 
 	h.mu.Lock()
