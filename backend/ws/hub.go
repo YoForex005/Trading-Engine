@@ -16,12 +16,44 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true
+		origin := r.Header.Get("Origin")
+
+		// Allow requests with no Origin header (same-origin, non-browser clients)
+		if origin == "" {
+			return true
+		}
+
+		if isOriginAllowed(origin, allowedOrigins) {
+			return true
+		}
+
+		// Reject unauthorized origin
+		log.Printf("[WebSocket] REJECTED connection from unauthorized origin: %s (client: %s)", origin, r.RemoteAddr)
+		return false
 	},
 }
 
 // Allowed origins for WebSocket CORS validation
 var allowedOrigins []string
+
+// isOriginAllowed checks if origin matches any allowed pattern
+func isOriginAllowed(origin string, allowedOrigins []string) bool {
+	for _, allowed := range allowedOrigins {
+		// Exact match
+		if origin == allowed {
+			return true
+		}
+
+		// Wildcard localhost pattern (e.g., "http://localhost:*")
+		if strings.HasSuffix(allowed, ":*") {
+			prefix := strings.TrimSuffix(allowed, ":*")
+			if strings.HasPrefix(origin, prefix+":") {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func init() {
 	// Load allowed origins from environment variable
@@ -262,7 +294,8 @@ func (h *Hub) Run() {
 
 // ServeWs handles websocket requests from the peer.
 func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
-	log.Printf("[WS] Upgrade request from %s", r.RemoteAddr)
+	origin := r.Header.Get("Origin")
+	log.Printf("[WS] Connection request from %s (origin: %s)", r.RemoteAddr, origin)
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
