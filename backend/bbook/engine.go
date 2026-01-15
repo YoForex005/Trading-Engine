@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	decutil "github.com/epic1st/rtx/backend/internal/decimal"
 	"github.com/epic1st/rtx/backend/internal/database/repository"
+	"github.com/epic1st/rtx/backend/internal/logging"
 )
 
 // Account represents a trading account
@@ -45,7 +45,10 @@ func (e *Engine) UpdatePassword(accountID int64, newPassword string) error {
 	}
 
 	account.Password = newPassword
-	log.Printf("[B-Book] Password updated for account %s", account.AccountNumber)
+	logging.Default.Info("password updated",
+		"account_number", account.AccountNumber,
+		"account_id", account.ID,
+	)
 	return nil
 }
 
@@ -66,7 +69,12 @@ func (e *Engine) UpdateAccount(accountID int64, leverage float64, marginMode str
 		account.MarginMode = marginMode
 	}
 
-	log.Printf("[B-Book] Account %s updated: Leverage=%.0f, Mode=%s", account.AccountNumber, account.Leverage, account.MarginMode)
+	logging.Default.Info("account updated",
+		"account_number", account.AccountNumber,
+		"account_id", account.ID,
+		"leverage", account.Leverage,
+		"margin_mode", account.MarginMode,
+	)
 	return nil
 }
 
@@ -205,7 +213,9 @@ func NewEngineWithRepos(
 	// Initialize default symbols
 	e.initDefaultSymbols()
 
-	log.Println("[B-Book Engine] Initialized")
+	if logging.Default != nil {
+		logging.Default.Info("[B-Book Engine] Initialized")
+	}
 	return e
 }
 
@@ -286,7 +296,13 @@ func (e *Engine) CreateAccount(userID, username, password string, isDemo bool) *
 	}
 
 	e.accounts[id] = account
-	log.Printf("[B-Book] Created account %s (User: %s, Username: %s)", account.AccountNumber, userID, username)
+	logging.Default.Info("account created",
+		"account_number", account.AccountNumber,
+		"account_id", account.ID,
+		"user_id", userID,
+		"username", username,
+		"is_demo", isDemo,
+	)
 	return account
 }
 
@@ -602,13 +618,24 @@ func (e *Engine) ExecuteMarketOrder(accountID int64, symbol, side string, volume
 		e.ledger.RecordCommission(accountID, -commission, tradeID)
 	}
 
-	log.Printf("[B-Book] EXECUTED: %s %s %.2f lots @ %.5f (Position #%d)", side, symbol, volume, fillPrice, positionID)
+	logging.Default.Info("position opened",
+		"position_id", positionID,
+		"account_id", accountID,
+		"symbol", symbol,
+		"side", side,
+		"volume", volume,
+		"fill_price", fillPrice,
+		"commission", commission,
+	)
 
 	// Recalculate margin after order execution
 	if e.marginStateRepo != nil {
 		ctx := context.Background()
 		if err := e.UpdateMarginState(ctx, accountID); err != nil {
-			log.Printf("[Margin] Failed to update margin state: %v", err)
+			logging.Default.Error("failed to update margin state",
+				"account_id", accountID,
+				"error", err,
+			)
 		}
 	}
 
@@ -696,13 +723,23 @@ func (e *Engine) ClosePosition(positionID int64, closeVolume float64) (*Trade, e
 		position.Volume -= closeVolume
 	}
 
-	log.Printf("[B-Book] CLOSED: %s Position #%d %.2f lots @ %.5f | P/L: %.2f", position.Symbol, positionID, closeVolume, closePrice, realizedPnL)
+	logging.Default.Info("position closed",
+		"position_id", positionID,
+		"account_id", account.ID,
+		"symbol", position.Symbol,
+		"volume", closeVolume,
+		"close_price", closePrice,
+		"realized_pnl", realizedPnL,
+	)
 
 	// Recalculate margin after position close
 	if e.marginStateRepo != nil {
 		ctx := context.Background()
 		if err := e.UpdateMarginState(ctx, account.ID); err != nil {
-			log.Printf("[Margin] Failed to update margin state: %v", err)
+			logging.Default.Error("failed to update margin state",
+				"account_id", account.ID,
+				"error", err,
+			)
 		}
 	}
 
@@ -724,7 +761,10 @@ func (e *Engine) ClosePosition(positionID int64, closeVolume float64) (*Trade, e
 			e.dailyStatsRepo,
 			e.riskLimitRepo,
 		); err != nil {
-			log.Printf("[DailyStats] Failed to update stats: %v", err)
+			logging.Default.Error("failed to update daily stats",
+				"account_id", account.ID,
+				"error", err,
+			)
 		}
 	}
 
@@ -748,7 +788,13 @@ func (e *Engine) ModifyPosition(positionID int64, sl, tp float64) (*Position, er
 	position.SL = sl
 	position.TP = tp
 
-	log.Printf("[B-Book] MODIFIED: Position #%d SL: %.5f TP: %.5f", positionID, sl, tp)
+	logging.Default.Info("position modified",
+		"position_id", positionID,
+		"account_id", position.AccountID,
+		"symbol", position.Symbol,
+		"sl", sl,
+		"tp", tp,
+	)
 
 	return position, nil
 }

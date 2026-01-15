@@ -1,8 +1,18 @@
 package bbook
 
 import (
+	"log/slog"
+	"os"
 	"testing"
+
+	"github.com/epic1st/rtx/backend/internal/logging"
 )
+
+func TestMain(m *testing.M) {
+	// Initialize logger for tests
+	logging.Init(slog.LevelInfo)
+	os.Exit(m.Run())
+}
 
 func TestOrderExecution_MarketOrder(t *testing.T) {
 	tests := []struct {

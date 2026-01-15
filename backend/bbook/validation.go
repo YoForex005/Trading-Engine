@@ -218,7 +218,7 @@ func ValidateSymbolExposure(
 	}
 
 	// Get risk limits
-	_, err = riskLimitRepo.GetByAccountID(ctx, accountID)
+	limits, err := riskLimitRepo.GetByAccountID(ctx, accountID)
 	if err != nil {
 		// Use default: max 40% exposure per symbol
 		maxExposurePercent := decutil.MustParse("40.00")
@@ -293,7 +293,7 @@ func ValidateTotalExposure(
 	}
 
 	// Get limits
-	_, err = riskLimitRepo.GetByAccountID(ctx, accountID)
+	limits, err := riskLimitRepo.GetByAccountID(ctx, accountID)
 	if err != nil {
 		// Use default: max 300% total exposure (3x equity with margin)
 		maxExposure := decutil.MustParse("300.00")

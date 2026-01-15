@@ -70,7 +70,7 @@ func ExecuteStopOut(
 	currentMarginLevel decimal.Decimal,
 	stopOutLevel decimal.Decimal,
 ) (int, error) {
-	account, ok := engine.accounts[accountID]
+	_, ok := engine.accounts[accountID]
 	if !ok {
 		return 0, fmt.Errorf("account %d not found", accountID)
 	}

@@ -3,11 +3,11 @@ package bbook
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/epic1st/rtx/backend/internal/logging"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -135,7 +135,13 @@ func (h *APIHandler) HandlePlaceMarketOrder(w http.ResponseWriter, r *http.Reque
 
 	position, err := h.engine.ExecuteMarketOrder(req.AccountID, req.Symbol, req.Side, req.Volume, req.SL, req.TP)
 	if err != nil {
-		log.Printf("[API] Order rejected: %v", err)
+		logging.Default.Warn("order rejected",
+			"account_id", req.AccountID,
+			"symbol", req.Symbol,
+			"side", req.Side,
+			"volume", req.Volume,
+			"error", err,
+		)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -420,7 +426,13 @@ func (h *APIHandler) HandleAdminDeposit(w http.ResponseWriter, r *http.Request) 
 	// Update account balance
 	account.Balance = entry.BalanceAfter
 
-	log.Printf("[ADMIN] Deposit: Account #%d +%.2f %s by %s", req.AccountID, req.Amount, req.Method, req.AdminID)
+	logging.Default.Info("deposit completed",
+		"account_id", req.AccountID,
+		"amount", req.Amount,
+		"method", req.Method,
+		"admin_id", req.AdminID,
+		"new_balance", entry.BalanceAfter,
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -475,7 +487,13 @@ func (h *APIHandler) HandleAdminWithdraw(w http.ResponseWriter, r *http.Request)
 	// Update account balance
 	account.Balance = entry.BalanceAfter
 
-	log.Printf("[ADMIN] Withdraw: Account #%d -%.2f %s by %s", req.AccountID, req.Amount, req.Method, req.AdminID)
+	logging.Default.Info("withdrawal completed",
+		"account_id", req.AccountID,
+		"amount", req.Amount,
+		"method", req.Method,
+		"admin_id", req.AdminID,
+		"new_balance", entry.BalanceAfter,
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -521,7 +539,13 @@ func (h *APIHandler) HandleAdminAdjust(w http.ResponseWriter, r *http.Request) {
 	// Update account balance
 	account.Balance = entry.BalanceAfter
 
-	log.Printf("[ADMIN] Adjustment: Account #%d %+.2f by %s: %s", req.AccountID, req.Amount, req.AdminID, req.Description)
+	logging.Default.Info("balance adjustment completed",
+		"account_id", req.AccountID,
+		"amount", req.Amount,
+		"admin_id", req.AdminID,
+		"description", req.Description,
+		"new_balance", entry.BalanceAfter,
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -571,7 +595,12 @@ func (h *APIHandler) HandleAdminBonus(w http.ResponseWriter, r *http.Request) {
 	// Update account balance
 	account.Balance = entry.BalanceAfter
 
-	log.Printf("[ADMIN] Bonus: Account #%d +%.2f by %s", req.AccountID, req.Amount, req.AdminID)
+	logging.Default.Info("bonus added",
+		"account_id", req.AccountID,
+		"amount", req.Amount,
+		"admin_id", req.AdminID,
+		"new_balance", entry.BalanceAfter,
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -694,7 +723,10 @@ func (h *APIHandler) HandleAdminResetPassword(w http.ResponseWriter, r *http.Req
 	// Hash password with bcrypt before updating
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
-		log.Printf("[ERROR] Failed to hash password for account %d: %v", req.AccountID, err)
+		logging.Default.Error("failed to hash password",
+			"account_id", req.AccountID,
+			"error", err,
+		)
 		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
 		return
 	}
@@ -842,7 +874,11 @@ func (h *APIHandler) HandleSetPositionSLTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	log.Printf("[API] Set SL/TP for Position #%d: SL=%.5f TP=%.5f", req.PositionID, req.SL, req.TP)
+	logging.Default.Info("sl/tp set",
+		"position_id", req.PositionID,
+		"sl", req.SL,
+		"tp", req.TP,
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

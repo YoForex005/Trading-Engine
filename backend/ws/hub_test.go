@@ -2,14 +2,23 @@ package ws
 
 import (
 	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/epic1st/rtx/backend/internal/logging"
 	"github.com/gorilla/websocket"
 )
+
+func TestMain(m *testing.M) {
+	// Initialize logger for tests
+	logging.Init(slog.LevelInfo)
+	os.Exit(m.Run())
+}
 
 func TestWebSocketHub_SingleClient(t *testing.T) {
 	hub := NewHub()

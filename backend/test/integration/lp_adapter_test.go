@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,10 +11,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/epic1st/rtx/backend/internal/logging"
 	"github.com/epic1st/rtx/backend/lpmanager"
 	"github.com/epic1st/rtx/backend/ws"
 	"github.com/gorilla/websocket"
 )
+
+func TestMain(m *testing.M) {
+	// Initialize logger for tests
+	logging.Init(slog.LevelInfo)
+	// Set ALLOWED_ORIGINS for WebSocket tests
+	os.Setenv("ALLOWED_ORIGINS", "http://localhost:*")
+	code := m.Run()
+	os.Exit(code)
+}
 
 func TestLPToWebSocketFlow(t *testing.T) {
 	// Integration test: LP quote → Manager → Hub → Client
@@ -239,12 +250,4 @@ func (m *MockLPAdapter) GetStatus() lpmanager.LPStatus {
 		Type:      m.lpType,
 		Connected: m.connected,
 	}
-}
-
-// TestMain sets up test environment
-func TestMain(m *testing.M) {
-	// Set ALLOWED_ORIGINS for WebSocket tests
-	os.Setenv("ALLOWED_ORIGINS", "http://localhost:*")
-	code := m.Run()
-	os.Exit(code)
 }
