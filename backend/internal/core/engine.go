@@ -6,6 +6,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Account represents a trading account
@@ -356,12 +358,19 @@ func (e *Engine) CreateAccount(userID, username, password string, isDemo bool) *
 		username = fmt.Sprintf("RTX-%06d", id)
 	}
 
+	// Hash password with bcrypt before storing
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("[ERROR] Failed to hash password for user %s: %v", username, err)
+		return nil
+	}
+
 	account := &Account{
 		ID:            id,
 		AccountNumber: fmt.Sprintf("RTX-%06d", id),
 		UserID:        userID,
 		Username:      username,
-		Password:      password,
+		Password:      string(passwordHash), // Store hash, not plaintext
 		Currency:      "USD",
 		Balance:       0,
 		Leverage:      100,
@@ -371,7 +380,7 @@ func (e *Engine) CreateAccount(userID, username, password string, isDemo bool) *
 	}
 
 	e.accounts[id] = account
-	log.Printf("[B-Book] Created account %s (User: %s, Username: %s)", account.AccountNumber, userID, username)
+	log.Printf("[Account] Created account %s with bcrypt-hashed password (User: %s, Username: %s)", account.AccountNumber, userID, username)
 	return account
 }
 
