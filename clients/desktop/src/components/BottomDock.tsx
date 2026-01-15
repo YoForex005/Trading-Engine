@@ -12,6 +12,7 @@ interface BottomDockProps {
     logs?: { time: string; message: string; type: 'info' | 'error' | 'success' }[]; // NEW
     onClosePosition: (id: number, volume?: number) => void;
     onModifyPosition: (id: number, sl: number, tp: number) => void;
+    onSetTrailingStop?: (positionId: number, trailingDelta: number) => void; // NEW: Trailing stop
     onCancelOrder: (id: number) => void; // Kept for future use
     onCloseBulk?: (type: 'ALL' | 'WINNERS' | 'LOSERS', symbol?: string) => void; // NEW: Bulk close
 }
@@ -28,6 +29,7 @@ export function BottomDock({
     logs,
     onClosePosition,
     onModifyPosition,
+    onSetTrailingStop,
 }: BottomDockProps) {
     const [activeTab, setActiveTab] = useState<TabType>('trade');
     const [isResizing, setIsResizing] = useState(false);
@@ -132,6 +134,7 @@ export function BottomDock({
                         positions={positions}
                         onClosePosition={onClosePosition}
                         onModifyPosition={onModifyPosition}
+                        onSetTrailingStop={onSetTrailingStop}
                         formatMoney={formatMoney}
                         formatDate={formatDate}
                     />
@@ -251,11 +254,15 @@ function JournalTab({ ledger, logs, formatMoney, formatDate }: any) {
     );
 }
 
-function TradeTab({ positions, onClosePosition, onModifyPosition, formatMoney }: any) {
+function TradeTab({ positions, onClosePosition, onModifyPosition, onSetTrailingStop, formatMoney }: any) {
     // Editing state for SL/TP inline
     const [editingId, setEditingId] = useState<number | null>(null);
     const [editSL, setEditSL] = useState("");
     const [editTP, setEditTP] = useState("");
+
+    // Trailing stop state
+    const [trailingStopId, setTrailingStopId] = useState<number | null>(null);
+    const [trailingDelta, setTrailingDelta] = useState("");
 
     const startEditing = (pos: any) => {
         setEditingId(pos.id);
@@ -266,6 +273,19 @@ function TradeTab({ positions, onClosePosition, onModifyPosition, formatMoney }:
     const saveEdit = (pos: any) => {
         onModifyPosition(pos.id, parseFloat(editSL) || 0, parseFloat(editTP) || 0);
         setEditingId(null);
+    };
+
+    const startTrailingStop = (posId: number) => {
+        setTrailingStopId(posId);
+        setTrailingDelta("");
+    };
+
+    const saveTrailingStop = (posId: number) => {
+        const delta = parseFloat(trailingDelta);
+        if (delta > 0 && onSetTrailingStop) {
+            onSetTrailingStop(posId, delta);
+        }
+        setTrailingStopId(null);
     };
 
     const formatDate = (dateStr: string) => {
@@ -291,6 +311,7 @@ function TradeTab({ positions, onClosePosition, onModifyPosition, formatMoney }:
                         <th className="p-2 border-b border-[#2a2e39] w-24">Price</th>
                         <th className="p-2 border-b border-[#2a2e39] w-24 hover:text-blue-400 transition-colors cursor-help" title="Stop Loss">S/L</th>
                         <th className="p-2 border-b border-[#2a2e39] w-24 hover:text-blue-400 transition-colors cursor-help" title="Take Profit">T/P</th>
+                        <th className="p-2 border-b border-[#2a2e39] w-28 hover:text-blue-400 transition-colors cursor-help" title="Trailing Stop Distance">Trail</th>
                         <th className="p-2 border-b border-[#2a2e39] w-24">Current</th>
                         <th className="p-2 border-b border-[#2a2e39] w-20">Swap</th>
                         <th className="p-2 border-b border-[#2a2e39] w-24">Profit</th>
@@ -355,6 +376,30 @@ function TradeTab({ positions, onClosePosition, onModifyPosition, formatMoney }:
                                     >
                                         {pos.tp > 0 ? pos.tp.toFixed(5) : <span className="opacity-0 group-hover:opacity-100 transition-opacity"><Edit2 size={12} /></span>}
                                     </span>
+                                )}
+                            </td>
+
+                            {/* Trailing Stop Cell */}
+                            <td className="p-2 relative">
+                                {trailingStopId === pos.id ? (
+                                    <input
+                                        type="number"
+                                        step="0.0001"
+                                        autoFocus
+                                        placeholder="Delta"
+                                        className="w-24 bg-[#131722] border border-orange-500 px-1 py-0.5 text-xs text-white focus:outline-none rounded"
+                                        value={trailingDelta}
+                                        onChange={(e) => setTrailingDelta(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && saveTrailingStop(pos.id)}
+                                        onBlur={() => saveTrailingStop(pos.id)}
+                                    />
+                                ) : (
+                                    <button
+                                        onClick={() => startTrailingStop(pos.id)}
+                                        className="text-xs px-2 py-0.5 rounded border border-zinc-700 hover:border-orange-500 hover:text-orange-400 transition-colors opacity-0 group-hover:opacity-100"
+                                    >
+                                        Set Trail
+                                    </button>
                                 )}
                             </td>
 

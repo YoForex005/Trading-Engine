@@ -299,6 +299,35 @@ function App() {
     }
   }, []);
 
+  const setTrailingStop = useCallback(async (positionId: number, trailingDelta: number) => {
+    try {
+      const res = await fetch('http://localhost:8080/api/positions/trailing-stop', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          positionId,
+          trailingDelta
+        })
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Failed to set trailing stop: ${errorText}`);
+      }
+
+      const result = await res.json();
+      console.log('Trailing stop set:', result);
+
+      // Refresh positions
+      const posRes = await fetch('http://localhost:8080/api/positions?accountId=1');
+      if (posRes.ok) {
+        setPositions(await posRes.json() || []);
+      }
+    } catch (err) {
+      console.error('Set trailing stop failed:', err);
+    }
+  }, []);
+
   const closeBulkPositions = useCallback(async (type: 'ALL' | 'WINNERS' | 'LOSERS', symbol?: string) => {
     try {
       const res = await fetch('http://localhost:8080/api/positions/close-bulk', {
@@ -532,6 +561,7 @@ function App() {
         // ledger={ledger}
         onClosePosition={closePosition}
         onModifyPosition={modifyPosition}
+        onSetTrailingStop={setTrailingStop}
         onCancelOrder={() => { }}
         onCloseBulk={closeBulkPositions}
       />
