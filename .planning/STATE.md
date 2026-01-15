@@ -10,17 +10,17 @@ See: .planning/PROJECT.md (updated 2026-01-15)
 ## Current Position
 
 Phase: 3 of 15 (Testing Infrastructure)
-Plan: 1 of 4 in current phase (03-02 complete)
+Plan: 2 of 7 in current phase
 Status: In progress
-Last activity: 2026-01-16 — Completed 03-02-PLAN.md (Frontend Testing Infrastructure)
+Last activity: 2026-01-16 — Completed 03-01-PLAN.md (Backend Testing Foundation)
 
-Progress: ▓▓░░░░░░░░ 13.3% (2/15 phases, 8/47 plans)
+Progress: ▓▓░░░░░░░░ 13.3% (2/15 phases, 9/15 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: ~35 min per plan
+- Total plans completed: 9
+- Average duration: ~30 min per plan
 - Total execution time: 1 day (2026-01-16)
 
 **By Phase:**
@@ -29,11 +29,11 @@ Progress: ▓▓░░░░░░░░ 13.3% (2/15 phases, 8/47 plans)
 |-------|-------|-------|----------|
 | 1. Security & Configuration | 3/3 | 1 day | ~8 hours |
 | 2. Database Migration | 4/4 | ~3 hours | ~45 min |
-| 3. Testing Infrastructure | 1/4 | ~15 min | ~15 min |
+| 3. Testing Infrastructure | 2/7 | ~30 min | ~15 min |
 
 **Recent Trend:**
-- Last 8 plans: Phase 1-2 complete, Phase 3 started (8/8 plans)
-- Trend: Strong execution velocity, Phase 3 Plan 02 completed in 15 min
+- Last 9 plans: Phase 1-2 complete, Phase 3 in progress (9/9 plans)
+- Trend: Strong execution velocity, maintaining ~15 min per plan in Phase 3
 - Trend: Consistent autonomous execution, improving velocity
 
 ## Accumulated Context
@@ -57,6 +57,9 @@ Recent decisions affecting current work:
 | 02-03 | In-memory caching strategy | Keep accounts/positions/orders in memory for performance, write through to database |
 | 02-03 | Idempotent migration | Check for existing data before migrating, safe to run on every startup |
 | 02-03 | Keep deprecated persistence.go | File retained for rollback safety during Phase 2, can be removed after database proven stable |
+| 03-01 | Selected govalues/decimal over shopspring/decimal | Modern Go idioms with generics, cross-validated via fuzz testing, banker's rounding, zero dependencies |
+| 03-01 | Test utility package in internal/ | Provides shared helpers for all backend tests with decimal assertions and test data builders |
+| 03-01 | Test fixtures in testdata/ | Follows Go convention for test fixtures, all financial values as strings (not floats) |
 | 03-02 | Mock WebSocket for testing | Prevents actual connections during tests, includes simulateMessage helper for controlled testing |
 | 03-02 | Reusable mock data generators | createMock* functions provide consistent test data for OHLC, ticks, and accounts |
 | 03-02 | Type-only imports for TypeScript types | Required for verbatimModuleSyntax compatibility |
@@ -72,7 +75,7 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-16
-Stopped at: Completed 03-02-PLAN.md (Frontend Testing Infrastructure)
+Stopped at: Completed 03-01-PLAN.md (Backend Testing Foundation)
 Resume file: None
 
 ## Phase 1 Completion Summary
