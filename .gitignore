@@ -11,3 +11,35 @@ tests/e2e/package-lock.json
 # Backend binary
 backend/server
 .archive/
+
+# Security & Secrets
+*.pem
+*.key
+*.crt
+*.pfx
+*.jks
+secrets.yaml
+!secrets.example.yaml
+.env
+.env.*
+!.env.example
+
+# IDE & OS
+.DS_Store
+.vscode/
+.idea/
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+
+# Go
+vendor/
+go.work
+bin/
+
+# Logs
+*.log
+logs/

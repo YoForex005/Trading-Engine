@@ -36,11 +36,8 @@ metadata:
   namespace: trading-engine-backup
 type: Opaque
 stringData:
-  postgres-password: "changeme"
-  gpg-private-key: |
-    -----BEGIN PGP PRIVATE KEY BLOCK-----
-    # Your GPG private key here
-    -----END PGP PRIVATE KEY BLOCK-----
+  postgres-password: "" # Set this in production
+  gpg-private-key: "" # Set this in production
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
