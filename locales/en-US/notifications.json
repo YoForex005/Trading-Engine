@@ -1,0 +1,55 @@
+{
+  "orders": {
+    "orderPlaced": "Order placed successfully",
+    "orderCancelled": "Order cancelled",
+    "orderFilled": "Order filled at {{price}}",
+    "orderPartiallyFilled": "Order partially filled: {{filled}}/{{total}}",
+    "orderRejected": "Order rejected: {{reason}}",
+    "orderExpired": "Order expired",
+    "stopLossTriggered": "Stop loss triggered at {{price}}",
+    "takeProfitTriggered": "Take profit triggered at {{price}}"
+  },
+  "positions": {
+    "positionOpened": "Position opened: {{side}} {{quantity}} {{symbol}}",
+    "positionClosed": "Position closed with {{pnl}} P&L",
+    "marginCall": "Margin call: Please add funds or close positions",
+    "positionLiquidated": "Position liquidated due to insufficient margin"
+  },
+  "account": {
+    "depositReceived": "Deposit of {{amount}} received",
+    "withdrawalProcessed": "Withdrawal of {{amount}} processed",
+    "withdrawalPending": "Withdrawal of {{amount}} is pending approval",
+    "kycApproved": "KYC verification approved",
+    "kycRejected": "KYC verification rejected: {{reason}}",
+    "accountVerified": "Account verified successfully",
+    "passwordChanged": "Password changed successfully",
+    "emailChanged": "Email changed successfully",
+    "twoFactorEnabled": "Two-factor authentication enabled",
+    "twoFactorDisabled": "Two-factor authentication disabled"
+  },
+  "market": {
+    "priceAlert": "{{symbol}} reached {{price}}",
+    "significantPriceMove": "{{symbol}} moved {{percentage}}% in the last hour",
+    "highVolatility": "High volatility detected for {{symbol}}",
+    "marketOpened": "{{market}} market is now open",
+    "marketClosed": "{{market}} market is now closed",
+    "marketHoliday": "{{market}} market is closed for holiday"
+  },
+  "system": {
+    "maintenanceScheduled": "System maintenance scheduled for {{date}}",
+    "maintenanceStarting": "System maintenance starting in {{minutes}} minutes",
+    "maintenanceComplete": "System maintenance completed",
+    "newFeature": "New feature available: {{feature}}",
+    "platformUpdate": "Platform updated to version {{version}}",
+    "connectionRestored": "Connection restored",
+    "connectionLost": "Connection lost. Reconnecting..."
+  },
+  "compliance": {
+    "documentRequired": "Document submission required: {{document}}",
+    "documentExpiring": "Your {{document}} expires in {{days}} days",
+    "tradingRestricted": "Trading restricted: {{reason}}",
+    "tradingResumed": "Trading restrictions lifted",
+    "reportAvailable": "Monthly report is now available",
+    "statementReady": "Account statement is ready for download"
+  }
+}

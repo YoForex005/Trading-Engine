@@ -1,0 +1,183 @@
+version: '3.9'
+
+services:
+  # Backend API
+  backend:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.backend
+    container_name: trading-engine-backend
+    ports:
+      - "8080:8080"
+      - "9090:9090"  # Metrics
+    environment:
+      - ENV=development
+      - PORT=8080
+      - METRICS_PORT=9090
+      - DATABASE_URL=postgres://trading:trading123@postgres:5432/trading?sslmode=disable
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=debug
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - FIX_HOST=fix-gateway
+      - FIX_PORT=9876
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fix-gateway:
+        condition: service_started
+    volumes:
+      - ../data:/app/data
+      - ../logs:/app/logs
+    networks:
+      - trading-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: trading-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=trading
+      - POSTGRES_USER=trading
+      - POSTGRES_PASSWORD=trading123
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../migrations:/docker-entrypoint-initdb.d
+    networks:
+      - trading-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: trading-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass redis123
+    volumes:
+      - redis-data:/data
+    networks:
+      - trading-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # FIX Gateway (QuickFIX/Go)
+  fix-gateway:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.fix-gateway
+    container_name: trading-fix-gateway
+    ports:
+      - "9876:9876"
+    environment:
+      - FIX_CONFIG_PATH=/app/config/fix.cfg
+      - LOG_LEVEL=debug
+    volumes:
+      - ../fix/config:/app/config
+      - ../fixstore:/app/fixstore
+      - ../logs:/app/logs
+    networks:
+      - trading-network
+    restart: unless-stopped
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: trading-prometheus
+    ports:
+      - "9091:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - trading-network
+    restart: unless-stopped
+
+  # Grafana Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: trading-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - trading-network
+    restart: unless-stopped
+
+  # Jaeger Distributed Tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: trading-jaeger
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"  # UI
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    networks:
+      - trading-network
+    restart: unless-stopped
+
+  # NGINX Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: trading-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - backend
+    networks:
+      - trading-network
+    restart: unless-stopped
+
+networks:
+  trading-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:

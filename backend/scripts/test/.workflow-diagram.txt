@@ -1,0 +1,164 @@
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                     AUTOMATED TEST SUITE WORKFLOW                             ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          USER RUNS COMMAND                                   │
+│                                                                              │
+│  $ make test                                                                 │
+│  $ ./scripts/test/run-all-tests.sh                                          │
+└──────────────────────────────────┬───────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    MASTER SCRIPT: run-all-tests.sh                           │
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ 1️⃣  Check Prerequisites                                               │  │
+│  │     ✓ Go 1.24.0+                                                      │  │
+│  │     ✓ Docker                                                          │  │
+│  │     ✓ Redis (optional)                                                │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                   │                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ 2️⃣  Setup Environment                                                 │  │
+│  │     ✓ Create test-reports/ directory                                 │  │
+│  │     ✓ Clear old reports                                               │  │
+│  │     ✓ Start log file                                                  │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                   │                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ 3️⃣  Start Test Services                                               │  │
+│  │     ✓ docker-compose up -d                                            │  │
+│  │     ✓ Wait for Redis to be ready                                      │  │
+│  │     ✓ Health check services                                           │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                   │                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ 4️⃣  Run Test Suites (Sequential or Parallel)                          │  │
+│  │                                                                        │  │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐   │  │
+│  │  │ Backend Tests    │  │ Integration Tests│  │ E2E Tests        │   │  │
+│  │  │ ─────────────    │  │ ─────────────────│  │ ─────────────    │   │  │
+│  │  │ • Unit tests     │  │ • API endpoints  │  │ • Full server    │   │  │
+│  │  │ • Race detection│  │ • Redis ops      │  │ • Auth flows     │   │  │
+│  │  │ • Coverage      │  │ • WebSockets     │  │ • Order placing  │   │  │
+│  │  │ • Retry logic   │  │ • Test DB        │  │ • Workflows      │   │  │
+│  │  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘   │  │
+│  │           │                     │                     │              │  │
+│  │           └─────────────────────┴─────────────────────┘              │  │
+│  │                                 │                                     │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                   │                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ 5️⃣  Verify Coverage                                                   │  │
+│  │     ✓ Parse coverage.out                                              │  │
+│  │     ✓ Check threshold (≥80%)                                          │  │
+│  │     ✓ Identify coverage gaps                                          │  │
+│  │     ✓ Generate badge                                                  │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                   │                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ 6️⃣  Generate Reports                                                  │  │
+│  │     ✓ HTML test dashboard                                             │  │
+│  │     ✓ Coverage reports (HTML, JSON)                                   │  │
+│  │     ✓ Performance benchmarks                                          │  │
+│  │     ✓ Profiling data (CPU, memory)                                    │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                   │                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ 7️⃣  Cleanup (Automatic)                                               │  │
+│  │     ✓ Stop test services                                              │  │
+│  │     ✓ Kill test processes                                             │  │
+│  │     ✓ Remove temp files                                               │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────┬───────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          RESULTS & REPORTS                                   │
+│                                                                              │
+│  test-reports/                                                               │
+│  ├── index.html              ← Main test dashboard                          │
+│  ├── coverage/                                                               │
+│  │   ├── coverage.html       ← Interactive coverage                         │
+│  │   ├── coverage.out        ← Go coverage data                             │
+│  │   ├── badge.svg          ← Coverage badge                                │
+│  │   └── coverage-report.json                                               │
+│  ├── benchmarks/                                                             │
+│  │   ├── report.html        ← Performance report                            │
+│  │   ├── cpu.prof           ← CPU profile                                   │
+│  │   └── mem.prof           ← Memory profile                                │
+│  └── *.log                  ← Test execution logs                           │
+│                                                                              │
+│  Exit Code: 0 ✅ (All tests passed)                                          │
+│             1 ❌ (Some tests failed)                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                        PARALLEL EXECUTION MODE                                ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+  $ make test-fast
+  $ ./scripts/test/run-all-tests.sh --parallel
+
+  ┌───────────────┐   ┌───────────────┐   ┌───────────────┐
+  │ Backend Tests │   │ Integration   │   │ E2E Tests     │
+  │               │   │ Tests         │   │               │
+  │ Running...    │   │ Running...    │   │ Running...    │
+  │               │   │               │   │               │
+  └───────┬───────┘   └───────┬───────┘   └───────┬───────┘
+          │                   │                   │
+          └───────────────────┴───────────────────┘
+                              │
+                    All tests run concurrently
+                         (Much faster!)
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                          CI/CD PIPELINE                                        ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+  GitHub Push/PR
+        │
+        ▼
+  ┌─────────────────┐
+  │ GitHub Actions  │
+  │                 │
+  │ • Checkout code │
+  │ • Setup Go      │
+  │ • Cache deps    │
+  │ • Run tests     │
+  │ • Upload cov    │
+  │ • PR comment    │
+  └─────────────────┘
+        │
+        ▼
+  ┌─────────────────┐
+  │ Artifacts       │
+  │ • Test results  │
+  │ • Coverage      │
+  │ • Benchmarks    │
+  └─────────────────┘
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                        QUICK REFERENCE                                         ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+  Run Everything:        make test
+  Run Fast (Parallel):   make test-fast
+  Unit Tests Only:       make test-unit
+  Integration Only:      make test-integration
+  E2E Only:             make test-e2e
+  Performance Tests:     make test-load
+  
+  View Reports:          make report
+  View Coverage:         make coverage-report
+  View Benchmarks:       make benchmark-report
+  
+  Clean & Restart:       make clean && make test
+  Pre-commit Checks:     make pre-commit
+  Pre-push Checks:       make pre-push
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Built with ❤️ for zero-intervention testing
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

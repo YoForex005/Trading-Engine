@@ -1,0 +1,182 @@
+name: Deploy to Development
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.24.0'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/rtx-backend
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=dev-
+            type=ref,event=branch
+            type=raw,value=dev-latest
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ github.sha }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
+
+  deploy:
+    name: Deploy to Development Environment
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment:
+      name: development
+      url: https://dev.rtx-trading.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'latest'
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_DEV }}" | base64 -d > kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace rtx-dev --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create Docker registry secret
+        run: |
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=${{ env.REGISTRY }} \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }} \
+            --namespace=rtx-dev \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy ConfigMap
+        run: |
+          kubectl apply -f k8s/configmap.yaml -n rtx-dev
+
+      - name: Deploy Secrets
+        run: |
+          kubectl create secret generic rtx-secrets \
+            --from-literal=database-url="${{ secrets.DEV_DATABASE_URL }}" \
+            --from-literal=redis-url="${{ secrets.DEV_REDIS_URL }}" \
+            --from-literal=jwt-secret="${{ secrets.DEV_JWT_SECRET }}" \
+            --from-literal=sentry-dsn="${{ secrets.DEV_SENTRY_DSN }}" \
+            --namespace=rtx-dev \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy PostgreSQL StatefulSet
+        run: |
+          kubectl apply -f k8s/statefulset.yaml -n rtx-dev
+
+      - name: Deploy backend
+        run: |
+          kubectl set image deployment/rtx-backend \
+            rtx-backend=${{ needs.build-and-push.outputs.image-tag }} \
+            -n rtx-dev || \
+          kubectl apply -f k8s/deployment.yaml -n rtx-dev
+
+          kubectl rollout status deployment/rtx-backend -n rtx-dev --timeout=5m
+
+      - name: Deploy services
+        run: |
+          kubectl apply -f k8s/service.yaml -n rtx-dev
+          kubectl apply -f k8s/ingress.yaml -n rtx-dev
+
+      - name: Deploy HPA
+        run: |
+          kubectl apply -f k8s/hpa.yaml -n rtx-dev
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n rtx-dev
+          kubectl get services -n rtx-dev
+          kubectl get ingress -n rtx-dev
+
+      - name: Run smoke tests
+        run: |
+          chmod +x scripts/deploy/smoke-test.sh
+          ./scripts/deploy/smoke-test.sh https://dev.rtx-trading.com
+
+      - name: Notify Slack on success
+        if: success()
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "✅ Development deployment succeeded",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Development Deployment Successful*\n*Commit:* ${{ github.sha }}\n*Image:* ${{ needs.build-and-push.outputs.image-tag }}\n*Deployed by:* ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "❌ Development deployment failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Development Deployment Failed*\n*Commit:* ${{ github.sha }}\n*Workflow:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                }
+              ]
+            }

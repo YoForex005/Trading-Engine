@@ -1,0 +1,13 @@
+# Test artifacts
+coverage.out
+test-results/
+playwright-report/
+test-results.xml
+
+# E2E test dependencies
+tests/e2e/node_modules/
+tests/e2e/package-lock.json
+
+# Backend binary
+backend/server
+.archive/

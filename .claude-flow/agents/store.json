@@ -1,0 +1,229 @@
+{
+  "agents": {
+    "agent-1768726428564-jp48og": {
+      "agentId": "agent-1768726428564-jp48og",
+      "agentType": "system-architect",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-18T08:53:48.564Z",
+      "domain": "backend-architecture",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768726428620-83tf02": {
+      "agentId": "agent-1768726428620-83tf02",
+      "agentType": "backend-dev",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-18T08:53:48.620Z",
+      "domain": "order-management",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768726428674-5il7li": {
+      "agentId": "agent-1768726428674-5il7li",
+      "agentType": "backend-dev",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-18T08:53:48.674Z",
+      "domain": "execution-engine",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768726428726-fkpt3q": {
+      "agentId": "agent-1768726428726-fkpt3q",
+      "agentType": "backend-dev",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-18T08:53:48.726Z",
+      "domain": "position-management",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768726428780-zn1r7j": {
+      "agentId": "agent-1768726428780-zn1r7j",
+      "agentType": "backend-dev",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-18T08:53:48.780Z",
+      "domain": "risk-management",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768726428832-94yptk": {
+      "agentId": "agent-1768726428832-94yptk",
+      "agentType": "backend-dev",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "haiku"
+      },
+      "createdAt": "2026-01-18T08:53:48.832Z",
+      "domain": "admin-api",
+      "model": "haiku",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768726428888-pxf80j": {
+      "agentId": "agent-1768726428888-pxf80j",
+      "agentType": "backend-dev",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "haiku"
+      },
+      "createdAt": "2026-01-18T08:53:48.888Z",
+      "domain": "client-api",
+      "model": "haiku",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768726428941-zfuc50": {
+      "agentId": "agent-1768726428941-zfuc50",
+      "agentType": "backend-dev",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-18T08:53:48.941Z",
+      "domain": "websocket-server",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768726428998-b7xwgn": {
+      "agentId": "agent-1768726428998-b7xwgn",
+      "agentType": "backend-dev",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-18T08:53:48.998Z",
+      "domain": "fix-refactoring",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768726429050-7693e8": {
+      "agentId": "agent-1768726429050-7693e8",
+      "agentType": "tester",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "haiku"
+      },
+      "createdAt": "2026-01-18T08:53:49.050Z",
+      "domain": "testing",
+      "model": "haiku",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768726429106-unxodt": {
+      "agentId": "agent-1768726429106-unxodt",
+      "agentType": "reviewer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-18T08:53:49.106Z",
+      "domain": "code-review",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768726429162-c32qid": {
+      "agentId": "agent-1768726429162-c32qid",
+      "agentType": "api-docs",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "haiku"
+      },
+      "createdAt": "2026-01-18T08:53:49.162Z",
+      "domain": "documentation",
+      "model": "haiku",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768761796050-9yunnb": {
+      "agentId": "agent-1768761796050-9yunnb",
+      "agentType": "researcher",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-18T18:43:16.051Z",
+      "domain": "backend-architecture",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768761796281-i24hmy": {
+      "agentId": "agent-1768761796281-i24hmy",
+      "agentType": "researcher",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-18T18:43:16.281Z",
+      "domain": "data-streaming",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768761796519-vtda1o": {
+      "agentId": "agent-1768761796519-vtda1o",
+      "agentType": "researcher",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-01-18T18:43:16.519Z",
+      "domain": "real-time-protocols",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1768761796771-74cps5": {
+      "agentId": "agent-1768761796771-74cps5",
+      "agentType": "system-architect",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "opus"
+      },
+      "createdAt": "2026-01-18T18:43:16.771Z",
+      "domain": "architecture-design",
+      "model": "opus",
+      "modelRoutedBy": "explicit"
+    }
+  },
+  "version": "3.0.0"
+}

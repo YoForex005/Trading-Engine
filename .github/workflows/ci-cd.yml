@@ -1,0 +1,477 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop, staging]
+  pull_request:
+    branches: [main, develop]
+  release:
+    types: [created]
+
+env:
+  GO_VERSION: '1.24.0'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ============================================
+  # LINT & CODE QUALITY
+  # ============================================
+  lint:
+    name: Lint & Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          working-directory: backend
+          args: --timeout=5m
+
+      - name: Go fmt check
+        working-directory: backend
+        run: |
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo "Please run 'go fmt' on the following files:"
+            gofmt -s -l .
+            exit 1
+          fi
+
+      - name: Go vet
+        working-directory: backend
+        run: go vet ./...
+
+      - name: Check for deprecated packages
+        working-directory: backend
+        run: go list -json -m all | jq -r 'select(.Deprecated != null) | "\(.Path) is deprecated: \(.Deprecated)"'
+
+  # ============================================
+  # SECURITY SCANNING
+  # ============================================
+  security:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Run gosec security scanner
+        uses: securego/gosec@master
+        with:
+          args: '-fmt sarif -out gosec-results.sarif ./backend/...'
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gosec-results.sarif
+
+      - name: Check for hardcoded secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+
+      - name: Dependency vulnerability scan
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  # ============================================
+  # UNIT TESTS
+  # ============================================
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['1.23.0', '1.24.0']
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Download dependencies
+        working-directory: backend
+        run: go mod download
+
+      - name: Run tests with coverage
+        working-directory: backend
+        run: |
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+          go tool cover -func=coverage.out -o=coverage.txt
+          go tool cover -html=coverage.out -o=coverage.html
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./backend/coverage.out
+          flags: unittests
+          name: codecov-umbrella
+
+      - name: Check coverage threshold
+        working-directory: backend
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < 70" | bc -l) )); then
+            echo "Coverage ${COVERAGE}% is below threshold 70%"
+            exit 1
+          fi
+
+      - name: Archive test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-go${{ matrix.go-version }}
+          path: |
+            backend/coverage.out
+            backend/coverage.html
+            backend/coverage.txt
+
+  # ============================================
+  # INTEGRATION TESTS
+  # ============================================
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: trading
+          POSTGRES_PASSWORD: trading_test
+          POSTGRES_DB: trading_engine_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Run integration tests
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://trading:trading_test@localhost:5432/trading_engine_test?sslmode=disable
+          REDIS_URL: redis://localhost:6379
+        run: |
+          go test -v -tags=integration ./... -timeout 10m
+
+  # ============================================
+  # BENCHMARKS
+  # ============================================
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          path: pr
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run benchmarks on base
+        working-directory: base/backend
+        run: |
+          go test -bench=. -benchmem -run=^$ ./... > ../base-bench.txt
+
+      - name: Run benchmarks on PR
+        working-directory: pr/backend
+        run: |
+          go test -bench=. -benchmem -run=^$ ./... > ../pr-bench.txt
+
+      - name: Compare benchmarks
+        run: |
+          go install golang.org/x/perf/cmd/benchstat@latest
+          benchstat base-bench.txt pr-bench.txt > bench-comparison.txt
+          cat bench-comparison.txt
+
+      - name: Upload benchmark comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-comparison
+          path: bench-comparison.txt
+
+  # ============================================
+  # BUILD & PUSH DOCKER IMAGES
+  # ============================================
+  build:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    needs: [lint, security, test]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [api, websocket, fix-gateway, worker]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./deployments/docker/Dockerfile.${{ matrix.service }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.service }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ============================================
+  # DEPLOY TO STAGING
+  # ============================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, integration]
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.trading-engine.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'latest'
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+          export KUBECONFIG=./kubeconfig
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install trading-engine ./deployments/helm/trading-engine \
+            --namespace staging \
+            --create-namespace \
+            --set image.tag=${{ github.sha }} \
+            --set environment=staging \
+            --set-string secrets.apiKeys="${{ secrets.STAGING_API_KEYS }}" \
+            --wait \
+            --timeout 10m
+
+      - name: Run smoke tests
+        run: |
+          kubectl wait --for=condition=ready pod -l app=trading-engine -n staging --timeout=300s
+          curl -f https://staging.trading-engine.com/health || exit 1
+
+  # ============================================
+  # DEPLOY TO PRODUCTION (Blue-Green)
+  # ============================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, integration]
+    if: github.event_name == 'release'
+    environment:
+      name: production
+      url: https://trading-engine.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > kubeconfig
+          export KUBECONFIG=./kubeconfig
+
+      - name: Determine active environment
+        id: active-env
+        run: |
+          ACTIVE=$(kubectl get service trading-engine-prod -n production -o jsonpath='{.spec.selector.environment}')
+          if [ "$ACTIVE" = "blue" ]; then
+            echo "target=green" >> $GITHUB_OUTPUT
+            echo "inactive=blue" >> $GITHUB_OUTPUT
+          else
+            echo "target=blue" >> $GITHUB_OUTPUT
+            echo "inactive=green" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy to inactive environment
+        run: |
+          helm upgrade --install trading-engine-${{ steps.active-env.outputs.target }} \
+            ./deployments/helm/trading-engine \
+            --namespace production \
+            --set image.tag=${{ github.event.release.tag_name }} \
+            --set environment=${{ steps.active-env.outputs.target }} \
+            --set-string secrets.apiKeys="${{ secrets.PROD_API_KEYS }}" \
+            --wait \
+            --timeout 15m
+
+      - name: Run production smoke tests
+        run: |
+          kubectl wait --for=condition=ready pod \
+            -l app=trading-engine,environment=${{ steps.active-env.outputs.target }} \
+            -n production --timeout=300s
+
+          # Test the inactive (newly deployed) environment
+          POD=$(kubectl get pod -l app=trading-engine,environment=${{ steps.active-env.outputs.target }} \
+            -n production -o jsonpath='{.items[0].metadata.name}')
+          kubectl port-forward -n production $POD 8080:7999 &
+          sleep 5
+          curl -f http://localhost:8080/health || exit 1
+          kill %1
+
+      - name: Switch traffic (Blue-Green cutover)
+        run: |
+          kubectl patch service trading-engine-prod -n production \
+            -p '{"spec":{"selector":{"environment":"${{ steps.active-env.outputs.target }}"}}}'
+
+      - name: Monitor for 5 minutes
+        run: |
+          sleep 300
+          # Check error rates, latency, etc.
+          kubectl get pods -n production -l app=trading-engine,environment=${{ steps.active-env.outputs.target }}
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          kubectl patch service trading-engine-prod -n production \
+            -p '{"spec":{"selector":{"environment":"${{ steps.active-env.outputs.inactive }}"}}}'
+          exit 1
+
+      - name: Scale down old environment
+        run: |
+          kubectl scale deployment trading-engine-${{ steps.active-env.outputs.inactive }} \
+            -n production --replicas=1
+
+  # ============================================
+  # LOAD TESTING
+  # ============================================
+  load-test:
+    name: Load Testing
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: github.ref == 'refs/heads/develop'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | \
+            sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Run load test
+        run: |
+          k6 run --out json=load-test-results.json \
+            ./tests/load/load-test.js
+
+      - name: Upload load test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: load-test-results.json
+
+      - name: Analyze results
+        run: |
+          # Parse JSON and check thresholds
+          cat load-test-results.json | jq '.metrics'

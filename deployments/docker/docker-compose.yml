@@ -1,0 +1,207 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # API Server
+  # ============================================
+  api:
+    build:
+      context: ../../backend
+      dockerfile: ../deployments/docker/Dockerfile.api
+    ports:
+      - "7999:7999"
+    environment:
+      - DATABASE_URL=postgresql://trading:trading_pass@postgres:5432/trading_engine?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - OANDA_API_KEY=${OANDA_API_KEY}
+      - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
+      - JWT_SECRET=${JWT_SECRET:-default_jwt_secret_change_in_production}
+      - LOG_LEVEL=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - trading-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7999/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # ============================================
+  # WebSocket Server
+  # ============================================
+  websocket:
+    build:
+      context: ../../backend
+      dockerfile: ../deployments/docker/Dockerfile.websocket
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - API_URL=http://api:7999
+      - LOG_LEVEL=info
+    depends_on:
+      - redis
+      - api
+    networks:
+      - trading-network
+    restart: unless-stopped
+
+  # ============================================
+  # FIX Gateway
+  # ============================================
+  fix-gateway:
+    build:
+      context: ../../backend
+      dockerfile: ../deployments/docker/Dockerfile.fix-gateway
+    ports:
+      - "9090:9090"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=info
+    depends_on:
+      - redis
+    networks:
+      - trading-network
+    restart: unless-stopped
+    volumes:
+      - fix-logs:/app/logs
+      - fix-store:/app/fixstore
+
+  # ============================================
+  # Background Workers
+  # ============================================
+  worker:
+    build:
+      context: ../../backend
+      dockerfile: ../deployments/docker/Dockerfile.worker
+    environment:
+      - DATABASE_URL=postgresql://trading:trading_pass@postgres:5432/trading_engine?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - trading-network
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+
+  # ============================================
+  # PostgreSQL Database
+  # ============================================
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=trading
+      - POSTGRES_PASSWORD=trading_pass
+      - POSTGRES_DB=trading_engine
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - trading-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # Redis Cache
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - trading-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ============================================
+  # Prometheus (Metrics)
+  # ============================================
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    networks:
+      - trading-network
+    restart: unless-stopped
+
+  # ============================================
+  # Grafana (Dashboards)
+  # ============================================
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - trading-network
+    restart: unless-stopped
+
+  # ============================================
+  # Jaeger (Distributed Tracing)
+  # ============================================
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    networks:
+      - trading-network
+    restart: unless-stopped
+
+networks:
+  trading-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+  fix-logs:
+  fix-store:

@@ -1,0 +1,210 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [main, develop, feature/*]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  GO_VERSION: '1.24.0'
+  GOLANGCI_LINT_VERSION: 'v1.61.0'
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: trading_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Run unit tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/trading_test?sslmode=disable
+          REDIS_URL: redis://localhost:6379
+        run: |
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/trading_test?sslmode=disable
+          REDIS_URL: redis://localhost:6379
+        run: |
+          go test -v -tags=integration ./tests/integration/...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: --timeout=5m
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run staticcheck
+        uses: dominikh/staticcheck-action@v1.3.0
+        with:
+          version: "2023.1.6"
+          install-go: false
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build binary
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo \
+            -ldflags="-s -w -X main.Version=${{ github.sha }} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o bin/trading-engine ./cmd/server
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trading-engine-${{ github.sha }}
+          path: bin/trading-engine
+          retention-days: 7
+
+  docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/trading-engine
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./deployments/Dockerfile.backend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/trading-engine:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/trading-engine:buildcache,mode=max
+          build-args: |
+            VERSION=${{ github.sha }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
+
+  security-check:
+    name: Security Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@master
+        with:
+          args: '-fmt sarif -out gosec-results.sarif ./...'
+
+      - name: Upload Gosec results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'gosec-results.sarif'

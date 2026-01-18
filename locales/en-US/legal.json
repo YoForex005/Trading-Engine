@@ -1,0 +1,79 @@
+{
+  "termsOfService": {
+    "title": "Terms of Service",
+    "lastUpdated": "Last updated: {{date}}",
+    "acceptance": "By using our platform, you agree to these terms.",
+    "tradingRisks": "Trading involves substantial risk of loss.",
+    "ageRequirement": "You must be at least 18 years old to use this service.",
+    "jurisdictionRestrictions": "Service may not be available in all jurisdictions.",
+    "accountTermination": "We reserve the right to terminate accounts violating our terms.",
+    "disputeResolution": "Disputes will be resolved through binding arbitration.",
+    "governingLaw": "These terms are governed by the laws of {{jurisdiction}}."
+  },
+  "privacyPolicy": {
+    "title": "Privacy Policy",
+    "lastUpdated": "Last updated: {{date}}",
+    "dataCollection": "We collect personal data to provide our services.",
+    "dataUsage": "Your data is used for account management and regulatory compliance.",
+    "dataSharing": "We do not sell your personal information to third parties.",
+    "dataRetention": "Data is retained as required by law.",
+    "yourRights": "You have the right to access, correct, or delete your data.",
+    "cookies": "We use cookies to improve your experience.",
+    "thirdPartyServices": "We may use third-party services that collect data.",
+    "dataProtection": "We implement industry-standard security measures.",
+    "gdprCompliance": "We comply with GDPR for EU residents.",
+    "ccpaCompliance": "We comply with CCPA for California residents."
+  },
+  "riskDisclosure": {
+    "title": "Risk Disclosure",
+    "generalWarning": "Trading financial instruments carries a high level of risk.",
+    "leverageRisk": "Leverage can magnify both profits and losses.",
+    "volatilityRisk": "Market volatility can result in rapid losses.",
+    "liquidityRisk": "Some instruments may have limited liquidity.",
+    "technologyRisk": "Technical failures may affect order execution.",
+    "regulatoryRisk": "Regulatory changes may impact trading.",
+    "pastPerformance": "Past performance is not indicative of future results.",
+    "professionalAdvice": "Consider seeking professional financial advice.",
+    "suitabilityAssessment": "Ensure trading is suitable for your financial situation.",
+    "lossWarning": "You may lose all of your invested capital."
+  },
+  "aml": {
+    "title": "Anti-Money Laundering Policy",
+    "kycRequirement": "Identity verification is required for all users.",
+    "documentVerification": "Supporting documents must be provided.",
+    "sourceOfFunds": "Source of funds may be requested.",
+    "suspiciousActivity": "Suspicious activity will be reported to authorities.",
+    "complianceObligation": "We comply with all applicable AML regulations.",
+    "sanctionsScreening": "Transactions are screened against sanctions lists.",
+    "recordKeeping": "Records are maintained as required by law.",
+    "trainingProgram": "Our staff receives regular AML training."
+  },
+  "regionalNotices": {
+    "us": {
+      "title": "Notice to U.S. Residents",
+      "cftcWarning": "Trading on margin carries a high level of risk.",
+      "finraDisclosure": "Not all instruments are suitable for all investors.",
+      "secCompliance": "We comply with SEC regulations.",
+      "stateLicensing": "Licensed in applicable states."
+    },
+    "eu": {
+      "title": "Notice to EU Residents",
+      "mifidCompliance": "We comply with MiFID II regulations.",
+      "esmaWarnings": "CFDs are complex instruments with high risk.",
+      "negativeBalanceProtection": "Negative balance protection is provided.",
+      "leverageLimits": "Leverage limits apply as per ESMA guidelines."
+    },
+    "uk": {
+      "title": "Notice to UK Residents",
+      "fcaAuthorization": "Authorized and regulated by the FCA.",
+      "fscsProtection": "Eligible deposits protected by FSCS.",
+      "clientMoney": "Client funds held in segregated accounts."
+    },
+    "asia": {
+      "title": "Notice to Asian Residents",
+      "localRegulation": "Subject to local regulatory requirements.",
+      "restrictedJurisdictions": "Service not available in some countries.",
+      "localLicensing": "Licensed where required by local law."
+    }
+  }
+}

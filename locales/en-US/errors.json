@@ -1,0 +1,64 @@
+{
+  "network": {
+    "timeout": "Request timed out. Please try again.",
+    "offline": "You are offline. Please check your internet connection.",
+    "serverError": "Server error occurred. Please try again later.",
+    "unauthorized": "You are not authorized to perform this action.",
+    "forbidden": "Access denied.",
+    "notFound": "The requested resource was not found.",
+    "badRequest": "Invalid request. Please check your input.",
+    "tooManyRequests": "Too many requests. Please slow down."
+  },
+  "authentication": {
+    "invalidCredentials": "Invalid email or password.",
+    "sessionExpired": "Your session has expired. Please log in again.",
+    "accountLocked": "Your account has been locked. Please contact support.",
+    "accountDisabled": "Your account has been disabled.",
+    "passwordTooWeak": "Password is too weak. Please use a stronger password.",
+    "passwordsDoNotMatch": "Passwords do not match.",
+    "emailAlreadyExists": "This email is already registered.",
+    "invalidToken": "Invalid or expired token.",
+    "twoFactorRequired": "Two-factor authentication is required.",
+    "invalidTwoFactorCode": "Invalid two-factor authentication code."
+  },
+  "trading": {
+    "insufficientBalance": "Insufficient balance to place this order.",
+    "invalidOrderSize": "Invalid order size. Minimum: {{min}}, Maximum: {{max}}.",
+    "invalidPrice": "Invalid price.",
+    "marketClosed": "Market is currently closed.",
+    "instrumentNotAvailable": "This instrument is not available for trading.",
+    "orderRejected": "Order was rejected by the broker.",
+    "positionNotFound": "Position not found.",
+    "cannotClosePosition": "Cannot close position at this time.",
+    "leverageTooHigh": "Leverage exceeds maximum allowed.",
+    "marginCallTriggered": "Margin call triggered. Please add funds or close positions.",
+    "riskLimitExceeded": "Risk limit exceeded.",
+    "orderSizeTooSmall": "Order size is below minimum.",
+    "orderSizeTooLarge": "Order size exceeds maximum.",
+    "invalidStopLoss": "Invalid stop loss price.",
+    "invalidTakeProfit": "Invalid take profit price."
+  },
+  "validation": {
+    "invalidEmail": "Please enter a valid email address.",
+    "invalidPhone": "Please enter a valid phone number.",
+    "invalidDate": "Please enter a valid date.",
+    "invalidNumber": "Please enter a valid number.",
+    "valueTooLow": "Value is too low. Minimum: {{min}}.",
+    "valueTooHigh": "Value is too high. Maximum: {{max}}.",
+    "fieldRequired": "This field is required.",
+    "invalidFormat": "Invalid format.",
+    "invalidLength": "Length must be between {{min}} and {{max}} characters."
+  },
+  "general": {
+    "unknownError": "An unknown error occurred. Please try again.",
+    "operationFailed": "Operation failed. Please try again.",
+    "dataLoadFailed": "Failed to load data.",
+    "saveFailed": "Failed to save changes.",
+    "deleteFailed": "Failed to delete item.",
+    "updateFailed": "Failed to update.",
+    "uploadFailed": "File upload failed.",
+    "downloadFailed": "File download failed.",
+    "connectionLost": "Connection lost. Attempting to reconnect...",
+    "maintenanceMode": "System is under maintenance. Please try again later."
+  }
+}

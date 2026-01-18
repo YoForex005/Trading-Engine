@@ -1,0 +1,168 @@
+version: '3.9'
+
+# Production-like environment configuration
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rtx_prod}
+      POSTGRES_USER: ${POSTGRES_USER:-rtx_prod_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=1GB"
+      - "-c"
+      - "maintenance_work_mem=64MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "default_statistics_target=100"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "work_mem=2621kB"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "max_wal_size=4GB"
+      - "-c"
+      - "max_worker_processes=4"
+      - "-c"
+      - "max_parallel_workers_per_gather=2"
+      - "-c"
+      - "max_parallel_workers=4"
+      - "-c"
+      - "max_parallel_maintenance_workers=2"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  redis:
+    command:
+      - redis-server
+      - --appendonly yes
+      - --requirepass ${REDIS_PASSWORD}
+      - --maxmemory 512mb
+      - --maxmemory-policy allkeys-lru
+      - --save 900 1
+      - --save 300 10
+      - --save 60 10000
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  backend:
+    environment:
+      GIN_MODE: release
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rtx_prod_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rtx_prod}?sslmode=require
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      JWT_SECRET: ${JWT_SECRET}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: production
+      ENABLE_METRICS: 'true'
+      ENABLE_PROFILING: 'false'
+      DB_MAX_OPEN_CONNS: 100
+      DB_MAX_IDLE_CONNS: 20
+      REDIS_POOL_SIZE: 50
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        monitor: 60s
+        max_failure_ratio: 0.3
+        order: start-first
+
+  prometheus:
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  grafana:
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_SERVER_ROOT_URL: https://grafana.rtx-trading.com
+      GF_SECURITY_COOKIE_SECURE: 'true'
+      GF_SECURITY_COOKIE_SAMESITE: 'strict'
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: rtx-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - backend
+    networks:
+      - rtx-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M

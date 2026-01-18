@@ -1,0 +1,56 @@
+{
+  "sessions": [
+    {
+      "id": "YOFX1",
+      "name": "YOFX Trading Account",
+      "enabled": true,
+      "purpose": "Order placement and trading operations",
+      "connection": {
+        "targetIP": "23.106.238.138",
+        "targetPort": 12336,
+        "ssl": false
+      },
+      "fixProtocol": {
+        "beginString": "FIX.4.4",
+        "senderCompID": "YOFX1",
+        "targetCompID": "YOFX"
+      },
+      "authentication": {
+        "username": "YOFX1",
+        "password": "Brand#143"
+      },
+      "tradingAccount": "50153",
+      "settings": {
+        "heartBeatInterval": 30,
+        "reconnectInterval": 30,
+        "logonTimeout": 10
+      }
+    },
+    {
+      "id": "YOFX2",
+      "name": "YOFX Market Data Feed",
+      "enabled": true,
+      "purpose": "Market data feeds only",
+      "connection": {
+        "targetIP": "23.106.238.138",
+        "targetPort": 12336,
+        "ssl": false
+      },
+      "fixProtocol": {
+        "beginString": "FIX.4.4",
+        "senderCompID": "YOFX2",
+        "targetCompID": "YOFX"
+      },
+      "authentication": {
+        "username": "YOFX2",
+        "password": "Brand#143"
+      },
+      "tradingAccount": "50153",
+      "settings": {
+        "heartBeatInterval": 30,
+        "reconnectInterval": 30,
+        "logonTimeout": 10
+      }
+    }
+  ]
+}

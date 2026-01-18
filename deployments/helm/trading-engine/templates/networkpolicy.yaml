@@ -1,0 +1,117 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "trading-engine.fullname" . }}-api
+  labels:
+    {{- include "trading-engine.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "trading-engine.selectorLabels" . | nindent 6 }}
+      component: api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 7999
+    # Allow from websocket service
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "trading-engine.selectorLabels" . | nindent 14 }}
+              component: websocket
+      ports:
+        - protocol: TCP
+          port: 7999
+  egress:
+    # Allow to PostgreSQL
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Allow to Redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow HTTPS for external APIs
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "trading-engine.fullname" . }}-websocket
+  labels:
+    {{- include "trading-engine.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "trading-engine.selectorLabels" . | nindent 6 }}
+      component: websocket
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # Allow to API service
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "trading-engine.selectorLabels" . | nindent 14 }}
+              component: api
+      ports:
+        - protocol: TCP
+          port: 7999
+    # Allow to Redis
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+{{- end }}

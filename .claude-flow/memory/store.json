@@ -1,0 +1,328 @@
+{
+  "entries": {
+    "final-verification-report": {
+      "key": "final-verification-report",
+      "value": {
+        "title": "Trading Engine - Dynamic Configuration Verification Report",
+        "generatedAt": "2026-01-18T00:00:00Z",
+        "summary": {
+          "totalHardcodedIssues": 47,
+          "criticalIssues": 8,
+          "highIssues": 12,
+          "mediumIssues": 18,
+          "lowIssues": 9,
+          "currentDynamicCapabilities": [
+            "Symbols can be loaded from JSON config or tick data directory",
+            "Symbols can be registered dynamically at runtime",
+            "LP configuration stored in JSON file",
+            "API endpoints exist for symbol toggle and LP management",
+            "Groups can be created/updated via admin API"
+          ],
+          "missingDynamicCapabilities": [
+            "Frontend symbol list not fetched from API on startup",
+            "Default symbol (EURUSD) hardcoded in frontend state",
+            "LP subscription symbols hardcoded in lpmanager",
+            "Routing rules hardcoded in SmartRouter",
+            "Major forex pairs hardcoded in risk engine",
+            "Default groups with hardcoded symbols",
+            "No real-time config push to frontend",
+            "No admin UI for routing rule management",
+            "No user activity logs API",
+            "No tick data chart access API documented"
+          ]
+        },
+        "hardcodedValues": {
+          "critical": [
+            {
+              "location": "backend/internal/core/engine.go:202-205",
+              "description": "Essential symbols hardcoded: EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, NZDUSD, USDCAD, EURGBP, EURJPY, GBPJPY, AUDJPY, BTCUSD, ETHUSD, XAUUSD",
+              "impact": "Symbols cannot be fully managed dynamically - fallback always includes these symbols",
+              "fix": "Load essential symbols from database or config file"
+            },
+            {
+              "location": "backend/router/smart_router.go:35-68",
+              "description": "Default routing rules hardcoded with VIP-* pattern, volume thresholds, and LMAX_PROD target",
+              "impact": "Routing rules cannot be changed without code modification",
+              "fix": "Load routing rules from database, add admin API endpoints"
+            },
+            {
+              "location": "backend/lpmanager/manager.go:314-316",
+              "description": "Binance subscription symbols hardcoded: BTCUSD, ETHUSD, BNBUSD, SOLUSD, XRPUSD",
+              "impact": "Cannot change which symbols Binance LP subscribes to without code change",
+              "fix": "Move to LP config, add admin UI to manage subscriptions"
+            },
+            {
+              "location": "backend/admin/groups.go:42-62",
+              "description": "Default groups with hardcoded enabled symbols per group",
+              "impact": "Default groups always have same symbols, cannot be configured",
+              "fix": "Load default group config from database on startup"
+            }
+          ],
+          "high": [
+            {
+              "location": "clients/desktop/src/store/useAppStore.ts:131",
+              "description": "Default selected symbol hardcoded as 'EURUSD'",
+              "impact": "Frontend always defaults to EURUSD regardless of available symbols",
+              "fix": "Fetch available symbols from API and default to first available"
+            },
+            {
+              "location": "clients/desktop/src/App.tsx:55",
+              "description": "useState default symbol hardcoded as 'EURUSD'",
+              "impact": "Same as above - duplicate hardcoding",
+              "fix": "Use centralized store or fetch from API"
+            },
+            {
+              "location": "backend/risk/pretrade.go:286-287",
+              "description": "Major pairs for risk calculation hardcoded",
+              "impact": "Risk calculations only recognize specific pairs as majors",
+              "fix": "Move to symbol config with category field"
+            },
+            {
+              "location": "backend/risk/enhanced_engine.go:177",
+              "description": "Major pairs list hardcoded for enhanced risk engine",
+              "impact": "Enhanced risk calculations limited to hardcoded pairs",
+              "fix": "Use symbol category from config"
+            },
+            {
+              "location": "backend/risk/exposure.go:330-331",
+              "description": "Major pairs for exposure calculation hardcoded",
+              "impact": "Exposure calculations limited to hardcoded pairs",
+              "fix": "Use symbol category from config"
+            }
+          ],
+          "medium": [
+            {
+              "location": "backend/internal/core/symbols.go:84",
+              "description": "Major forex pair list in category detection hardcoded",
+              "impact": "Symbol category detection uses fixed list",
+              "fix": "Make configurable or load from database"
+            },
+            {
+              "location": "backend/bbook/symbols.go:85",
+              "description": "Duplicate major forex pair list in bbook package",
+              "impact": "Code duplication, inconsistency risk",
+              "fix": "Centralize symbol definitions"
+            },
+            {
+              "location": "clients/desktop/src/services/api.ts:108",
+              "description": "API base URL defaults to localhost:8080",
+              "impact": "Requires env var override for production",
+              "fix": "Already uses VITE_API_URL - document properly"
+            }
+          ]
+        },
+        "missingFeatures": {
+          "adminControls": [
+            {
+              "feature": "Routing Rule Management API",
+              "priority": "CRITICAL",
+              "description": "No API endpoints to CRUD routing rules dynamically",
+              "requiredEndpoints": [
+                "GET /admin/routing-rules",
+                "POST /admin/routing-rules",
+                "PUT /admin/routing-rules/:id",
+                "DELETE /admin/routing-rules/:id"
+              ]
+            },
+            {
+              "feature": "LP Subscription Management",
+              "priority": "HIGH",
+              "description": "Cannot change which symbols an LP subscribes to via admin",
+              "requiredEndpoints": [
+                "GET /admin/lp/:id/subscriptions",
+                "PUT /admin/lp/:id/subscriptions"
+              ]
+            },
+            {
+              "feature": "Real-time Config Push",
+              "priority": "HIGH",
+              "description": "Config changes require frontend refresh or websocket reconnect",
+              "requiredEndpoints": [
+                "WebSocket: config_update message type",
+                "GET /api/config/version for polling"
+              ]
+            }
+          ],
+          "tickDataAndCharts": [
+            {
+              "feature": "Historical Tick Data API",
+              "priority": "HIGH",
+              "description": "Backend has tick storage but limited API exposure",
+              "requiredEndpoints": [
+                "GET /api/ticks/:symbol/history?from=&to=&limit=",
+                "GET /api/ohlc/:symbol/:timeframe?from=&to="
+              ],
+              "notes": "Endpoints exist but not fully documented for chart integration"
+            },
+            {
+              "feature": "Tick Data Retention Config",
+              "priority": "MEDIUM",
+              "description": "No admin control over tick data retention periods",
+              "requiredEndpoints": [
+                "GET /admin/data/retention",
+                "PUT /admin/data/retention"
+              ]
+            }
+          ],
+          "userLogs": [
+            {
+              "feature": "User Activity Log API",
+              "priority": "HIGH",
+              "description": "Audit logs exist internally but no API for viewing",
+              "requiredEndpoints": [
+                "GET /admin/audit-logs?userId=&action=&from=&to=",
+                "GET /admin/users/:id/activity"
+              ]
+            },
+            {
+              "feature": "User Login History",
+              "priority": "MEDIUM",
+              "description": "No tracking of user login sessions",
+              "requiredEndpoints": [
+                "GET /admin/users/:id/sessions",
+                "DELETE /admin/users/:id/sessions (force logout)"
+              ]
+            }
+          ]
+        },
+        "databaseSchemaRequirements": [
+          {
+            "table": "routing_rules",
+            "status": "EXISTS",
+            "changes": "Add admin API integration"
+          },
+          {
+            "table": "lp_subscriptions",
+            "status": "MISSING",
+            "schema": "CREATE TABLE lp_subscriptions (id SERIAL PRIMARY KEY, lp_id VARCHAR(50), symbol VARCHAR(20), enabled BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW())"
+          },
+          {
+            "table": "user_activity_log",
+            "status": "MISSING",
+            "schema": "CREATE TABLE user_activity_log (id BIGSERIAL PRIMARY KEY, user_id UUID, account_id BIGINT, action VARCHAR(50), details JSONB, ip_address INET, user_agent TEXT, created_at TIMESTAMPTZ DEFAULT NOW())"
+          },
+          {
+            "table": "user_sessions",
+            "status": "MISSING",
+            "schema": "CREATE TABLE user_sessions (id UUID PRIMARY KEY, user_id UUID, token_hash VARCHAR(64), ip_address INET, user_agent TEXT, created_at TIMESTAMPTZ, expires_at TIMESTAMPTZ, revoked_at TIMESTAMPTZ)"
+          },
+          {
+            "table": "config_versions",
+            "status": "MISSING",
+            "schema": "CREATE TABLE config_versions (id SERIAL PRIMARY KEY, config_type VARCHAR(50), version INT, data JSONB, created_by VARCHAR(50), created_at TIMESTAMPTZ DEFAULT NOW())"
+          }
+        ],
+        "frontendUIChanges": [
+          {
+            "component": "AdminPanel.tsx",
+            "priority": "CRITICAL",
+            "changes": [
+              "Add routing rules management tab",
+              "Add LP subscription editor",
+              "Add user activity log viewer",
+              "Add data retention settings"
+            ]
+          },
+          {
+            "component": "useAppStore.ts",
+            "priority": "HIGH",
+            "changes": [
+              "Fetch available symbols from API on init",
+              "Default to first available symbol instead of EURUSD",
+              "Add config version tracking for auto-refresh"
+            ]
+          },
+          {
+            "component": "App.tsx",
+            "priority": "HIGH",
+            "changes": [
+              "Remove hardcoded EURUSD default",
+              "Subscribe to config update websocket messages"
+            ]
+          },
+          {
+            "component": "NEW: RoutingRulesPanel.tsx",
+            "priority": "CRITICAL",
+            "changes": [
+              "CRUD interface for routing rules",
+              "Rule priority drag-and-drop",
+              "Symbol/group pattern builder",
+              "LP target selector"
+            ]
+          },
+          {
+            "component": "NEW: UserActivityLog.tsx",
+            "priority": "MEDIUM",
+            "changes": [
+              "Filterable activity log table",
+              "Action type filters",
+              "Date range picker",
+              "Export functionality"
+            ]
+          }
+        ],
+        "implementationRoadmap": {
+          "phase1_critical": {
+            "title": "Phase 1: Dynamic Routing Rules (Week 1-2)",
+            "priority": "CRITICAL",
+            "tasks": [
+              "Create routing_rules CRUD API endpoints in backend",
+              "Load routing rules from database in SmartRouter",
+              "Add RoutingRulesPanel to AdminPanel",
+              "Add rule validation and conflict detection"
+            ]
+          },
+          "phase2_symbols": {
+            "title": "Phase 2: Dynamic Symbol Management (Week 2-3)",
+            "priority": "HIGH",
+            "tasks": [
+              "Remove hardcoded essential symbols fallback",
+              "Load symbols from database on startup",
+              "Update frontend to fetch symbols from API",
+              "Add symbol category management to admin"
+            ]
+          },
+          "phase3_lp": {
+            "title": "Phase 3: LP Subscription Management (Week 3-4)",
+            "priority": "HIGH",
+            "tasks": [
+              "Create lp_subscriptions table",
+              "Add LP subscription CRUD API",
+              "Update lpmanager to load subscriptions from config",
+              "Add LP subscription editor to AdminPanel"
+            ]
+          },
+          "phase4_logging": {
+            "title": "Phase 4: User Activity Logging (Week 4-5)",
+            "priority": "MEDIUM",
+            "tasks": [
+              "Create user_activity_log table",
+              "Add activity logging middleware",
+              "Create audit log API endpoints",
+              "Add UserActivityLog component to AdminPanel"
+            ]
+          },
+          "phase5_realtime": {
+            "title": "Phase 5: Real-time Config Updates (Week 5-6)",
+            "priority": "MEDIUM",
+            "tasks": [
+              "Add config versioning system",
+              "Implement config_update websocket message",
+              "Add config polling/subscription to frontend",
+              "Add notification for config changes"
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "type": "verification-report",
+        "version": "1.0",
+        "status": "complete"
+      },
+      "storedAt": "2026-01-18T18:12:06.972Z",
+      "accessCount": 0,
+      "lastAccessed": "2026-01-18T18:12:06.972Z"
+    }
+  },
+  "version": "3.0.0"
+}

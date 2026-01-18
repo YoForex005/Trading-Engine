@@ -1,0 +1,363 @@
+# Kubernetes Deployment for Backup CronJobs
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trading-engine-backup
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-config
+  namespace: trading-engine-backup
+data:
+  backup.config: |
+    BACKUP_ROOT="/var/backups/trading-engine"
+    BACKUP_LOG_DIR="/var/log/trading-engine/backup"
+    DB_HOST="postgresql.trading-engine.svc.cluster.local"
+    DB_PORT="5432"
+    DB_NAME="trading_engine"
+    DB_USER="postgres"
+    REDIS_HOST="redis.trading-engine.svc.cluster.local"
+    REDIS_PORT="6379"
+    ENABLE_ENCRYPTION="true"
+    GPG_RECIPIENT="backup@trading-engine.local"
+    ENABLE_S3="true"
+    S3_BUCKET="trading-engine-backups"
+    ENABLE_VERIFICATION="true"
+    RETENTION_DAILY=7
+    RETENTION_WEEKLY=4
+    RETENTION_MONTHLY=12
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backup-secrets
+  namespace: trading-engine-backup
+type: Opaque
+stringData:
+  postgres-password: "changeme"
+  gpg-private-key: |
+    -----BEGIN PGP PRIVATE KEY BLOCK-----
+    # Your GPG private key here
+    -----END PGP PRIVATE KEY BLOCK-----
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-storage
+  namespace: trading-engine-backup
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Gi
+  storageClassName: fast-ssd
+---
+# Full Backup CronJob - Daily at 2 AM
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-full
+  namespace: trading-engine-backup
+spec:
+  schedule: "0 2 * * *"
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: backup-full
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: backup-service-account
+          containers:
+          - name: backup
+            image: trading-engine/backup:latest
+            imagePullPolicy: Always
+            command: ["/scripts/backup-full.sh"]
+            env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: postgres-password
+            - name: BACKUP_CONFIG
+              value: /config/backup.config
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /var/backups/trading-engine
+            - name: backup-logs
+              mountPath: /var/log/trading-engine/backup
+            - name: config
+              mountPath: /config
+            - name: scripts
+              mountPath: /scripts
+            - name: gpg-key
+              mountPath: /root/.gnupg
+              readOnly: true
+            resources:
+              requests:
+                cpu: 500m
+                memory: 2Gi
+              limits:
+                cpu: 2000m
+                memory: 4Gi
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage
+          - name: backup-logs
+            emptyDir: {}
+          - name: config
+            configMap:
+              name: backup-config
+          - name: scripts
+            configMap:
+              name: backup-scripts
+              defaultMode: 0755
+          - name: gpg-key
+            secret:
+              secretName: backup-secrets
+              items:
+              - key: gpg-private-key
+                path: private-key.asc
+---
+# Incremental Backup CronJob - Every 4 hours
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-incremental
+  namespace: trading-engine-backup
+spec:
+  schedule: "0 */4 * * *"
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: backup-incremental
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: backup-service-account
+          containers:
+          - name: backup
+            image: trading-engine/backup:latest
+            command: ["/scripts/backup-incremental.sh"]
+            env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secrets
+                  key: postgres-password
+            - name: BACKUP_CONFIG
+              value: /config/backup.config
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /var/backups/trading-engine
+            - name: config
+              mountPath: /config
+            - name: scripts
+              mountPath: /scripts
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+              limits:
+                cpu: 1000m
+                memory: 1Gi
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage
+          - name: config
+            configMap:
+              name: backup-config
+          - name: scripts
+            configMap:
+              name: backup-scripts
+              defaultMode: 0755
+---
+# Backup Verification CronJob - Daily at 3 AM
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-verify
+  namespace: trading-engine-backup
+spec:
+  schedule: "0 3 * * *"
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: backup-verify
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: verify
+            image: trading-engine/backup:latest
+            command: ["/scripts/run-verification.sh"]
+            env:
+            - name: BACKUP_CONFIG
+              value: /config/backup.config
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /var/backups/trading-engine
+            - name: config
+              mountPath: /config
+            - name: scripts
+              mountPath: /scripts
+            resources:
+              requests:
+                cpu: 500m
+                memory: 1Gi
+              limits:
+                cpu: 1500m
+                memory: 2Gi
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage
+          - name: config
+            configMap:
+              name: backup-config
+          - name: scripts
+            configMap:
+              name: backup-scripts
+              defaultMode: 0755
+---
+# Backup Cleanup CronJob - Daily at 4 AM
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-cleanup
+  namespace: trading-engine-backup
+spec:
+  schedule: "0 4 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: cleanup
+            image: trading-engine/backup:latest
+            command: ["/scripts/cleanup-old-backups.sh"]
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /var/backups/trading-engine
+            - name: scripts
+              mountPath: /scripts
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage
+          - name: scripts
+            configMap:
+              name: backup-scripts
+              defaultMode: 0755
+---
+# Health Check CronJob - Hourly
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-health
+  namespace: trading-engine-backup
+spec:
+  schedule: "0 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: health
+            image: trading-engine/backup:latest
+            command: ["/scripts/backup-health-check.sh"]
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /var/backups/trading-engine
+            - name: scripts
+              mountPath: /scripts
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage
+          - name: scripts
+            configMap:
+              name: backup-scripts
+              defaultMode: 0755
+---
+# DR Test CronJob - Monthly (First Sunday at 5 AM)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-dr-test
+  namespace: trading-engine-backup
+spec:
+  schedule: "0 5 1-7 * 0"  # First Sunday of month at 5 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: dr-test
+            image: trading-engine/backup:latest
+            command: ["/scripts/dr-test.sh"]
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /var/backups/trading-engine
+            - name: scripts
+              mountPath: /scripts
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage
+          - name: scripts
+            configMap:
+              name: backup-scripts
+              defaultMode: 0755
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backup-service-account
+  namespace: trading-engine-backup
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: backup-role
+  namespace: trading-engine-backup
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: backup-role-binding
+  namespace: trading-engine-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: backup-role
+subjects:
+- kind: ServiceAccount
+  name: backup-service-account
+  namespace: trading-engine-backup

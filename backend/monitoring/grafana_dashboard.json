@@ -1,0 +1,213 @@
+{
+  "dashboard": {
+    "title": "Trading Engine - Production Monitoring",
+    "tags": ["trading", "production", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "Order Execution Latency (P50, P95, P99)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(trading_order_execution_latency_milliseconds_bucket[5m]))",
+            "legendFormat": "P50 - {{order_type}}"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(trading_order_execution_latency_milliseconds_bucket[5m]))",
+            "legendFormat": "P95 - {{order_type}}"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(trading_order_execution_latency_milliseconds_bucket[5m]))",
+            "legendFormat": "P99 - {{order_type}}"
+          }
+        ],
+        "yaxes": [
+          {"label": "Latency (ms)", "format": "ms"}
+        ]
+      },
+      {
+        "title": "Order Success Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "rate(trading_orders_total{status=\"success\"}[5m]) / rate(trading_orders_total[5m])",
+            "legendFormat": "Success Rate - {{order_type}}"
+          }
+        ],
+        "yaxes": [
+          {"label": "Success Rate", "format": "percentunit", "max": 1}
+        ]
+      },
+      {
+        "title": "Active Positions by Symbol",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "sum by (symbol) (trading_active_positions)",
+            "legendFormat": "{{symbol}}"
+          }
+        ],
+        "yaxes": [
+          {"label": "Position Count", "format": "short"}
+        ]
+      },
+      {
+        "title": "Unrealized P&L by Symbol",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "sum by (symbol) (trading_position_pnl_usd)",
+            "legendFormat": "{{symbol}}"
+          }
+        ],
+        "yaxes": [
+          {"label": "P&L (USD)", "format": "currencyUSD"}
+        ]
+      },
+      {
+        "title": "LP Connection Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "trading_lp_connected",
+            "legendFormat": "{{lp_name}} - {{connection_type}}"
+          }
+        ],
+        "mappings": [
+          {"value": 1, "text": "Connected", "color": "green"},
+          {"value": 0, "text": "Disconnected", "color": "red"}
+        ]
+      },
+      {
+        "title": "LP Latency (P95)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(trading_lp_latency_milliseconds_bucket[5m]))",
+            "legendFormat": "{{lp_name}} - {{operation}}"
+          }
+        ],
+        "yaxes": [
+          {"label": "Latency (ms)", "format": "ms"}
+        ]
+      },
+      {
+        "title": "Memory Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 20},
+        "targets": [
+          {
+            "expr": "trading_memory_usage_bytes / (1024 * 1024)",
+            "legendFormat": "Memory Usage (MB)"
+          }
+        ],
+        "yaxes": [
+          {"label": "Memory (MB)", "format": "decmbytes"}
+        ]
+      },
+      {
+        "title": "Goroutine Count",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 20},
+        "targets": [
+          {
+            "expr": "trading_goroutines_count",
+            "legendFormat": "Goroutines"
+          }
+        ],
+        "yaxes": [
+          {"label": "Count", "format": "short"}
+        ]
+      },
+      {
+        "title": "API Request Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
+        "targets": [
+          {
+            "expr": "sum by (endpoint) (rate(trading_api_requests_total[5m]))",
+            "legendFormat": "{{endpoint}}"
+          }
+        ],
+        "yaxes": [
+          {"label": "Requests/s", "format": "reqps"}
+        ]
+      },
+      {
+        "title": "Database Query Latency (P95)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(trading_db_query_duration_milliseconds_bucket[5m]))",
+            "legendFormat": "{{operation}} - {{table}}"
+          }
+        ],
+        "yaxes": [
+          {"label": "Latency (ms)", "format": "ms"}
+        ]
+      },
+      {
+        "title": "WebSocket Connections",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 36},
+        "targets": [
+          {
+            "expr": "trading_websocket_connections",
+            "legendFormat": "Active Connections"
+          }
+        ]
+      },
+      {
+        "title": "Trading Volume (Last Hour)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 36},
+        "targets": [
+          {
+            "expr": "sum(increase(trading_volume_lots_total[1h]))",
+            "legendFormat": "Total Volume (lots)"
+          }
+        ]
+      },
+      {
+        "title": "Account Balance",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+        "targets": [
+          {
+            "expr": "trading_account_balance_usd",
+            "legendFormat": "{{account_id}}"
+          }
+        ],
+        "yaxes": [
+          {"label": "Balance (USD)", "format": "currencyUSD"}
+        ]
+      },
+      {
+        "title": "Margin Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40},
+        "targets": [
+          {
+            "expr": "trading_account_margin_used_usd / trading_account_equity_usd",
+            "legendFormat": "{{account_id}}"
+          }
+        ],
+        "yaxes": [
+          {"label": "Margin Usage", "format": "percentunit", "max": 1}
+        ]
+      }
+    ],
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    }
+  }
+}

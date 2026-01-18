@@ -1,0 +1,99 @@
+@import "tailwindcss";
+@import "./styles/theme.css";
+
+/* Trading Terminal Custom Styles */
+.trading-terminal {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Price flash animation classes */
+.price-up {
+  color: var(--color-profit);
+  text-shadow: 0 0 8px var(--color-profit-dimmer);
+}
+
+.price-down {
+  color: var(--color-loss);
+  text-shadow: 0 0 8px var(--color-loss-dimmer);
+}
+
+/* Smooth panel transitions */
+.panel-enter {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.panel-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity var(--transition-base), transform var(--transition-base);
+}
+
+/* Floating panel shadow */
+.floating-panel {
+  box-shadow: var(--shadow-xl);
+  backdrop-filter: blur(8px);
+}
+
+/* Professional input styling */
+input[type="number"],
+input[type="text"],
+select {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Chart container optimization */
+.chart-container {
+  contain: layout style paint;
+  will-change: transform;
+}
+
+/* Virtualized list optimization */
+.virtualized-list {
+  contain: strict;
+  overflow-anchor: none;
+}
+
+/* No-select for draggable elements */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+}
+
+/* Focus ring for accessibility */
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Custom number increment buttons */
+.number-input-controls {
+  display: flex;
+  flex-direction: column;
+}
+
+.number-input-controls button {
+  padding: 0;
+  height: 12px;
+  line-height: 1;
+  font-size: 8px;
+}
+
+/* Grid layout utilities */
+.grid-auto-fit {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.grid-auto-fill {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}

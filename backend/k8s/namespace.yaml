@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rtx-prod
+  labels:
+    name: rtx-prod
+    environment: production
+    app: rtx-trading-engine
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rtx-staging
+  labels:
+    name: rtx-staging
+    environment: staging
+    app: rtx-trading-engine
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rtx-dev
+  labels:
+    name: rtx-dev
+    environment: development
+    app: rtx-trading-engine

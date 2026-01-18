@@ -1,0 +1,43 @@
+fix/
+│
+├── 📂 cmd/                         Application Entry Points
+│   └── 📂 tests/                   Test Executables
+│       ├── test_all_features.go         Full YOFX1 feature test
+│       ├── test_connection.go           Basic connectivity test
+│       ├── test_order_placement.go      Order execution test
+│       ├── test_securities_list.go      Symbol discovery test
+│       └── test_yofx2_marketdata.go     YOFX2 market data test
+│
+├── 📂 config/                      Configuration Files
+│   ├── sessions.json                    Both YOFX1 & YOFX2 configs
+│   └── yofx1_session.cfg               Legacy INI format
+│
+├── 📂 docs/                        Documentation
+│   ├── README.md                        Session details & usage
+│   ├── deploy_vps.md                    VPS deployment guide
+│   └── test_summary.md                  Test results & API capabilities
+│
+├── 📂 internal/                    Private Application Code
+│   ├── 📂 gateway/                      FIX gateway core (ready for code)
+│   ├── 📂 session/                      Session management (ready for code)
+│   └── 📂 message/                      Message handlers (ready for code)
+│
+├── 📂 pkg/                         Public Reusable Packages
+│   ├── 📂 fixclient/                    FIX client library (ready for code)
+│   └── 📂 types/                        Shared types (ready for code)
+│
+├── 📂 scripts/                     Utility Scripts
+│   └── ssh_tunnel.sh                    SSH tunnel for port forwarding
+│
+├── 📂 examples/                    Usage Examples
+│   └── (Ready for examples)
+│
+├── 📂 backup/                      Temporary Backup (old files)
+│
+├── 📄 gateway.go                   Main Implementation (to be refactored)
+├── 📄 README.md                    Main Project Documentation
+├── 📄 STRUCTURE.md                 Detailed Structure Guide
+├── 📄 REORGANIZATION_SUMMARY.md    This Reorganization Summary
+├── 📄 FOLDER_TREE.txt              Visual Folder Structure
+└── 📄 .gitignore                   Git Ignore Rules
+

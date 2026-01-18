@@ -1,0 +1,304 @@
+# ============================================
+# Default values for trading-engine
+# ============================================
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/epic1st/trading-engine
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+# ============================================
+# API Server Configuration
+# ============================================
+api:
+  enabled: true
+  replicaCount: 3
+  service:
+    type: ClusterIP
+    port: 7999
+    targetPort: 7999
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 7999
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 7999
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# ============================================
+# WebSocket Server Configuration
+# ============================================
+websocket:
+  enabled: true
+  replicaCount: 5
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 5
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 60
+    targetMemoryUtilizationPercentage: 70
+
+# ============================================
+# FIX Gateway Configuration
+# ============================================
+fixGateway:
+  enabled: true
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 9090
+    targetPort: 9090
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 10Gi
+
+# ============================================
+# Worker Configuration
+# ============================================
+worker:
+  enabled: true
+  replicaCount: 2
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+# ============================================
+# Ingress Configuration
+# ============================================
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  hosts:
+    - host: api.trading-engine.com
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: trading-engine-api
+              port: 7999
+    - host: ws.trading-engine.com
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: trading-engine-websocket
+              port: 8080
+  tls:
+    - secretName: trading-engine-tls
+      hosts:
+        - api.trading-engine.com
+        - ws.trading-engine.com
+
+# ============================================
+# PostgreSQL Configuration
+# ============================================
+postgresql:
+  enabled: true
+  auth:
+    username: trading
+    password: ""  # Set via secrets
+    database: trading_engine
+  primary:
+    persistence:
+      enabled: true
+      size: 50Gi
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+  metrics:
+    enabled: true
+  readReplicas:
+    replicaCount: 2
+
+# ============================================
+# Redis Configuration
+# ============================================
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+    password: ""  # Set via secrets
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+  replica:
+    replicaCount: 2
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# ============================================
+# Environment Variables
+# ============================================
+env:
+  - name: LOG_LEVEL
+    value: "info"
+  - name: ENVIRONMENT
+    value: "production"
+
+secrets:
+  apiKeys:
+    oandaApiKey: ""
+    oandaAccountId: ""
+  jwt:
+    secret: ""
+  database:
+    password: ""
+  redis:
+    password: ""
+
+# ============================================
+# Network Policies
+# ============================================
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+
+# ============================================
+# Service Mesh (Istio)
+# ============================================
+serviceMesh:
+  enabled: false
+  istio:
+    enabled: false
+    virtualService:
+      enabled: true
+    destinationRule:
+      enabled: true
+
+# ============================================
+# Monitoring
+# ============================================
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+  prometheusRule:
+    enabled: true
+
+# ============================================
+# Pod Disruption Budget
+# ============================================
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# ============================================
+# Node Affinity
+# ============================================
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - trading-engine
+          topologyKey: kubernetes.io/hostname

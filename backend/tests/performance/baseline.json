@@ -1,0 +1,41 @@
+{
+  "load-test": {
+    "p95": 150.0,
+    "p99": 350.0,
+    "error_rate": 0.005,
+    "order_execution_p95": 45.0,
+    "ws_latency_p95": 8.0,
+    "rps": 2500.0
+  },
+  "stress-test": {
+    "breaking_point_vus": 7000,
+    "graceful_degradation": true,
+    "p95_at_5k": 280.0,
+    "error_rate_at_5k": 0.02
+  },
+  "spike-test": {
+    "recovery_rate": 0.96,
+    "spike_errors": 150,
+    "avg_recovery_time": 180.0
+  },
+  "soak-test": {
+    "memory_leak_indicator": 1.15,
+    "performance_degradation_max": 1.4,
+    "connection_leaks": 2,
+    "data_corruption": 0,
+    "stability_rate": 0.998
+  },
+  "go-benchmarks": {
+    "order_execution_ns": 45000000,
+    "ws_broadcast_ns": 8000000,
+    "order_matching_ns": 15000000,
+    "risk_calc_ns": 5000000,
+    "pnl_calc_ns": 12000000
+  },
+  "metadata": {
+    "timestamp": "2026-01-18T14:00:00Z",
+    "version": "1.0.0",
+    "environment": "test",
+    "notes": "Initial baseline - trading engine v1.0"
+  }
+}

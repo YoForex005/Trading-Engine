@@ -1,0 +1,210 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
+    environment:
+      name: staging
+      url: https://staging.trading-engine.example.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig --name trading-engine-staging --region us-east-1
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: |
+          chmod +x ./scripts/deploy/migrate.sh
+          ./scripts/deploy/migrate.sh
+
+      - name: Deploy to Kubernetes
+        run: |
+          chmod +x ./scripts/deploy/deploy-staging.sh
+          ./scripts/deploy/deploy-staging.sh
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+
+      - name: Wait for deployment
+        run: |
+          kubectl rollout status deployment/trading-engine -n staging --timeout=5m
+
+      - name: Run smoke tests
+        run: |
+          chmod +x ./scripts/deploy/health-check.sh
+          ./scripts/deploy/health-check.sh staging
+        env:
+          STAGING_URL: https://staging.trading-engine.example.com
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          chmod +x ./scripts/deploy/rollback.sh
+          ./scripts/deploy/rollback.sh staging
+
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Staging deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.environment == 'production'
+    environment:
+      name: production
+      url: https://api.trading-engine.example.com
+
+    strategy:
+      matrix:
+        deployment_type: [blue-green]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig --name trading-engine-production --region us-east-1
+
+      - name: Backup current deployment
+        run: |
+          kubectl get deployment trading-engine -n production -o yaml > backup-deployment-$(date +%Y%m%d-%H%M%S).yaml
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          chmod +x ./scripts/deploy/migrate.sh
+          ./scripts/deploy/migrate.sh
+
+      - name: Deploy with Blue-Green strategy
+        run: |
+          chmod +x ./scripts/deploy/deploy-production.sh
+          ./scripts/deploy/deploy-production.sh blue-green
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.ref_name }}
+          DEPLOYMENT_STRATEGY: blue-green
+
+      - name: Canary deployment (10% traffic)
+        run: |
+          kubectl patch service trading-engine -n production -p '{"spec":{"selector":{"version":"new"}}}'
+          kubectl set image deployment/trading-engine-canary app=${{ steps.login-ecr.outputs.registry }}/trading-engine:${{ github.ref_name }} -n production
+          kubectl scale deployment trading-engine-canary --replicas=1 -n production
+
+      - name: Monitor canary metrics
+        run: |
+          sleep 300  # 5 minutes monitoring
+          chmod +x ./scripts/deploy/canary-metrics.sh
+          ./scripts/deploy/canary-metrics.sh
+
+      - name: Promote canary to production
+        run: |
+          kubectl scale deployment trading-engine-canary --replicas=3 -n production
+          kubectl set image deployment/trading-engine app=${{ steps.login-ecr.outputs.registry }}/trading-engine:${{ github.ref_name }} -n production
+          kubectl rollout status deployment/trading-engine -n production --timeout=10m
+
+      - name: Run smoke tests
+        run: |
+          chmod +x ./scripts/deploy/health-check.sh
+          ./scripts/deploy/health-check.sh production
+        env:
+          PRODUCTION_URL: https://api.trading-engine.example.com
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          chmod +x ./scripts/deploy/rollback.sh
+          ./scripts/deploy/rollback.sh production
+          kubectl apply -f backup-deployment-*.yaml
+
+      - name: Update deployment status
+        if: success()
+        run: |
+          kubectl scale deployment trading-engine-canary --replicas=0 -n production
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v') && success()
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            Production deployment successful
+            Docker image: ${{ steps.login-ecr.outputs.registry }}/trading-engine:${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Production deployment ${{ job.status }} - Version: ${{ github.ref_name }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
