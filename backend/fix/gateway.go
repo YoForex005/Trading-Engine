@@ -47,6 +47,12 @@ const (
 	MsgTypeTradeCaptureReportAck   = "AQ"
 	MsgTypeTradeCaptureReport      = "AE"
 
+	// FIX message types - Security Definition
+	MsgTypeSecurityListRequest  = "x"
+	MsgTypeSecurityList         = "y"
+	MsgTypeSecurityDefinitionReq = "c"
+	MsgTypeSecurityDefinition    = "d"
+
 	// Store directory for sequence numbers
 	DefaultStoreDir = "./fixstore"
 )
@@ -176,8 +182,11 @@ type FIXGateway struct {
 	positions       chan Position
 	trades          chan TradeCapture
 	orderStatuses   chan OrderStatus
-	mdSubscriptions map[string]string // MDReqID -> Symbol mapping
-	posSubscriptions map[string]bool  // PosReqID -> active
+	mdSubscriptions    map[string]string // MDReqID -> Symbol mapping
+	symbolSubscriptions map[string]string // Symbol -> MDReqID mapping (reverse lookup)
+	posSubscriptions   map[string]bool  // PosReqID -> active
+	quoteCache      map[string]*MarketData // Symbol -> Last known quote (for merging incremental updates)
+	quoteCacheMu    sync.RWMutex
 	mu              sync.RWMutex
 }
 
@@ -222,15 +231,19 @@ func NewFIXGateway() *FIXGateway {
 				ID:              "YOFX1",
 				Name:            "YOFX Trading Account",
 				Host:            getEnvOrDefault("YOFX_HOST", "23.106.238.138"),
-				Port:            12336, // T4B FIX server port
-				SenderCompID:    "YOFX1",
-				TargetCompID:    "YOFX",
-				Username:        "YOFX1",
-				Password:        getEnvOrDefault("YOFX_PASSWORD", "Brand#143"),
-				TradingAccount:  "50153",
+				Port:            getEnvIntOrDefault("YOFX_PORT", 12336), // T4B FIX server port
+				SenderCompID:    getEnvOrDefault("YOFX1_SENDER_COMP_ID", "YOFX1"),
+				TargetCompID:    getEnvOrDefault("YOFX_TARGET_COMP_ID", "YOFX"),
+				Username:        getEnvOrDefault("YOFX1_USERNAME", "YOFX1"),
+				Password:        getEnvOrDefault("YOFX1_PASSWORD", "Brand#143"),
+				TradingAccount:  getEnvOrDefault("YOFX_TRADING_ACCOUNT", "50153"),
 				BeginString:     "FIX.4.4",
-				SSL:             false, // SSL=N per LP config
-				UseProxy:        false,
+				SSL:             getEnvOrDefault("YOFX_SSL", "false") == "true",
+				UseProxy:        getEnvOrDefault("YOFX_USE_PROXY", "true") == "true",
+				ProxyHost:       getEnvOrDefault("YOFX_PROXY_HOST", "81.29.145.69"),
+				ProxyPort:       getEnvIntOrDefault("YOFX_PROXY_PORT", 49527),
+				ProxyUsername:   getEnvOrDefault("YOFX_PROXY_USERNAME", "fGUqTcsdMsBZlms"),
+				ProxyPassword:   getEnvOrDefault("YOFX_PROXY_PASSWORD", "3eo1qF91WA7Fyku"),
 				Status:          "DISCONNECTED",
 				OutSeqNum:       0,
 				InSeqNum:        0,
@@ -242,15 +255,19 @@ func NewFIXGateway() *FIXGateway {
 				ID:              "YOFX2",
 				Name:            "YOFX Market Data Feed",
 				Host:            getEnvOrDefault("YOFX_HOST", "23.106.238.138"),
-				Port:            12336, // T4B FIX server port
-				SenderCompID:    "YOFX2",
-				TargetCompID:    "YOFX",
-				Username:        "YOFX2",
-				Password:        getEnvOrDefault("YOFX_PASSWORD", "Brand#143"),
-				TradingAccount:  "50153",
+				Port:            getEnvIntOrDefault("YOFX_PORT", 12336), // T4B FIX server port
+				SenderCompID:    getEnvOrDefault("YOFX2_SENDER_COMP_ID", "YOFX2"),
+				TargetCompID:    getEnvOrDefault("YOFX_TARGET_COMP_ID", "YOFX"),
+				Username:        getEnvOrDefault("YOFX2_USERNAME", "YOFX2"),
+				Password:        getEnvOrDefault("YOFX2_PASSWORD", "Brand#143"),
+				TradingAccount:  getEnvOrDefault("YOFX_TRADING_ACCOUNT", "50153"),
 				BeginString:     "FIX.4.4",
-				SSL:             false, // SSL=N per LP config
-				UseProxy:        false,
+				SSL:             getEnvOrDefault("YOFX_SSL", "false") == "true",
+				UseProxy:        getEnvOrDefault("YOFX_USE_PROXY", "true") == "true",
+				ProxyHost:       getEnvOrDefault("YOFX_PROXY_HOST", "81.29.145.69"),
+				ProxyPort:       getEnvIntOrDefault("YOFX_PROXY_PORT", 49527),
+				ProxyUsername:   getEnvOrDefault("YOFX_PROXY_USERNAME", "fGUqTcsdMsBZlms"),
+				ProxyPassword:   getEnvOrDefault("YOFX_PROXY_PASSWORD", "3eo1qF91WA7Fyku"),
 				Status:          "DISCONNECTED",
 				OutSeqNum:       0,
 				InSeqNum:        0,
@@ -265,8 +282,10 @@ func NewFIXGateway() *FIXGateway {
 		positions:        make(chan Position, 1000),
 		trades:           make(chan TradeCapture, 5000),
 		orderStatuses:    make(chan OrderStatus, 1000),
-		mdSubscriptions:  make(map[string]string),
-		posSubscriptions: make(map[string]bool),
+		mdSubscriptions:     make(map[string]string),
+		symbolSubscriptions: make(map[string]string),
+		posSubscriptions:    make(map[string]bool),
+		quoteCache:          make(map[string]*MarketData),
 	}
 
 	// Load persisted sequence numbers for all sessions
@@ -361,6 +380,16 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
+// getEnvIntOrDefault returns the environment variable as int or a default
+func getEnvIntOrDefault(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intVal, err := strconv.Atoi(value); err == nil {
+			return intVal
+		}
+	}
+	return defaultValue
+}
+
 // Connect initiates a FIX session with real TCP connection
 func (g *FIXGateway) Connect(sessionID string) error {
 	g.mu.Lock()
@@ -434,6 +463,19 @@ func (g *FIXGateway) connectSession(session *LPSession) {
 		tlsConn.SetDeadline(time.Time{}) // Clear deadline
 		conn = tlsConn
 		log.Printf("[FIX] TLS handshake successful for %s", session.Name)
+	}
+
+	// Apply TCP optimizations for low-latency trading
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		// Disable Nagle's algorithm for immediate packet transmission
+		tcpConn.SetNoDelay(true)
+		// Increase socket buffer sizes for high-throughput market data
+		tcpConn.SetReadBuffer(131072)  // 128KB read buffer
+		tcpConn.SetWriteBuffer(65536)  // 64KB write buffer
+		// Enable TCP keep-alive for connection health monitoring
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		log.Printf("[FIX] TCP optimizations applied (NoDelay=true, ReadBuf=128KB, WriteBuf=64KB)")
 	}
 
 	g.mu.Lock()
@@ -668,10 +710,12 @@ func (g *FIXGateway) sendLogon(session *LPSession) error {
 		sendingTime,
 	)
 
-	// Add ResetSeqNumFlag if we're resetting
-	if session.ResetSeqNumFlag {
-		body += "141=Y\x01" // ResetSeqNumFlag
-	}
+	// NOTE: ResetSeqNumFlag (141=Y) is NOT sent in Logon message
+	// The YOFX/T4B server does not accept this field and will not respond
+	// Sequence number reset is handled internally by resetSequenceNumbers() above
+	// if session.ResetSeqNumFlag {
+	// 	body += "141=Y\x01" // ResetSeqNumFlag - DISABLED: Server doesn't support
+	// }
 
 	// Add credentials
 	if session.Username != "" {
@@ -1841,33 +1885,36 @@ func (g *FIXGateway) SubscribeMarketData(sessionID string, symbol string) (strin
 	// Generate unique MDReqID
 	mdReqID := fmt.Sprintf("MD_%s_%d", symbol, time.Now().UnixNano())
 
-	// Store subscription
+	// Store subscription (both directions for easy lookup)
 	g.mu.Lock()
 	g.mdSubscriptions[mdReqID] = symbol
+	g.symbolSubscriptions[symbol] = mdReqID
 	msgSeqNum := g.getNextOutSeqNum(session)
 	g.mu.Unlock()
 
 	sendingTime := time.Now().UTC().Format("20060102-15:04:05.000")
 
-	// Build Market Data Request (35=V)
-	// 262=MDReqID, 263=SubscriptionRequestType (1=Snapshot+Updates)
-	// 264=MarketDepth (1=Top of book), 265=MDUpdateType (0=Full refresh)
-	// 267=NoMDEntryTypes, 269=MDEntryType (0=Bid, 1=Offer)
-	// 146=NoRelatedSym, 55=Symbol
+	// Build Market Data Request (35=V) - YOFX/T4B MINIMAL format
+	// YOFX Key findings:
+	// - NO Account tag (1) - causes rejection
+	// - NO EUR/USD format - causes "Unknown symbol" rejection
+	// - NO MDUpdateType (265) - causes rejection ("Unsupported MDUpdateType '1'")
+	// - NO SecurityType (167) - might cause silent rejection
+	// - MarketDepth (264) = 0 (Full book)
+
 	body := fmt.Sprintf("35=%s\x01"+
 		"49=%s\x01"+
 		"56=%s\x01"+
 		"34=%d\x01"+
 		"52=%s\x01"+
-		"262=%s\x01"+ // MDReqID
-		"263=1\x01"+   // SubscriptionRequestType: 1=Snapshot+Updates
-		"264=1\x01"+   // MarketDepth: 1=Top of book
-		"265=0\x01"+   // MDUpdateType: 0=Full refresh
-		"267=2\x01"+   // NoMDEntryTypes: 2 (Bid and Offer)
-		"269=0\x01"+   // MDEntryType: 0=Bid
-		"269=1\x01"+   // MDEntryType: 1=Offer
-		"146=1\x01"+   // NoRelatedSym: 1
-		"55=%s\x01",   // Symbol
+		"262=%s\x01"+      // MDReqID
+		"263=1\x01"+       // SubscriptionRequestType: 1=Snapshot+Updates (streaming)
+		"264=0\x01"+       // MarketDepth: 0=Full book
+		"267=2\x01"+       // NoMDEntryTypes: 2 (Bid and Offer)
+		"269=0\x01"+       // MDEntryType: 0=Bid
+		"269=1\x01"+       // MDEntryType: 1=Offer
+		"146=1\x01"+       // NoRelatedSym: 1
+		"55=%s\x01",       // Symbol (EURUSD format)
 		MsgTypeMarketDataRequest,
 		session.SenderCompID,
 		session.TargetCompID,
@@ -1890,6 +1937,25 @@ func (g *FIXGateway) SubscribeMarketData(sessionID string, symbol string) (strin
 		session.Name, mdReqID, symbol, msgSeqNum)
 
 	return mdReqID, nil
+}
+
+// IsSymbolSubscribed checks if a symbol is already subscribed for market data
+func (g *FIXGateway) IsSymbolSubscribed(symbol string) bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	_, exists := g.symbolSubscriptions[symbol]
+	return exists
+}
+
+// GetSubscribedSymbols returns a list of all subscribed symbols
+func (g *FIXGateway) GetSubscribedSymbols() []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	symbols := make([]string, 0, len(g.symbolSubscriptions))
+	for symbol := range g.symbolSubscriptions {
+		symbols = append(symbols, symbol)
+	}
+	return symbols
 }
 
 // UnsubscribeMarketData unsubscribes from market data for a symbol (35=V with 263=2)
@@ -1917,6 +1983,9 @@ func (g *FIXGateway) UnsubscribeMarketData(sessionID string, mdReqID string) err
 
 	g.mu.Lock()
 	delete(g.mdSubscriptions, mdReqID)
+	if symbol != "" {
+		delete(g.symbolSubscriptions, symbol)
+	}
 	msgSeqNum := g.getNextOutSeqNum(session)
 	g.mu.Unlock()
 
@@ -1957,6 +2026,70 @@ func (g *FIXGateway) UnsubscribeMarketData(sessionID string, mdReqID string) err
 		session.Name, mdReqID, symbol)
 
 	return nil
+}
+
+// RequestSecurityList sends a SecurityListRequest (35=x) to discover available symbols
+func (g *FIXGateway) RequestSecurityList(sessionID string) (string, error) {
+	g.mu.RLock()
+	session, ok := g.sessions[sessionID]
+	g.mu.RUnlock()
+
+	if !ok {
+		return "", fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	if session.Status != "LOGGED_IN" {
+		return "", fmt.Errorf("session not logged in: %s", session.Status)
+	}
+
+	g.mu.RLock()
+	conn := session.conn
+	g.mu.RUnlock()
+
+	if conn == nil {
+		return "", fmt.Errorf("connection not available")
+	}
+
+	// Generate unique request ID
+	securityReqID := fmt.Sprintf("SECLIST_%d", time.Now().UnixNano())
+
+	g.mu.Lock()
+	msgSeqNum := g.getNextOutSeqNum(session)
+	g.mu.Unlock()
+
+	sendingTime := time.Now().UTC().Format("20060102-15:04:05.000")
+
+	// Build Security List Request (35=x)
+	// 320 = SecurityReqID (required)
+	// 559 = SecurityListRequestType: 0=Symbol, 1=SecurityType/Exchange, 2=Product, 4=All
+	body := fmt.Sprintf("35=%s\x01"+
+		"49=%s\x01"+
+		"56=%s\x01"+
+		"34=%d\x01"+
+		"52=%s\x01"+
+		"320=%s\x01"+      // SecurityReqID
+		"559=4\x01",       // SecurityListRequestType: 4=All Securities
+		MsgTypeSecurityListRequest,
+		session.SenderCompID,
+		session.TargetCompID,
+		msgSeqNum,
+		sendingTime,
+		securityReqID,
+	)
+
+	fullMsg := g.buildMessage(session, body)
+	g.storeMessage(session, msgSeqNum, fullMsg)
+
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_, err := conn.Write([]byte(fullMsg))
+	if err != nil {
+		return "", fmt.Errorf("failed to send security list request: %v", err)
+	}
+
+	log.Printf("[FIX] Sent SecurityListRequest to %s: SecurityReqID=%s, SeqNum=%d",
+		session.Name, securityReqID, msgSeqNum)
+
+	return securityReqID, nil
 }
 
 // handleMarketDataSnapshot processes incoming market data (35=W)
@@ -2002,6 +2135,19 @@ func (g *FIXGateway) handleMarketDataSnapshot(session *LPSession, msg string) {
 			}
 		}
 	}
+
+	// Update quote cache with snapshot data
+	g.quoteCacheMu.Lock()
+	g.quoteCache[symbol] = &MarketData{
+		Symbol:    symbol,
+		Bid:       md.Bid,
+		Ask:       md.Ask,
+		BidSize:   md.BidSize,
+		AskSize:   md.AskSize,
+		SessionID: session.ID,
+		Timestamp: md.Timestamp,
+	}
+	g.quoteCacheMu.Unlock()
 
 	log.Printf("[FIX] MarketData from %s: %s Bid=%.5f Ask=%.5f",
 		session.Name, symbol, md.Bid, md.Ask)
@@ -2497,6 +2643,7 @@ func (g *FIXGateway) handleRequestForPositionsAck(session *LPSession, msg string
 }
 
 // handleMarketDataIncremental handles incremental market data updates (35=X)
+// Merges with cached quotes to preserve bid when only ask updates (and vice versa)
 func (g *FIXGateway) handleMarketDataIncremental(session *LPSession, msg string) {
 	now := time.Now()
 
@@ -2523,19 +2670,52 @@ func (g *FIXGateway) handleMarketDataIncremental(session *LPSession, msg string)
 			// When we have size, we have a complete entry
 			// Skip delete actions (279=2)
 			if currentSymbol != "" && currentPrice > 0 && currentAction != "2" {
+				// Get cached quote to merge with incremental update
+				g.quoteCacheMu.RLock()
+				cached := g.quoteCache[currentSymbol]
+				g.quoteCacheMu.RUnlock()
+
+				// Start with cached values or zeros
+				var bid, ask, bidSize, askSize float64
+				if cached != nil {
+					bid = cached.Bid
+					ask = cached.Ask
+					bidSize = cached.BidSize
+					askSize = cached.AskSize
+				}
+
+				// Apply incremental update
+				if currentType == "0" { // Bid update
+					bid = currentPrice
+					bidSize = currentSize
+				} else if currentType == "1" { // Ask update
+					ask = currentPrice
+					askSize = currentSize
+				}
+
+				// Create merged market data
 				md := MarketData{
 					Symbol:    currentSymbol,
 					SessionID: session.ID,
 					Timestamp: now,
+					Bid:       bid,
+					Ask:       ask,
+					BidSize:   bidSize,
+					AskSize:   askSize,
 				}
 
-				if currentType == "0" {
-					md.Bid = currentPrice
-					md.BidSize = currentSize
-				} else if currentType == "1" {
-					md.Ask = currentPrice
-					md.AskSize = currentSize
+				// Update cache with merged data
+				g.quoteCacheMu.Lock()
+				g.quoteCache[currentSymbol] = &MarketData{
+					Symbol:    currentSymbol,
+					Bid:       bid,
+					Ask:       ask,
+					BidSize:   bidSize,
+					AskSize:   askSize,
+					SessionID: session.ID,
+					Timestamp: now,
 				}
+				g.quoteCacheMu.Unlock()
 
 				select {
 				case g.marketData <- md:

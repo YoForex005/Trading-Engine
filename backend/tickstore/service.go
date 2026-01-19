@@ -8,6 +8,16 @@ import (
 	"time"
 )
 
+// TickStorageService is the interface for tick storage implementations
+// Both TickStore and OptimizedTickStore implement this interface
+type TickStorageService interface {
+	StoreTick(symbol string, bid, ask, spread float64, lp string, timestamp time.Time)
+	GetHistory(symbol string, limit int) []Tick
+	GetOHLC(symbol string, timeframeSecs int64, limit int) []OHLC
+	GetSymbols() []string
+	GetTickCount(symbol string) int
+}
+
 // Tick represents a single market price update
 type Tick struct {
 	BrokerID  string    `json:"broker_id"`

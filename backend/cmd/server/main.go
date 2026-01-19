@@ -2,11 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/epic1st/rtx/backend/admin"
@@ -44,7 +49,166 @@ var brokerConfig BrokerConfig
 // For backward compatibility
 var executionMode string
 
+// Global tick tracker for debugging market data flow
+var (
+	latestTicks    = make(map[string]*ws.MarketTick)
+	tickMutex      sync.RWMutex
+	totalTickCount int64
+)
+
+// HistoricalTick represents a tick from OANDA historical data
+type HistoricalTick struct {
+	BrokerID  string  `json:"broker_id"`
+	Symbol    string  `json:"symbol"`
+	Bid       float64 `json:"bid"`
+	Ask       float64 `json:"ask"`
+	Spread    float64 `json:"spread"`
+	Timestamp string  `json:"timestamp"`
+	LP        string  `json:"lp"`
+}
+
+// HistoricalDataCache stores loaded historical tick data
+type HistoricalDataCache struct {
+	Ticks      []HistoricalTick
+	LastIndex  int
+	Symbol     string
+	AvgSpread  float64
+	PipSize    float64
+	mu         sync.RWMutex
+}
+
+// Global cache for historical data
+var historicalCache = make(map[string]*HistoricalDataCache)
+var historicalCacheMutex sync.RWMutex
+
+// loadHistoricalTickData loads OANDA historical tick data from files
+func loadHistoricalTickData(symbol string, dataDir string) (*HistoricalDataCache, error) {
+	// Check if already cached
+	historicalCacheMutex.RLock()
+	if cache, exists := historicalCache[symbol]; exists {
+		historicalCacheMutex.RUnlock()
+		return cache, nil
+	}
+	historicalCacheMutex.RUnlock()
+
+	// Build path to historical data
+	tickPath := filepath.Join(dataDir, "data", "ticks", symbol)
+
+	// Find the most recent data file
+	files, err := ioutil.ReadDir(tickPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read tick directory for %s: %v", symbol, err)
+	}
+
+	var latestFile string
+	for i := len(files) - 1; i >= 0; i-- {
+		if strings.HasSuffix(files[i].Name(), ".json") {
+			latestFile = filepath.Join(tickPath, files[i].Name())
+			break
+		}
+	}
+
+	if latestFile == "" {
+		return nil, fmt.Errorf("no historical tick data found for %s", symbol)
+	}
+
+	// Read and parse the file
+	data, err := ioutil.ReadFile(latestFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read tick file: %v", err)
+	}
+
+	var ticks []HistoricalTick
+	if err := json.Unmarshal(data, &ticks); err != nil {
+		return nil, fmt.Errorf("failed to parse tick data: %v", err)
+	}
+
+	if len(ticks) == 0 {
+		return nil, fmt.Errorf("no ticks found in file")
+	}
+
+	// Calculate average spread from OANDA data
+	var totalSpread float64
+	oandaCount := 0
+	for _, tick := range ticks {
+		if tick.LP == "OANDA" {
+			totalSpread += tick.Ask - tick.Bid
+			oandaCount++
+		}
+	}
+
+	avgSpread := 0.00015 // default 1.5 pips for 4-decimal pairs
+	if oandaCount > 0 {
+		avgSpread = totalSpread / float64(oandaCount)
+	}
+
+	// Determine pip size based on symbol
+	pipSize := 0.0001 // default for most pairs
+	if strings.Contains(symbol, "JPY") || strings.Contains(symbol, "HKD") {
+		pipSize = 0.01 // 2-decimal pairs
+	}
+
+	cache := &HistoricalDataCache{
+		Ticks:     ticks,
+		LastIndex: 0,
+		Symbol:    symbol,
+		AvgSpread: avgSpread,
+		PipSize:   pipSize,
+	}
+
+	// Store in cache
+	historicalCacheMutex.Lock()
+	historicalCache[symbol] = cache
+	historicalCacheMutex.Unlock()
+
+	log.Printf("[HISTORICAL] Loaded %d ticks for %s from %s (avg spread: %.5f, pip: %.5f)",
+		len(ticks), symbol, filepath.Base(latestFile), avgSpread, pipSize)
+
+	return cache, nil
+}
+
+// getNextHistoricalTick gets the next tick from historical data with small variations
+func (cache *HistoricalDataCache) getNextHistoricalTick() *ws.MarketTick {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+
+	// Get base tick from historical data (cycle through if needed)
+	baseTick := cache.Ticks[cache.LastIndex]
+	cache.LastIndex = (cache.LastIndex + 1) % len(cache.Ticks)
+
+	// Use historical price as base, but add small random variation to simulate live market
+	// This gives realistic price levels while still showing movement
+	variation := (rand.Float64()*2 - 1) * cache.PipSize * 2 // -2 to +2 pips
+
+	bid := baseTick.Bid + variation
+	ask := bid + cache.AvgSpread
+
+	return &ws.MarketTick{
+		Type:      "tick",
+		Symbol:    cache.Symbol,
+		Bid:       bid,
+		Ask:       ask,
+		Spread:    ask - bid,
+		Timestamp: time.Now().Unix(),
+		LP:        "OANDA-HISTORICAL", // Clearly marked as historical data
+	}
+}
+
 func main() {
+	// ============================================
+	// GC TUNING - Prevents memory crashes during high-frequency quote processing
+	// ============================================
+	// GOGC=50: More frequent, shorter GC pauses (default 100)
+	// GOMEMLIMIT=2GiB: Hard cap prevents OOM crashes
+	if os.Getenv("GOGC") == "" {
+		os.Setenv("GOGC", "50")
+		log.Println("[GC] Set GOGC=50 for more frequent garbage collection")
+	}
+	if os.Getenv("GOMEMLIMIT") == "" {
+		os.Setenv("GOMEMLIMIT", "2GiB")
+		log.Println("[GC] Set GOMEMLIMIT=2GiB to prevent OOM crashes")
+	}
+
 	// Load configuration from environment
 	cfg, err := config.Load()
 	if err != nil {
@@ -71,8 +235,11 @@ func main() {
 	log.Printf("║        %s Mode + %s LP                 ║", brokerConfig.ExecutionMode, brokerConfig.PriceFeedLP)
 	log.Println("╚═══════════════════════════════════════════════════════════╝")
 
-	// Initialize tick storage using config
-	tickStore := tickstore.NewTickStore("default", brokerConfig.MaxTicksPerSymbol)
+	// Initialize OPTIMIZED tick storage with:
+	// - Ring buffers (bounded memory, O(1) operations)
+	// - Quote throttling (skip < 0.001% price changes)
+	// - Async batch writer (non-blocking disk persistence)
+	tickStore := tickstore.NewOptimizedTickStore("default", brokerConfig.MaxTicksPerSymbol)
 
 	// Initialize B-Book engine
 	bbookEngine := core.NewEngine()
@@ -271,9 +438,64 @@ func main() {
 		}
 
 		if r.Method == "GET" {
-			// Return current config
+			// Dynamically detect active LP from FIX sessions
+			activePriceFeedLP := brokerConfig.PriceFeedLP // Default from config
+			activePriceFeedName := brokerConfig.PriceFeedName
+
+			fixGateway := server.GetFIXGateway()
+			if fixGateway != nil {
+				status := fixGateway.GetStatus()
+				// Check for YOFX2 (Market Data Feed) being logged in
+				if status["YOFX2"] == "LOGGED_IN" {
+					activePriceFeedLP = "YOFX"
+					activePriceFeedName = "YOFX Market Data Feed"
+				} else if status["YOFX1"] == "LOGGED_IN" {
+					activePriceFeedLP = "YOFX"
+					activePriceFeedName = "YOFX Trading Account"
+				}
+				// Add more LP detection logic as needed (dynamic, no hardcoding)
+				for sessionID, sessionStatus := range status {
+					if sessionStatus == "LOGGED_IN" && activePriceFeedLP == brokerConfig.PriceFeedLP {
+						// Use the session name as the LP if still using default
+						activePriceFeedLP = sessionID
+						activePriceFeedName = sessionID + " (FIX)"
+					}
+				}
+			}
+
+			// Return config with dynamic LP info
+			response := struct {
+				BrokerName        string            `json:"brokerName"`
+				BrokerDisplayName string            `json:"brokerDisplayName"`
+				PriceFeedLP       string            `json:"priceFeedLP"`
+				PriceFeedName     string            `json:"priceFeedName"`
+				ExecutionMode     string            `json:"executionMode"`
+				DefaultLeverage   int               `json:"defaultLeverage"`
+				DefaultBalance    float64           `json:"defaultBalance"`
+				MarginMode        string            `json:"marginMode"`
+				MaxTicksPerSymbol int               `json:"maxTicksPerSymbol"`
+				DisabledSymbols   map[string]bool   `json:"disabledSymbols"`
+				FIXStatus         map[string]string `json:"fixStatus,omitempty"`
+			}{
+				BrokerName:        brokerConfig.BrokerName,
+				BrokerDisplayName: brokerConfig.BrokerDisplayName,
+				PriceFeedLP:       activePriceFeedLP,
+				PriceFeedName:     activePriceFeedName,
+				ExecutionMode:     brokerConfig.ExecutionMode,
+				DefaultLeverage:   brokerConfig.DefaultLeverage,
+				DefaultBalance:    brokerConfig.DefaultBalance,
+				MarginMode:        brokerConfig.MarginMode,
+				MaxTicksPerSymbol: brokerConfig.MaxTicksPerSymbol,
+				DisabledSymbols:   brokerConfig.DisabledSymbols,
+			}
+
+			// Include FIX session status for debugging/monitoring
+			if fixGateway != nil {
+				response.FIXStatus = fixGateway.GetStatus()
+			}
+
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(brokerConfig)
+			json.NewEncoder(w).Encode(response)
 			return
 		}
 
@@ -474,6 +696,191 @@ func main() {
 
 	// Positions (B-Book)
 	http.HandleFunc("/api/symbols", apiHandler.HandleGetSymbols)
+
+	// Symbol Management API (for Market Watch)
+	http.HandleFunc("/api/symbols/available", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Comprehensive list of all tradeable symbols from YOFX and other LPs
+		availableSymbols := []map[string]interface{}{
+			// Major Forex Pairs
+			{"symbol": "EURUSD", "name": "Euro/US Dollar", "category": "forex.major", "digits": 5},
+			{"symbol": "GBPUSD", "name": "British Pound/US Dollar", "category": "forex.major", "digits": 5},
+			{"symbol": "USDJPY", "name": "US Dollar/Japanese Yen", "category": "forex.major", "digits": 3},
+			{"symbol": "USDCHF", "name": "US Dollar/Swiss Franc", "category": "forex.major", "digits": 5},
+			{"symbol": "USDCAD", "name": "US Dollar/Canadian Dollar", "category": "forex.major", "digits": 5},
+			{"symbol": "AUDUSD", "name": "Australian Dollar/US Dollar", "category": "forex.major", "digits": 5},
+			{"symbol": "NZDUSD", "name": "New Zealand Dollar/US Dollar", "category": "forex.major", "digits": 5},
+			// Cross Pairs
+			{"symbol": "EURGBP", "name": "Euro/British Pound", "category": "forex.cross", "digits": 5},
+			{"symbol": "EURJPY", "name": "Euro/Japanese Yen", "category": "forex.cross", "digits": 3},
+			{"symbol": "GBPJPY", "name": "British Pound/Japanese Yen", "category": "forex.cross", "digits": 3},
+			{"symbol": "EURAUD", "name": "Euro/Australian Dollar", "category": "forex.cross", "digits": 5},
+			{"symbol": "EURCAD", "name": "Euro/Canadian Dollar", "category": "forex.cross", "digits": 5},
+			{"symbol": "EURCHF", "name": "Euro/Swiss Franc", "category": "forex.cross", "digits": 5},
+			{"symbol": "AUDCAD", "name": "Australian Dollar/Canadian Dollar", "category": "forex.cross", "digits": 5},
+			{"symbol": "AUDCHF", "name": "Australian Dollar/Swiss Franc", "category": "forex.cross", "digits": 5},
+			{"symbol": "AUDJPY", "name": "Australian Dollar/Japanese Yen", "category": "forex.cross", "digits": 3},
+			{"symbol": "AUDNZD", "name": "Australian Dollar/New Zealand Dollar", "category": "forex.cross", "digits": 5},
+			{"symbol": "CADCHF", "name": "Canadian Dollar/Swiss Franc", "category": "forex.cross", "digits": 5},
+			{"symbol": "CADJPY", "name": "Canadian Dollar/Japanese Yen", "category": "forex.cross", "digits": 3},
+			{"symbol": "CHFJPY", "name": "Swiss Franc/Japanese Yen", "category": "forex.cross", "digits": 3},
+			{"symbol": "GBPAUD", "name": "British Pound/Australian Dollar", "category": "forex.cross", "digits": 5},
+			{"symbol": "GBPCAD", "name": "British Pound/Canadian Dollar", "category": "forex.cross", "digits": 5},
+			{"symbol": "GBPCHF", "name": "British Pound/Swiss Franc", "category": "forex.cross", "digits": 5},
+			{"symbol": "GBPNZD", "name": "British Pound/New Zealand Dollar", "category": "forex.cross", "digits": 5},
+			{"symbol": "NZDCAD", "name": "New Zealand Dollar/Canadian Dollar", "category": "forex.cross", "digits": 5},
+			{"symbol": "NZDCHF", "name": "New Zealand Dollar/Swiss Franc", "category": "forex.cross", "digits": 5},
+			{"symbol": "NZDJPY", "name": "New Zealand Dollar/Japanese Yen", "category": "forex.cross", "digits": 3},
+			// Exotic Pairs
+			{"symbol": "EURNOK", "name": "Euro/Norwegian Krone", "category": "forex.exotic", "digits": 5},
+			{"symbol": "EURSEK", "name": "Euro/Swedish Krona", "category": "forex.exotic", "digits": 5},
+			{"symbol": "EURTRY", "name": "Euro/Turkish Lira", "category": "forex.exotic", "digits": 5},
+			{"symbol": "EURZAR", "name": "Euro/South African Rand", "category": "forex.exotic", "digits": 5},
+			{"symbol": "USDNOK", "name": "US Dollar/Norwegian Krone", "category": "forex.exotic", "digits": 5},
+			{"symbol": "USDSEK", "name": "US Dollar/Swedish Krona", "category": "forex.exotic", "digits": 5},
+			{"symbol": "USDTRY", "name": "US Dollar/Turkish Lira", "category": "forex.exotic", "digits": 5},
+			{"symbol": "USDZAR", "name": "US Dollar/South African Rand", "category": "forex.exotic", "digits": 5},
+			{"symbol": "USDMXN", "name": "US Dollar/Mexican Peso", "category": "forex.exotic", "digits": 5},
+			{"symbol": "USDSGD", "name": "US Dollar/Singapore Dollar", "category": "forex.exotic", "digits": 5},
+			{"symbol": "USDHKD", "name": "US Dollar/Hong Kong Dollar", "category": "forex.exotic", "digits": 5},
+			// Metals
+			{"symbol": "XAUUSD", "name": "Gold/US Dollar", "category": "metals", "digits": 2},
+			{"symbol": "XAGUSD", "name": "Silver/US Dollar", "category": "metals", "digits": 3},
+			{"symbol": "XPTUSD", "name": "Platinum/US Dollar", "category": "metals", "digits": 2},
+			{"symbol": "XPDUSD", "name": "Palladium/US Dollar", "category": "metals", "digits": 2},
+			// Indices
+			{"symbol": "US30USD", "name": "Dow Jones 30", "category": "indices", "digits": 1},
+			{"symbol": "SPX500USD", "name": "S&P 500", "category": "indices", "digits": 1},
+			{"symbol": "NAS100USD", "name": "NASDAQ 100", "category": "indices", "digits": 1},
+			{"symbol": "UK100GBP", "name": "UK 100", "category": "indices", "digits": 1},
+			{"symbol": "DE30EUR", "name": "Germany 30", "category": "indices", "digits": 1},
+			{"symbol": "JP225USD", "name": "Japan 225", "category": "indices", "digits": 0},
+			// Crypto (if supported)
+			{"symbol": "BTCUSD", "name": "Bitcoin/US Dollar", "category": "crypto", "digits": 2},
+			{"symbol": "ETHUSD", "name": "Ethereum/US Dollar", "category": "crypto", "digits": 2},
+			// Commodities
+			{"symbol": "WTICOUSD", "name": "WTI Crude Oil", "category": "commodities", "digits": 3},
+			{"symbol": "BCOUSD", "name": "Brent Crude Oil", "category": "commodities", "digits": 3},
+			{"symbol": "NATGASUSD", "name": "Natural Gas", "category": "commodities", "digits": 3},
+		}
+
+		// Check which symbols are currently subscribed via FIX
+		fixGateway := server.GetFIXGateway()
+		if fixGateway != nil {
+			subscribedSymbols := fixGateway.GetSubscribedSymbols()
+			subscribedMap := make(map[string]bool)
+			for _, s := range subscribedSymbols {
+				subscribedMap[s] = true
+			}
+			// Add subscribed status to each symbol
+			for _, sym := range availableSymbols {
+				symbol := sym["symbol"].(string)
+				sym["subscribed"] = subscribedMap[symbol]
+			}
+		}
+
+		json.NewEncoder(w).Encode(availableSymbols)
+	})
+
+	// Subscribe to a symbol (triggers FIX market data subscription)
+	http.HandleFunc("/api/symbols/subscribe", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			Symbol string `json:"symbol"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		if req.Symbol == "" {
+			http.Error(w, "Symbol is required", http.StatusBadRequest)
+			return
+		}
+
+		fixGateway := server.GetFIXGateway()
+		if fixGateway == nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "FIX gateway not available",
+			})
+			return
+		}
+
+		// Check if already subscribed
+		if fixGateway.IsSymbolSubscribed(req.Symbol) {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"symbol":  req.Symbol,
+				"message": "Already subscribed",
+			})
+			return
+		}
+
+		// Subscribe via YOFX2 (market data session)
+		mdReqID, err := fixGateway.SubscribeMarketData("YOFX2", req.Symbol)
+		if err != nil {
+			log.Printf("[API] Symbol subscription failed for %s: %v", req.Symbol, err)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"symbol":  req.Symbol,
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		log.Printf("[API] Subscribed to %s market data (MDReqID: %s)", req.Symbol, mdReqID)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":  true,
+			"symbol":   req.Symbol,
+			"mdReqId":  mdReqID,
+			"message":  "Subscribed successfully",
+		})
+	})
+
+	// Get list of currently subscribed symbols
+	http.HandleFunc("/api/symbols/subscribed", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		fixGateway := server.GetFIXGateway()
+		if fixGateway == nil {
+			json.NewEncoder(w).Encode([]string{})
+			return
+		}
+
+		subscribedSymbols := fixGateway.GetSubscribedSymbols()
+		json.NewEncoder(w).Encode(subscribedSymbols)
+	})
+
 	http.HandleFunc("/api/positions", apiHandler.HandleGetPositions)
 	http.HandleFunc("/api/positions/close", apiHandler.HandleClosePosition)
 	http.HandleFunc("/api/positions/close-bulk", apiHandler.HandleCloseBulk)
@@ -618,8 +1025,23 @@ func main() {
 	http.HandleFunc("/risk/calculate-lot", server.HandleCalculateLot)
 	http.HandleFunc("/risk/margin-preview", server.HandleMarginPreview)
 
-	// Market Data
-	http.HandleFunc("/ticks", server.HandleGetTicks)
+	// Market Data with dynamic FIX subscription
+	http.HandleFunc("/ticks", func(w http.ResponseWriter, r *http.Request) {
+		symbol := r.URL.Query().Get("symbol")
+		if symbol != "" {
+			// Check if symbol is subscribed, if not subscribe dynamically
+			fixGateway := server.GetFIXGateway()
+			if fixGateway != nil && !fixGateway.IsSymbolSubscribed(symbol) {
+				// Subscribe to this symbol on YOFX2 (market data session)
+				if _, err := fixGateway.SubscribeMarketData("YOFX2", symbol); err != nil {
+					log.Printf("[FIX] Dynamic subscription for %s failed: %v", symbol, err)
+				} else {
+					log.Printf("[FIX] Dynamically subscribed to %s market data", symbol)
+				}
+			}
+		}
+		server.HandleGetTicks(w, r)
+	})
 	http.HandleFunc("/ohlc", server.HandleGetOHLC)
 
 	// Admin (legacy)
@@ -780,14 +1202,284 @@ func main() {
 		})
 	})
 
-	// Auto-Connect YOFX1 FIX Session on startup
+	// Manual FIX Subscription endpoint
+	http.HandleFunc("/admin/fix/subscribe", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		var req struct {
+			SessionID string `json:"sessionId"`
+			Symbol    string `json:"symbol"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		fixGateway := server.GetFIXGateway()
+		if fixGateway == nil {
+			http.Error(w, "FIX gateway not available", http.StatusServiceUnavailable)
+			return
+		}
+
+		mdReqID, err := fixGateway.SubscribeMarketData(req.SessionID, req.Symbol)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":   true,
+			"sessionId": req.SessionID,
+			"symbol":    req.Symbol,
+			"mdReqId":   mdReqID,
+		})
+	})
+
+	// Subscribe all forex symbols
+	http.HandleFunc("/admin/fix/subscribe-all", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+
+		fixGateway := server.GetFIXGateway()
+		if fixGateway == nil {
+			http.Error(w, "FIX gateway not available", http.StatusServiceUnavailable)
+			return
+		}
+
+		// Forex symbols for testing (includes XAUUSD gold)
+		forexSymbols := []string{
+			"EURUSD", "GBPUSD", "USDJPY", "XAUUSD",
+		}
+
+		results := make([]map[string]interface{}, 0)
+		for _, symbol := range forexSymbols {
+			mdReqID, err := fixGateway.SubscribeMarketData("YOFX2", symbol)
+			if err != nil {
+				results = append(results, map[string]interface{}{
+					"symbol": symbol,
+					"error":  err.Error(),
+				})
+			} else {
+				results = append(results, map[string]interface{}{
+					"symbol":  symbol,
+					"mdReqId": mdReqID,
+					"success": true,
+				})
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"subscriptions": results,
+		})
+	})
+
+	// Auto-Connect FIX Sessions on startup
 	go func() {
 		time.Sleep(3 * time.Second) // Wait for other services to initialize
-		log.Println("[FIX] Auto-connecting YOFX1 session...")
+
+		// Connect YOFX1 (Trading)
+		log.Println("[FIX] Auto-connecting YOFX1 session (Trading)...")
 		if err := server.ConnectToLP("YOFX1"); err != nil {
 			log.Printf("[FIX] Failed to auto-connect YOFX1: %v", err)
 		}
+
+		// Connect YOFX2 (Market Data) after short delay
+		time.Sleep(2 * time.Second)
+		log.Println("[FIX] Auto-connecting YOFX2 session (Market Data)...")
+		if err := server.ConnectToLP("YOFX2"); err != nil {
+			log.Printf("[FIX] Failed to auto-connect YOFX2: %v", err)
+		} else {
+			// First request security list to discover available symbols
+			time.Sleep(2 * time.Second)
+			fixGateway := server.GetFIXGateway()
+			if fixGateway != nil {
+				// Request available securities from YOFX
+				log.Println("[FIX] Requesting security list from YOFX2...")
+				if _, err := fixGateway.RequestSecurityList("YOFX2"); err != nil {
+					log.Printf("[FIX] Failed to request security list: %v", err)
+				}
+
+				// Wait for security list response before subscribing
+				time.Sleep(2 * time.Second)
+
+				// All major forex pairs and metals available on YOFX
+				forexSymbols := []string{
+					// Major pairs
+					"EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD",
+					"AUDUSD", "NZDUSD",
+					// Cross pairs
+					"EURGBP", "EURJPY", "GBPJPY", "EURAUD", "EURCAD",
+					"EURCHF", "AUDCAD", "AUDCHF", "AUDJPY", "AUDNZD",
+					"CADCHF", "CADJPY", "CHFJPY", "GBPAUD", "GBPCAD",
+					"GBPCHF", "GBPNZD", "NZDCAD", "NZDCHF", "NZDJPY",
+					// Metals
+					"XAUUSD", "XAGUSD",
+				}
+				log.Printf("[FIX] Auto-subscribing to %d forex symbols on YOFX2...", len(forexSymbols))
+				for _, symbol := range forexSymbols {
+					if _, err := fixGateway.SubscribeMarketData("YOFX2", symbol); err != nil {
+						log.Printf("[FIX] Failed to subscribe %s: %v", symbol, err)
+					} else {
+						log.Printf("[FIX] Subscribed to %s market data", symbol)
+					}
+					time.Sleep(100 * time.Millisecond) // Rate limit subscriptions
+				}
+			}
+		}
 	}()
+
+	// Pipe FIX market data to WebSocket hub
+	go func() {
+		fixGateway := server.GetFIXGateway()
+		if fixGateway == nil {
+			log.Println("[FIX-WS] FIX gateway not available for market data pipe")
+			return
+		}
+
+		var tickCount int64 = 0
+		log.Println("[FIX-WS] Starting FIX market data → WebSocket hub pipe...")
+
+		for md := range fixGateway.GetMarketData() {
+			tickCount++
+			if tickCount%100 == 1 {
+				log.Printf("[FIX-WS] Piping FIX tick #%d: %s Bid=%.5f Ask=%.5f",
+					tickCount, md.Symbol, md.Bid, md.Ask)
+			}
+
+			tick := &ws.MarketTick{
+				Type:      "tick",
+				Symbol:    md.Symbol,
+				Bid:       md.Bid,
+				Ask:       md.Ask,
+				Spread:    md.Ask - md.Bid,
+				Timestamp: md.Timestamp.Unix(),
+				LP:        "YOFX", // FIX LP source
+			}
+
+			// Store latest tick for debugging
+			tickMutex.Lock()
+			latestTicks[md.Symbol] = tick
+			totalTickCount++
+			tickMutex.Unlock()
+			hub.BroadcastTick(tick)
+		}
+		log.Println("[FIX-WS] FIX market data pipe closed!")
+	}()
+
+	// Simulated market data fallback - uses OANDA historical data when LP unavailable
+	go func() {
+		// Wait 30 seconds to see if real market data arrives
+		time.Sleep(30 * time.Second)
+
+		tickMutex.RLock()
+		hasRealData := totalTickCount > 0
+		tickMutex.RUnlock()
+
+		if hasRealData {
+			log.Println("[SIM-MD] Real market data detected, simulation not needed")
+			return
+		}
+
+		log.Println("[SIM-MD] No real market data after 30s - starting OANDA historical data simulation")
+		log.Println("[SIM-MD] Using real OANDA tick data with small variations for realistic prices")
+
+		// Get current working directory (backend/cmd/server when running server.exe)
+		workDir, err := os.Getwd()
+		if err != nil {
+			log.Printf("[SIM-MD] Failed to get working directory: %v", err)
+			workDir = "."
+		}
+
+		// Determine data directory - check if we're in backend/cmd/server or backend
+		dataDir := workDir
+		if strings.HasSuffix(workDir, "cmd\\server") || strings.HasSuffix(workDir, "cmd/server") {
+			// We're in backend/cmd/server, go up to backend
+			dataDir = filepath.Join(workDir, "..", "..")
+		} else if !strings.HasSuffix(workDir, "backend") {
+			// We might be in project root, add backend
+			dataDir = filepath.Join(workDir, "backend")
+		}
+
+		log.Printf("[SIM-MD] Loading historical data from: %s", dataDir)
+
+		// Symbols to simulate with historical data
+		symbols := []string{
+			"EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
+			"USDCAD", "USDCHF", "NZDUSD", "EURGBP",
+			"EURJPY", "GBPJPY", "AUDJPY", "AUDCAD",
+			"AUDCHF", "AUDNZD", "AUDSGD", "AUDHKD",
+		}
+
+		// Load historical data for all symbols
+		historicalDataLoaded := make(map[string]*HistoricalDataCache)
+		for _, symbol := range symbols {
+			cache, err := loadHistoricalTickData(symbol, dataDir)
+			if err != nil {
+				log.Printf("[SIM-MD] Failed to load historical data for %s: %v (will skip)", symbol, err)
+				continue
+			}
+			historicalDataLoaded[symbol] = cache
+		}
+
+		if len(historicalDataLoaded) == 0 {
+			log.Println("[SIM-MD] ERROR: No historical data loaded, cannot simulate market data")
+			return
+		}
+
+		log.Printf("[SIM-MD] Successfully loaded historical data for %d symbols", len(historicalDataLoaded))
+
+		// Generate simulated ticks every 500ms using historical data
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			tickMutex.RLock()
+			realDataArrived := totalTickCount > 0
+			tickMutex.RUnlock()
+
+			if realDataArrived {
+				log.Println("[SIM-MD] Real market data now available - stopping historical simulation")
+				return
+			}
+
+			// Generate tick for each symbol using historical data
+			for symbol, cache := range historicalDataLoaded {
+				tick := cache.getNextHistoricalTick()
+
+				tickMutex.Lock()
+				latestTicks[symbol] = tick
+				tickMutex.Unlock()
+
+				hub.BroadcastTick(tick)
+			}
+		}
+	}()
+
+	// Debug endpoint to check market data flow
+	http.HandleFunc("/admin/fix/ticks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Content-Type", "application/json")
+
+		tickMutex.RLock()
+		response := map[string]interface{}{
+			"totalTickCount": totalTickCount,
+			"symbolCount":    len(latestTicks),
+			"latestTicks":    latestTicks,
+		}
+		tickMutex.RUnlock()
+
+		json.NewEncoder(w).Encode(response)
+	})
 
 	// Backend restart endpoint (graceful)
 	http.HandleFunc("/admin/restart", func(w http.ResponseWriter, r *http.Request) {
