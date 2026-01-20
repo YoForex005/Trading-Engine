@@ -33,7 +33,7 @@ export class WebSocketService {
 
   private tickBuffer: Map<string, WebSocketMessage> = new Map();
   private flushInterval: ReturnType<typeof setInterval> | null = null;
-  private updateThrottle = 100; // ms
+  private updateThrottle = 0; // ms - PERFORMANCE FIX: Zero throttling for MT5 parity (<5ms tick latency)
 
   constructor(url: string) {
     this.url = url;

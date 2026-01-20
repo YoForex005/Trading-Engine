@@ -1,5 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, Check, ChevronRight, Clock, Plus } from 'lucide-react';
+import { ContextMenu, type ContextMenuItemConfig, MenuSectionHeader, MenuDivider } from '../ui/ContextMenu';
+import { useContextMenu, useKeyboardShortcuts } from '../../hooks';
+import { useAppStore } from '../../store/useAppStore';
 
 // API Base URL
 const API_BASE = 'http://localhost:7999';
@@ -17,7 +20,7 @@ interface Tick {
     symbol: string;
     bid: number;
     ask: number;
-    spread?: number;
+    spread: number; // Always present - calculated as ask - bid
     prevBid?: number;
     dailyChange?: number;
     high?: number;
@@ -30,7 +33,6 @@ interface Tick {
 }
 
 interface MarketWatchPanelProps {
-    ticks: Record<string, Tick>;
     allSymbols: any[];
     selectedSymbol: string;
     onSymbolSelect: (symbol: string) => void;
@@ -65,12 +67,14 @@ const ALL_COLUMNS: ColumnConfig[] = [
 const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['symbol', 'bid', 'ask', 'spread'];
 
 export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
-    ticks,
     allSymbols,
     selectedSymbol,
     onSymbolSelect,
     className
 }) => {
+    // Get ticks from Zustand store (single source of truth)
+    const ticks = useAppStore(state => state.ticks);
+
     const [searchTerm, setSearchTerm] = useState('');
     const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(() => {
         const saved = localStorage.getItem('rtx5_marketwatch_cols');
@@ -81,10 +85,8 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
     // Sort State
     const [sortBy, setSortBy] = useState<'symbol' | 'gainers' | 'losers' | 'volume' | null>(null);
 
-    // Context Menu State
-    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; symbol?: string } | null>(null);
-    const [activeSubMenu, setActiveSubMenu] = useState<string | null>(null);
-    const menuRef = useRef<HTMLDivElement>(null);
+    // Context Menu State (using new hook)
+    const contextMenu = useContextMenu();
 
     // Symbol Search & Subscribe State
     const [availableSymbols, setAvailableSymbols] = useState<AvailableSymbol[]>([]);
@@ -92,6 +94,37 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
     const [subscribedSymbols, setSubscribedSymbols] = useState<string[]>([]);
     const [isSubscribing, setIsSubscribing] = useState<string | null>(null);
     const searchRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    // Keyboard navigation state (Agent 1 - MT5 parity)
+    const [selectedDropdownIndex, setSelectedDropdownIndex] = useState<number>(0);
+
+    // Hidden symbols state (for Show All / Hide to work reactively)
+    const [hiddenSymbols, setHiddenSymbols] = useState<string[]>(() => {
+        const saved = localStorage.getItem('rtx5_hidden_symbols');
+        return saved ? JSON.parse(saved) : [];
+    });
+
+    // System Options State (persisted to localStorage)
+    const [systemOptions, setSystemOptions] = useState(() => {
+        const saved = localStorage.getItem('rtx5_marketwatch_options');
+        return saved ? JSON.parse(saved) : {
+            useSystemColors: true,
+            showMilliseconds: false,
+            autoRemoveExpired: true,
+            autoArrange: true,
+            showGrid: true,
+        };
+    });
+
+    // Persist system options
+    useEffect(() => {
+        localStorage.setItem('rtx5_marketwatch_options', JSON.stringify(systemOptions));
+    }, [systemOptions]);
+
+    const toggleSystemOption = (key: string) => {
+        setSystemOptions((prev: Record<string, boolean>) => ({ ...prev, [key]: !prev[key] }));
+    };
 
     // Fetch available symbols from API on mount
     useEffect(() => {
@@ -109,14 +142,32 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         fetchAvailableSymbols();
     }, []);
 
-    // Fetch subscribed symbols
+    // Load persisted subscribed symbols from localStorage on mount
+    useEffect(() => {
+        const saved = localStorage.getItem('rtx5_subscribed_symbols');
+        if (saved) {
+            try {
+                const symbols = JSON.parse(saved);
+                setSubscribedSymbols(symbols);
+                console.log('[MarketWatch] Loaded subscribed symbols from localStorage:', symbols);
+            } catch (e) {
+                console.error('[MarketWatch] Failed to load subscribed symbols:', e);
+            }
+        }
+    }, []);
+
+    // Fetch subscribed symbols from backend and merge with localStorage
     useEffect(() => {
         const fetchSubscribed = async () => {
             try {
                 const response = await fetch(`${API_BASE}/api/symbols/subscribed`);
                 if (response.ok) {
                     const data = await response.json();
-                    setSubscribedSymbols(data || []);
+                    setSubscribedSymbols(prev => {
+                        // Merge backend subscriptions with local storage
+                        const merged = [...new Set([...prev, ...(data || [])])];
+                        return merged;
+                    });
                 }
             } catch (error) {
                 console.error('Failed to fetch subscribed symbols:', error);
@@ -128,9 +179,27 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         return () => clearInterval(interval);
     }, []);
 
-    // Subscribe to a symbol
+    // Persist subscribed symbols to localStorage whenever they change
+    useEffect(() => {
+        if (subscribedSymbols.length > 0) {
+            localStorage.setItem('rtx5_subscribed_symbols', JSON.stringify(subscribedSymbols));
+            console.log('[MarketWatch] Persisted subscribed symbols:', subscribedSymbols);
+        }
+    }, [subscribedSymbols]);
+
+    // Subscribe to a symbol with optimistic updates (Agent 3 fix - instant UI feedback)
     const subscribeToSymbol = useCallback(async (symbol: string) => {
         setIsSubscribing(symbol);
+
+        // Optimistic update - add symbol immediately for instant UI feedback
+        setSubscribedSymbols(prev => [...new Set([...prev, symbol])]);
+        setSearchTerm('');
+        setShowSearchDropdown(false);
+        onSymbolSelect(symbol);
+
+        // Auto-focus input after subscription (Agent 1 - MT5 UX)
+        setTimeout(() => inputRef.current?.focus(), 150);
+
         try {
             const response = await fetch(`${API_BASE}/api/symbols/subscribe`, {
                 method: 'POST',
@@ -138,23 +207,54 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                 body: JSON.stringify({ symbol })
             });
             const result = await response.json();
-            if (result.success) {
-                setSubscribedSymbols(prev => [...new Set([...prev, symbol])]);
-                setSearchTerm('');
-                setShowSearchDropdown(false);
-                // Select the newly subscribed symbol
-                onSymbolSelect(symbol);
-            } else {
+
+            if (!result.success) {
+                // Rollback on failure
+                setSubscribedSymbols(prev => prev.filter(s => s !== symbol));
                 console.error('Subscribe failed:', result.error);
                 alert(`Failed to subscribe to ${symbol}: ${result.error || 'Unknown error'}`);
+            } else {
+                console.log(`[MarketWatch] Successfully subscribed to ${symbol}`);
             }
         } catch (error) {
+            // Rollback on error
+            setSubscribedSymbols(prev => prev.filter(s => s !== symbol));
             console.error('Subscribe error:', error);
             alert(`Failed to subscribe to ${symbol}`);
         } finally {
             setIsSubscribing(null);
         }
     }, [onSymbolSelect]);
+
+    // Unsubscribe from a symbol (MT5 parity - remove from market watch)
+    const unsubscribeFromSymbol = useCallback(async (symbol: string) => {
+        // Optimistically remove
+        setSubscribedSymbols(prev => prev.filter(s => s !== symbol));
+        setHiddenSymbols(prev => [...prev, symbol]); // Hide from view
+
+        try {
+            const response = await fetch(`${API_BASE}/api/symbols/unsubscribe`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol })
+            });
+            const result = await response.json();
+
+            if (!result.success) {
+                console.error('Unsubscribe failed:', result.error);
+                // Rollback
+                setSubscribedSymbols(prev => [...new Set([...prev, symbol])]);
+                setHiddenSymbols(prev => prev.filter(s => s !== symbol));
+            } else {
+                console.log(`[MarketWatch] Successfully unsubscribed from ${symbol}`);
+            }
+        } catch (error) {
+            console.error('Unsubscribe error:', error);
+            // Rollback
+            setSubscribedSymbols(prev => [...new Set([...prev, symbol])]);
+            setHiddenSymbols(prev => prev.filter(s => s !== symbol));
+        }
+    }, []);
 
     // Close search dropdown on click outside
     useEffect(() => {
@@ -167,29 +267,62 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Filter available symbols for search dropdown
-    const filteredAvailableSymbols = searchTerm.length > 0
-        ? availableSymbols.filter(s =>
-            s.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            s.name.toLowerCase().includes(searchTerm.toLowerCase())
-        )
-        : availableSymbols;
+    // Filter available symbols for search dropdown (moved before handleSearchKeyDown)
+    const filteredAvailableSymbols = useMemo(() => {
+        return searchTerm.length > 0
+            ? availableSymbols.filter(s =>
+                s.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                s.name.toLowerCase().includes(searchTerm.toLowerCase())
+            )
+            : availableSymbols;
+    }, [searchTerm, availableSymbols]);
+
+    // Keyboard navigation handler (Agent 1 - MT5 parity)
+    const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (!showSearchDropdown) return;
+
+        const maxIndex = filteredAvailableSymbols.length - 1;
+
+        switch (e.key) {
+            case 'ArrowDown':
+                e.preventDefault();
+                setSelectedDropdownIndex(prev => Math.min(prev + 1, maxIndex));
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                setSelectedDropdownIndex(prev => Math.max(prev - 1, 0));
+                break;
+            case 'Enter':
+                e.preventDefault();
+                if (filteredAvailableSymbols[selectedDropdownIndex]) {
+                    const selectedSymbol = filteredAvailableSymbols[selectedDropdownIndex];
+                    const isSubscribed = subscribedSymbols.includes(selectedSymbol.symbol) || Object.keys(ticks).includes(selectedSymbol.symbol);
+                    if (!isSubscribed) {
+                        subscribeToSymbol(selectedSymbol.symbol);
+                    } else {
+                        onSymbolSelect(selectedSymbol.symbol);
+                        setShowSearchDropdown(false);
+                        setSearchTerm('');
+                    }
+                }
+                break;
+            case 'Escape':
+                e.preventDefault();
+                setShowSearchDropdown(false);
+                setSearchTerm('');
+                inputRef.current?.blur();
+                break;
+        }
+    }, [showSearchDropdown, filteredAvailableSymbols, selectedDropdownIndex, subscribedSymbols, ticks, subscribeToSymbol, onSymbolSelect]);
+
+    // Reset selected index when filtered list changes
+    useEffect(() => {
+        setSelectedDropdownIndex(0);
+    }, [searchTerm]);
 
     useEffect(() => {
         localStorage.setItem('rtx5_marketwatch_cols', JSON.stringify(visibleColumns));
     }, [visibleColumns]);
-
-    // Close menu on click outside
-    useEffect(() => {
-        const handleClick = (e: MouseEvent) => {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-                setContextMenu(null);
-                setActiveSubMenu(null);
-            }
-        };
-        document.addEventListener('mousedown', handleClick);
-        return () => document.removeEventListener('mousedown', handleClick);
-    }, []);
 
     const toggleColumn = (colId: ColumnId) => {
         setVisibleColumns(prev => {
@@ -203,28 +336,28 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         });
     };
 
-    const handleContextMenu = (e: React.MouseEvent, symbol?: string) => {
+    const handleContextMenuOpen = useCallback((e: React.MouseEvent, symbol?: string) => {
         e.preventDefault();
-        setContextMenu({ x: e.clientX, y: e.clientY, symbol: symbol || selectedSymbol });
-        setActiveSubMenu(null);
-    };
+        e.stopPropagation();
+        contextMenu.open(e.clientX, e.clientY, symbol || selectedSymbol);
+    }, [contextMenu, selectedSymbol]);
 
     // Context Menu Action Handlers
     const handleNewOrder = useCallback(() => {
-        const symbol = contextMenu?.symbol || selectedSymbol;
+        const symbol = contextMenu.state.data || selectedSymbol;
         if (symbol) {
             // Dispatch event to open order dialog (App.tsx should listen)
             window.dispatchEvent(new CustomEvent('openOrderDialog', { detail: { symbol } }));
         }
-        setContextMenu(null);
-    }, [contextMenu?.symbol, selectedSymbol]);
+        contextMenu.close();
+    }, [contextMenu, selectedSymbol]);
 
     const handleQuickBuy = useCallback(async () => {
-        const symbol = contextMenu?.symbol || selectedSymbol;
+        const symbol = contextMenu.state.data || selectedSymbol;
         const tick = ticks[symbol];
         if (!symbol || !tick) {
             alert('Please select a symbol first');
-            setContextMenu(null);
+            contextMenu.close();
             return;
         }
         try {
@@ -245,15 +378,15 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         } catch (error) {
             console.error('Quick buy error:', error);
         }
-        setContextMenu(null);
-    }, [contextMenu?.symbol, selectedSymbol, ticks]);
+        contextMenu.close();
+    }, [contextMenu, selectedSymbol, ticks]);
 
     const handleQuickSell = useCallback(async () => {
-        const symbol = contextMenu?.symbol || selectedSymbol;
+        const symbol = contextMenu.state.data || selectedSymbol;
         const tick = ticks[symbol];
         if (!symbol || !tick) {
             alert('Please select a symbol first');
-            setContextMenu(null);
+            contextMenu.close();
             return;
         }
         try {
@@ -274,45 +407,101 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         } catch (error) {
             console.error('Quick sell error:', error);
         }
-        setContextMenu(null);
-    }, [contextMenu?.symbol, selectedSymbol, ticks]);
+        contextMenu.close();
+    }, [contextMenu, selectedSymbol, ticks]);
 
     const handleChartWindow = useCallback(() => {
-        const symbol = contextMenu?.symbol || selectedSymbol;
+        const symbol = contextMenu.state.data || selectedSymbol;
         if (symbol) {
             onSymbolSelect(symbol);
             // Dispatch event to maximize chart
             window.dispatchEvent(new CustomEvent('openChart', { detail: { symbol } }));
         }
-        setContextMenu(null);
-    }, [contextMenu?.symbol, selectedSymbol, onSymbolSelect]);
+        contextMenu.close();
+    }, [contextMenu, selectedSymbol, onSymbolSelect]);
 
     const handleHideSymbol = useCallback(() => {
-        const symbol = contextMenu?.symbol;
+        const symbol = contextMenu.state.data;
         if (symbol) {
-            // Store hidden symbols in localStorage
-            const hidden = JSON.parse(localStorage.getItem('rtx5_hidden_symbols') || '[]');
-            if (!hidden.includes(symbol)) {
-                hidden.push(symbol);
-                localStorage.setItem('rtx5_hidden_symbols', JSON.stringify(hidden));
-            }
+            setHiddenSymbols(prev => {
+                if (!prev.includes(symbol)) {
+                    const updated = [...prev, symbol];
+                    localStorage.setItem('rtx5_hidden_symbols', JSON.stringify(updated));
+                    return updated;
+                }
+                return prev;
+            });
         }
-        setContextMenu(null);
-    }, [contextMenu?.symbol]);
+        contextMenu.close();
+    }, [contextMenu]);
 
     const handleShowAll = useCallback(() => {
+        setHiddenSymbols([]);
         localStorage.setItem('rtx5_hidden_symbols', '[]');
-        setContextMenu(null);
-    }, []);
+        contextMenu.close();
+    }, [contextMenu]);
+
+    // Export symbols as CSV
+    const handleExport = useCallback(() => {
+        const headers = ['Symbol', 'Bid', 'Ask', 'Spread (pips)', 'Daily Change %'];
+        const rows = Object.keys(ticks).map(sym => {
+            const t = ticks[sym];
+            const spreadInPips = Math.round((t.spread || (t.ask - t.bid)) * 10000);
+            return [sym, t.bid, t.ask, spreadInPips, t.dailyChange || 0].join(',');
+        });
+        const csv = [headers.join(','), ...rows].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `marketwatch_${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        contextMenu.close();
+    }, [ticks, contextMenu]);
+
+    // Open Depth of Market modal
+    const handleDepthOfMarket = useCallback(() => {
+        const symbol = contextMenu.state.data || selectedSymbol;
+        window.dispatchEvent(new CustomEvent('openDepthOfMarket', { detail: { symbol } }));
+        contextMenu.close();
+    }, [contextMenu, selectedSymbol]);
+
+    // Open Popup Prices window
+    const handlePopupPrices = useCallback(() => {
+        const symbol = contextMenu.state.data || selectedSymbol;
+        window.dispatchEvent(new CustomEvent('openPopupPrices', { detail: { symbol } }));
+        contextMenu.close();
+    }, [contextMenu, selectedSymbol]);
+
+    // Open Symbols management dialog
+    const handleOpenSymbols = useCallback(() => {
+        window.dispatchEvent(new CustomEvent('openSymbolsDialog'));
+        contextMenu.close();
+    }, [contextMenu]);
 
     // Symbol Processing
-    const uniqueSymbols = Array.from(new Set([
-        ...allSymbols.map(s => s.symbol || s),
-        ...Object.keys(ticks)
-    ]));
+    // Global keyboard shortcuts integration (MT5-style)
+    useKeyboardShortcuts({
+        NEW_ORDER: handleNewOrder,
+        DEPTH_OF_MARKET: handleDepthOfMarket,
+        SYMBOLS_DIALOG: handleOpenSymbols,
+        POPUP_PRICES: handlePopupPrices,
+        CLOSE_MODAL: () => contextMenu.close(),
+    });
+
+    // Convert to useMemo for reactivity (Agent 3 fix - eliminates state sync race condition)
+    const uniqueSymbols = useMemo(() => {
+        return Array.from(new Set([
+            ...allSymbols.map(s => s.symbol || s),
+            ...Object.keys(ticks),
+            ...subscribedSymbols  // Include manually subscribed symbols
+        ]));
+    }, [allSymbols, ticks, subscribedSymbols]);
 
     let processedSymbols = uniqueSymbols.filter(s =>
-        (s || '').toLowerCase().includes(searchTerm.toLowerCase())
+        (s || '').toLowerCase().includes(searchTerm.toLowerCase()) &&
+        !hiddenSymbols.includes(s)
     );
 
     // Sorting Logic
@@ -329,112 +518,82 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         processedSymbols.sort();
     }
 
+    // Build context menu items configuration
+    const menuItems: ContextMenuItemConfig[] = useMemo(() => [
+        { label: 'Trading Actions', divider: true },
+        { label: 'New Order', shortcut: 'F9', action: handleNewOrder },
+        { label: 'Quick Buy (0.01)', action: handleQuickBuy },
+        { label: 'Quick Sell (0.01)', action: handleQuickSell },
+        { label: 'Chart Window', action: handleChartWindow },
+        { label: 'Tick Chart', action: () => { setActiveTab('ticks'); contextMenu.close(); } },
+        { label: 'Depth of Market', shortcut: 'Alt+B', action: handleDepthOfMarket },
+        { label: 'Popup Prices', shortcut: 'F10', action: handlePopupPrices },
+        { divider: true },
+        { label: 'Visibility', divider: true },
+        { label: 'Hide', shortcut: 'Delete', action: handleHideSymbol },
+        { label: 'Show All', action: handleShowAll },
+        { divider: true },
+        { label: 'Configuration', divider: true },
+        { label: 'Symbols', shortcut: 'Ctrl+U', action: handleOpenSymbols },
+        {
+            label: 'Sets',
+            submenu: [
+                { label: 'forex.all', action: () => contextMenu.close() },
+                { label: 'forex.major', action: () => contextMenu.close() },
+                { label: 'forex.crosses', action: () => contextMenu.close() },
+                { divider: true },
+                { label: 'Save as...', icon: <Clock size={12} />, action: () => contextMenu.close() },
+                { label: 'Remove', submenu: [] }
+            ]
+        },
+        {
+            label: 'Sort',
+            submenu: [
+                { label: 'Symbol', checked: sortBy === 'symbol', action: () => setSortBy('symbol') },
+                { label: 'Gainers', checked: sortBy === 'gainers', action: () => setSortBy('gainers') },
+                { label: 'Losers', checked: sortBy === 'losers', action: () => setSortBy('losers') },
+                { label: 'Volume', checked: sortBy === 'volume', action: () => setSortBy('volume') },
+                { divider: true },
+                { label: 'Reset', action: () => setSortBy(null) }
+            ]
+        },
+        { label: 'Export', action: handleExport },
+        { divider: true },
+        { label: 'System Options', divider: true },
+        { label: 'Use System Colors', checked: systemOptions.useSystemColors, action: () => toggleSystemOption('useSystemColors') },
+        { label: 'Show Milliseconds', checked: systemOptions.showMilliseconds, action: () => toggleSystemOption('showMilliseconds') },
+        { label: 'Auto Remove Expired', checked: systemOptions.autoRemoveExpired, action: () => toggleSystemOption('autoRemoveExpired') },
+        { label: 'Auto Arrange', checked: systemOptions.autoArrange, action: () => toggleSystemOption('autoArrange') },
+        { label: 'Grid', checked: systemOptions.showGrid, action: () => toggleSystemOption('showGrid') },
+        { divider: true },
+        {
+            label: 'Columns',
+            submenu: ALL_COLUMNS
+                .filter(col => !col.locked)
+                .map(col => ({
+                    label: col.label === '!' ? 'Spread' : col.label,
+                    checked: visibleColumns.includes(col.id),
+                    action: () => toggleColumn(col.id),
+                    autoClose: false
+                }))
+        }
+    ], [
+        sortBy, systemOptions, visibleColumns,
+        handleNewOrder, handleQuickBuy, handleQuickSell, handleChartWindow,
+        handleDepthOfMarket, handlePopupPrices, handleHideSymbol, handleShowAll,
+        handleOpenSymbols, handleExport, contextMenu, setActiveTab, toggleColumn
+    ]);
 
     return (
-        <div className={`flex flex-col bg-[#1e1e1e] border-b border-zinc-700 select-none ${className}`} onContextMenu={handleContextMenu}>
-            {/* Context Menu */}
-            {contextMenu && (
-                <div
-                    ref={menuRef}
-                    className="fixed z-[9999] w-64 bg-[#1e1e1e] border border-zinc-600 shadow-2xl rounded-sm py-1 text-xs text-zinc-200"
-                    style={{ top: contextMenu.y, left: contextMenu.x }}
-                >
-                    {contextMenu?.symbol && (
-                        <div className="px-3 py-1.5 text-[10px] font-bold text-emerald-400 border-b border-zinc-700 mb-1">
-                            {contextMenu.symbol}
-                        </div>
-                    )}
-                    <div className="px-3 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider pl-2">Trading Actions</div>
-                    <ContextMenuItem label="New Order" shortcut="F9" action={handleNewOrder} />
-                    <ContextMenuItem label="Quick Buy (0.01)" action={handleQuickBuy} />
-                    <ContextMenuItem label="Quick Sell (0.01)" action={handleQuickSell} />
-                    <ContextMenuItem label="Chart Window" action={handleChartWindow} />
-                    <ContextMenuItem label="Tick Chart" action={() => { setActiveTab('ticks'); setContextMenu(null); }} />
-                    <ContextMenuItem label="Depth of Market" shortcut="Alt+B" action={() => { alert('Depth of Market - Coming soon'); setContextMenu(null); }} />
-                    <ContextMenuItem label="Popup Prices" shortcut="F10" action={() => { alert('Popup Prices - Coming soon'); setContextMenu(null); }} />
-                    <MenuDivider />
-
-                    <div className="px-3 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider pl-2">Visibility</div>
-                    <ContextMenuItem label="Hide" shortcut="Delete" action={handleHideSymbol} />
-                    <ContextMenuItem label="Show All" action={handleShowAll} />
-                    <MenuDivider />
-
-                    <div className="px-3 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider pl-2">Configuration</div>
-                    <ContextMenuItem label="Symbols" shortcut="Ctrl+U" action={() => setContextMenu(null)} />
-
-                    {/* Sets Submenu */}
-                    <div
-                        className="relative"
-                        onMouseEnter={() => setActiveSubMenu('sets')}
-                        onMouseLeave={() => setActiveSubMenu(null)}
-                    >
-                        <ContextMenuItem label="Sets" hasSubmenu active={activeSubMenu === 'sets'} />
-                        {activeSubMenu === 'sets' && (
-                            <div className="absolute left-full top-0 -ml-1 w-48 bg-[#1e1e1e] border border-zinc-600 shadow-xl rounded-sm py-1">
-                                <ContextMenuItem label="forex.all" action={() => setContextMenu(null)} />
-                                <ContextMenuItem label="forex.major" action={() => setContextMenu(null)} />
-                                <ContextMenuItem label="forex.crosses" action={() => setContextMenu(null)} />
-                                <MenuDivider />
-                                <ContextMenuItem label="Save as..." icon={<Clock size={12} />} action={() => setContextMenu(null)} />
-                                <ContextMenuItem label="Remove" hasSubmenu />
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Sort Submenu */}
-                    <div
-                        className="relative"
-                        onMouseEnter={() => setActiveSubMenu('sort')}
-                        onMouseLeave={() => setActiveSubMenu(null)}
-                    >
-                        <ContextMenuItem label="Sort" hasSubmenu active={activeSubMenu === 'sort'} />
-                        {activeSubMenu === 'sort' && (
-                            <div className="absolute left-full top-0 -ml-1 w-48 bg-[#1e1e1e] border border-zinc-600 shadow-xl rounded-sm py-1">
-                                <ContextMenuItem label="Symbol" checked={sortBy === 'symbol'} action={() => setSortBy('symbol')} />
-                                <ContextMenuItem label="Gainers" checked={sortBy === 'gainers'} action={() => setSortBy('gainers')} />
-                                <ContextMenuItem label="Losers" checked={sortBy === 'losers'} action={() => setSortBy('losers')} />
-                                <ContextMenuItem label="Volume" checked={sortBy === 'volume'} action={() => setSortBy('volume')} />
-                                <MenuDivider />
-                                <ContextMenuItem label="Reset" action={() => setSortBy(null)} />
-                            </div>
-                        )}
-                    </div>
-
-                    <ContextMenuItem label="Export" action={() => setContextMenu(null)} />
-
-                    <MenuDivider />
-                    <div className="px-3 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider pl-2">System Options</div>
-                    <ContextMenuItem label="Use System Colors" checked={true} />
-                    <ContextMenuItem label="Show Milliseconds" />
-                    <ContextMenuItem label="Auto Remove Expired" checked={true} />
-                    <ContextMenuItem label="Auto Arrange" checked={true} />
-                    <ContextMenuItem label="Grid" checked={true} />
-                    <MenuDivider />
-
-                    {/* Columns Submenu */}
-                    <div
-                        className="relative"
-                        onMouseEnter={() => setActiveSubMenu('columns')}
-                        onMouseLeave={() => setActiveSubMenu(null)}
-                    >
-                        <ContextMenuItem label="Columns" hasSubmenu active={activeSubMenu === 'columns'} />
-                        {activeSubMenu === 'columns' && (
-                            <div className="absolute left-full top-0 -ml-1 w-48 bg-[#1e1e1e] border border-zinc-600 shadow-xl rounded-sm py-1 max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700">
-                                {ALL_COLUMNS.map(col => (
-                                    (!col.locked) && (
-                                        <ContextMenuItem
-                                            key={col.id}
-                                            label={col.label === '!' ? 'Spread' : col.label}
-                                            checked={visibleColumns.includes(col.id)}
-                                            action={() => toggleColumn(col.id)}
-                                            autoClose={false}
-                                        />
-                                    )
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
+        <div className={`flex flex-col bg-[#1e1e1e] border-b border-zinc-700 select-none ${className}`} onContextMenu={handleContextMenuOpen}>
+            {/* Portal-Based Context Menu */}
+            {contextMenu.state.isOpen && (
+                <ContextMenu
+                    items={menuItems}
+                    onClose={contextMenu.close}
+                    position={contextMenu.state.position}
+                    triggerSymbol={contextMenu.state.data}
+                />
             )}
 
             {/* Header Bar */}
@@ -447,6 +606,7 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                 <div className="p-1 border-b border-zinc-700 bg-[#1e1e1e]" ref={searchRef}>
                     <div className="relative">
                         <input
+                            ref={inputRef}
                             type="text"
                             placeholder="Click to add symbol..."
                             value={searchTerm}
@@ -455,7 +615,8 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                                 setShowSearchDropdown(true);
                             }}
                             onFocus={() => setShowSearchDropdown(true)}
-                            className="w-full bg-[#2d3436] border border-zinc-600 rounded-sm px-2 py-0.5 text-xs text-zinc-300 focus:outline-none focus:border-emerald-500 placeholder:text-zinc-500"
+                            onKeyDown={handleSearchKeyDown}
+                            className="w-full bg-[#2d3436] border border-zinc-600 rounded-sm px-2 py-0.5 text-xs text-zinc-300 focus:outline-none focus:border-yellow-500 placeholder:text-zinc-500"
                         />
                         <Search size={10} className="absolute right-2 top-1.5 text-zinc-500" />
 
@@ -466,6 +627,7 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                                 {(() => {
                                     // Get unique categories from available symbols (dynamic, not hardcoded)
                                     const uniqueCategories = [...new Set(filteredAvailableSymbols.map(s => s.category))];
+                                    let globalIndex = 0; // Track global index across categories for keyboard nav
 
                                     return uniqueCategories.map(category => {
                                         const categorySymbols = filteredAvailableSymbols.filter(s => s.category === category);
@@ -485,11 +647,13 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                                                 {categorySymbols.map(sym => {
                                                     const isSubscribed = subscribedSymbols.includes(sym.symbol) || Object.keys(ticks).includes(sym.symbol);
                                                     const isLoading = isSubscribing === sym.symbol;
+                                                    const isKeyboardSelected = globalIndex === selectedDropdownIndex;
+                                                    const currentIndex = globalIndex++;
 
                                                     return (
                                                         <div
                                                             key={sym.symbol}
-                                                            className={`flex items-center justify-between px-2 py-1.5 hover:bg-[#3b82f6] hover:text-white cursor-pointer text-xs group ${isSubscribed ? 'bg-emerald-900/20' : ''}`}
+                                                            className={`flex items-center justify-between px-2 py-1.5 hover:bg-[#3b82f6] hover:text-white cursor-pointer text-xs group ${isSubscribed ? 'bg-emerald-900/20' : ''} ${isKeyboardSelected ? 'bg-yellow-900/30 border-l-2 border-yellow-500' : ''}`}
                                                             onClick={() => {
                                                                 if (!isSubscribed && !isLoading) {
                                                                     subscribeToSymbol(sym.symbol);
@@ -508,9 +672,15 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                                                                 {isLoading ? (
                                                                     <span className="text-[9px] text-yellow-400 animate-pulse">Adding...</span>
                                                                 ) : isSubscribed ? (
-                                                                    <span className="text-[9px] text-emerald-400 flex items-center gap-0.5">
-                                                                        <Check size={10} /> Active
-                                                                    </span>
+                                                                    ticks[sym.symbol] ? (
+                                                                        <span className="text-[9px] text-emerald-400 flex items-center gap-0.5">
+                                                                            <Check size={10} /> Active
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="text-[9px] text-yellow-600 flex items-center gap-0.5" title="Subscribed but no market data yet">
+                                                                            <Clock size={10} /> Waiting
+                                                                        </span>
+                                                                    )
                                                                 ) : (
                                                                     <span className="text-[9px] text-blue-400 flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
                                                                         <Plus size={10} /> Add
@@ -559,7 +729,8 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                                     onClick={() => onSymbolSelect(symbol)}
                                     index={idx}
                                     columns={ALL_COLUMNS.filter(c => visibleColumns.includes(c.id))}
-                                    onContextMenu={handleContextMenu}
+                                    onContextMenu={handleContextMenuOpen}
+                                    isSubscribed={subscribedSymbols.includes(symbol)}
                                 />
                             ))}
                         </div>
@@ -605,8 +776,8 @@ const TabButton = ({ label, active, onClick }: { label: string, active: boolean,
     <div
         onClick={onClick}
         className={`px-3 py-0.5 text-[11px] font-bold cursor-pointer rounded-sm transition-colors border-t-2 ${active
-                ? 'bg-[#1e1e1e] text-zinc-200 border-emerald-500'
-                : 'text-zinc-500 border-transparent hover:text-zinc-300'
+            ? 'bg-[#1e1e1e] text-zinc-200 border-emerald-500'
+            : 'text-zinc-500 border-transparent hover:text-zinc-300'
             }`}
     >
         {label}
@@ -730,53 +901,52 @@ const TicksView = ({ symbol, tick }: { symbol: string, tick?: Tick }) => {
     );
 };
 
-const ContextMenuItem = ({
-    label,
-    shortcut,
-    checked,
-    hasSubmenu,
-    active,
-    action,
-    icon,
-    autoClose = true
-}: {
-    label: string,
-    shortcut?: string,
-    checked?: boolean,
-    hasSubmenu?: boolean,
-    active?: boolean,
-    action?: () => void,
-    icon?: React.ReactNode,
-    autoClose?: boolean
-}) => (
-    <div
-        className={`flex items-center px-3 py-1.5 hover:bg-[#3b82f6] hover:text-white cursor-pointer group relative ${active ? 'bg-[#3b82f6] text-white' : 'text-zinc-300'}`}
-        onClick={() => {
-            if (action) action();
-            // Note: autoClose logic is handled in the action prop usually by setting parent state to null
-        }}
-    >
-        <div className="w-5 flex items-center justify-center mr-1">
-            {checked && <Check size={12} />}
-            {icon && !checked && <span className="text-zinc-400 group-hover:text-white">{icon}</span>}
-        </div>
-        <span className="flex-1">{label}</span>
-        {shortcut && <span className="text-[10px] text-zinc-500 group-hover:text-zinc-200 ml-4 font-mono">{shortcut}</span>}
-        {hasSubmenu && <ChevronRight size={12} className="ml-2 text-zinc-500 group-hover:text-white" />}
-    </div>
-);
-
-const MenuDivider = () => <div className="h-[1px] bg-zinc-700 my-1 mx-2"></div>;
-
-function MarketWatchRow({ symbol, tick, selected, onClick, index, columns, onContextMenu }: {
+// MarketWatchRow component with MT5-style flash animations (Agent 2)
+const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, tick, selected, onClick, index, columns, onContextMenu, isSubscribed }: {
     symbol: string;
-    tick: Tick;
+    tick: Tick | undefined;
     selected: boolean;
     onClick: () => void;
     index: number;
     columns: ColumnConfig[];
     onContextMenu: (e: React.MouseEvent, symbol: string) => void;
+    isSubscribed?: boolean;
 }) {
+    // Flash animation state (Agent 2 - MT5 parity)
+    const [flashBid, setFlashBid] = useState<'up' | 'down' | 'none'>('none');
+    const [flashAsk, setFlashAsk] = useState<'up' | 'down' | 'none'>('none');
+
+    // Detect bid price changes and trigger flash
+    useEffect(() => {
+        if (tick?.prevBid !== undefined) {
+            if (tick.bid > tick.prevBid) {
+                setFlashBid('up');
+                const timer = setTimeout(() => setFlashBid('none'), 200);
+                return () => clearTimeout(timer);
+            } else if (tick.bid < tick.prevBid) {
+                setFlashBid('down');
+                const timer = setTimeout(() => setFlashBid('none'), 200);
+                return () => clearTimeout(timer);
+            }
+        }
+    }, [tick?.bid, tick?.prevBid]);
+
+    // Detect ask price changes and trigger flash
+    useEffect(() => {
+        if (tick?.ask && tick?.prevBid !== undefined) {
+            const prevAsk = tick.prevBid + (tick.spread || 0);
+            if (tick.ask > prevAsk) {
+                setFlashAsk('up');
+                const timer = setTimeout(() => setFlashAsk('none'), 200);
+                return () => clearTimeout(timer);
+            } else if (tick.ask < prevAsk) {
+                setFlashAsk('down');
+                const timer = setTimeout(() => setFlashAsk('none'), 200);
+                return () => clearTimeout(timer);
+            }
+        }
+    }, [tick?.ask, tick?.prevBid, tick?.spread]);
+
     // Determine colors
     const bidDir = tick?.prevBid !== undefined
         ? tick.bid > tick.prevBid ? 'up' : tick.bid < tick.prevBid ? 'down' : 'none'
@@ -811,14 +981,24 @@ function MarketWatchRow({ symbol, tick, selected, onClick, index, columns, onCon
                             break;
                         case 'bid':
                             content = formatPrice(tick.bid, symbol);
-                            cellClass = bidColor;
+                            cellClass = `${bidColor} transition-colors duration-200 ${
+                                flashBid === 'up' ? 'bg-emerald-500/30' :
+                                flashBid === 'down' ? 'bg-red-500/30' : ''
+                            }`;
                             break;
                         case 'ask':
                             content = formatPrice(tick.ask, symbol);
-                            cellClass = askColor;
+                            cellClass = `${askColor} transition-colors duration-200 ${
+                                flashAsk === 'up' ? 'bg-emerald-500/30' :
+                                flashAsk === 'down' ? 'bg-red-500/30' : ''
+                            }`;
                             break;
                         case 'spread':
-                            content = tick.spread?.toFixed(0) || '!';
+                            // Always recalculate spread dynamically (Agent 4 fix - MT5 parity)
+                            const rawSpread = tick.ask - tick.bid;
+                            const spreadFormat = getSpreadFormat(symbol);
+                            const spreadInPips = rawSpread * spreadFormat.multiplier;
+                            content = spreadInPips > 0 ? spreadInPips.toFixed(spreadFormat.decimals) : '-';
                             cellClass = 'text-zinc-400 text-[10px]';
                             break;
                         case 'dailyChange':
@@ -832,6 +1012,26 @@ function MarketWatchRow({ symbol, tick, selected, onClick, index, columns, onCon
                         case 'time': content = new Date().toLocaleTimeString('en-US', { hour12: false }); break;
                         default: content = '-';
                     }
+                } else if (isSubscribed) {
+                    // PERFORMANCE FIX: Show subscription status for symbols waiting for data (MT5 parity)
+                    switch (col.id) {
+                        case 'symbol':
+                            content = (
+                                <div className="flex items-center gap-1">
+                                    <Clock size={10} className="text-yellow-500 animate-pulse" />
+                                    <span className={selected ? 'text-white font-bold' : 'text-zinc-200'}>{symbol}</span>
+                                </div>
+                            );
+                            break;
+                        case 'bid':
+                        case 'ask':
+                        case 'spread':
+                            content = <span className="text-yellow-600 text-[9px] italic">Waiting...</span>;
+                            cellClass = 'text-center';
+                            break;
+                        default:
+                            content = '-';
+                    }
                 }
 
                 return (
@@ -842,7 +1042,13 @@ function MarketWatchRow({ symbol, tick, selected, onClick, index, columns, onCon
             })}
         </div>
     );
-}
+}, (prevProps, nextProps) => {
+    // Only re-render if tick data actually changed (performance optimization)
+    return prevProps.tick?.bid === nextProps.tick?.bid &&
+           prevProps.tick?.ask === nextProps.tick?.ask &&
+           prevProps.selected === nextProps.selected &&
+           prevProps.isSubscribed === nextProps.isSubscribed;
+});
 
 function formatPrice(price: number, symbol: string): string {
     if (!price) return '---';
@@ -850,4 +1056,30 @@ function formatPrice(price: number, symbol: string): string {
         return price.toFixed(3);
     }
     return price.toFixed(5);
+}
+
+// Symbol-aware spread formatting (Agent 4 recommendation - MT5 parity fix)
+function getSpreadFormat(symbol: string): { pipSize: number; multiplier: number; decimals: number } {
+    // Gold and precious metals (2 decimals, pip = 0.01)
+    if (symbol.includes('XAU') || symbol.includes('XAG') || symbol.includes('GOLD') || symbol.includes('SILVER')) {
+        return { pipSize: 0.01, multiplier: 100, decimals: 0 };
+    }
+
+    // JPY pairs (3 decimals, pip = 0.01)
+    if (symbol.includes('JPY')) {
+        return { pipSize: 0.01, multiplier: 100, decimals: 1 };
+    }
+
+    // Crypto (variable decimals, pip = 0.01)
+    if (symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('USDT')) {
+        return { pipSize: 0.01, multiplier: 100, decimals: 1 };
+    }
+
+    // Oil and commodities
+    if (symbol.includes('WTI') || symbol.includes('BRENT') || symbol.includes('OIL')) {
+        return { pipSize: 0.01, multiplier: 100, decimals: 1 };
+    }
+
+    // Standard forex (5 decimals, pip = 0.0001)
+    return { pipSize: 0.0001, multiplier: 10000, decimals: 1 };
 }

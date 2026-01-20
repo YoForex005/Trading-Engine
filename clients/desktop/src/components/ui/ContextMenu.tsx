@@ -1,133 +1,667 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { Check, ChevronRight } from 'lucide-react';
+import { useHoverIntent } from '../../hooks/useHoverIntent';
+import { useSafeHoverTriangle } from '../../hooks/useSafeHoverTriangle';
 
-type MenuItem = {
-  label: string;
-  icon?: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  divider?: boolean;
-  shortcut?: string;
-};
+// ============================================================================
+// TYPES - Exported from centralized types file
+// ============================================================================
 
-type ContextMenuProps = {
-  items: MenuItem[];
-  children: React.ReactNode;
-  disabled?: boolean;
-};
+import type { ContextMenuItemConfig } from './context-menu.types';
+export type { ContextMenuItemConfig } from './context-menu.types';
 
-export function ContextMenu({ items, children, disabled = false }: ContextMenuProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const menuRef = useRef<HTMLDivElement>(null);
+interface ContextMenuProps {
+  items: ContextMenuItemConfig[];
+  onClose: () => void;
+  position: { x: number; y: number };
+  triggerSymbol?: string;
+}
 
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    if (disabled) return;
+interface SubMenuState {
+  parentId: string;
+  items: ContextMenuItemConfig[];
+  triggerRect: DOMRect;
+}
 
-    e.preventDefault();
+// ============================================================================
+// VIEWPORT COLLISION DETECTION
+// ============================================================================
+
+interface Position {
+  x: number;
+  y: number;
+}
+
+function calculateMenuPosition(
+  triggerX: number,
+  triggerY: number,
+  menuWidth: number,
+  menuHeight: number,
+  viewportWidth: number,
+  viewportHeight: number
+): Position {
+  let x = triggerX;
+  let y = triggerY;
+
+  const EDGE_PADDING = 8;
+
+  // MT5-style auto-flip: Horizontal overflow check
+  if (x + menuWidth > viewportWidth - EDGE_PADDING) {
+    // Try to flip left of cursor
+    x = Math.max(EDGE_PADDING, triggerX - menuWidth);
+
+    // If still overflows, clamp to right edge
+    if (x + menuWidth > viewportWidth - EDGE_PADDING) {
+      x = viewportWidth - menuWidth - EDGE_PADDING;
+    }
+  }
+
+  // MT5-style auto-flip: Vertical overflow check
+  if (y + menuHeight > viewportHeight - EDGE_PADDING) {
+    // Try to flip above cursor
+    y = Math.max(EDGE_PADDING, triggerY - menuHeight);
+
+    // If still overflows, clamp to bottom edge
+    if (y + menuHeight > viewportHeight - EDGE_PADDING) {
+      y = viewportHeight - menuHeight - EDGE_PADDING;
+    }
+  }
+
+  // Ensure minimum padding from all edges
+  x = Math.max(EDGE_PADDING, Math.min(x, viewportWidth - menuWidth - EDGE_PADDING));
+  y = Math.max(EDGE_PADDING, Math.min(y, viewportHeight - menuHeight - EDGE_PADDING));
+
+  return { x, y };
+}
+
+function calculateSubmenuPosition(
+  triggerRect: DOMRect,
+  menuWidth: number,
+  menuHeight: number,
+  viewportWidth: number,
+  viewportHeight: number
+): Position {
+  const EDGE_PADDING = 8;
+  const SUBMENU_OVERLAP = 4; // Slight overlap for better UX
+  const MIN_GAP = 8; // Minimum gap to prevent parent/submenu overlap at corners
+
+  let x = triggerRect.right - SUBMENU_OVERLAP;
+  let y = triggerRect.top;
+  let horizontalFlipped = false;
+
+  // MT5-style horizontal flip: Try right first, then left
+  if (x + menuWidth > viewportWidth - EDGE_PADDING) {
+    x = triggerRect.left - menuWidth + SUBMENU_OVERLAP;
+    horizontalFlipped = true;
+
+    // If still overflows left, clamp to left edge
+    if (x < EDGE_PADDING) {
+      x = EDGE_PADDING;
+    }
+  }
+
+  // MT5-style vertical alignment: Keep submenu aligned with parent item
+  // But prevent overflow at bottom
+  if (y + menuHeight > viewportHeight - EDGE_PADDING) {
+    // PERFORMANCE FIX: Prevent overlap at corners when both horizontal and vertical flip
+    // If we flipped horizontally AND need to flip vertically, add extra spacing
+    if (horizontalFlipped) {
+      // Align bottom of submenu with bottom of trigger item (prevents corner overlap)
+      y = triggerRect.bottom - menuHeight;
+
+      // If that causes top overflow, align to bottom edge with gap
+      if (y < EDGE_PADDING) {
+        y = Math.max(EDGE_PADDING, viewportHeight - menuHeight - EDGE_PADDING);
+      }
+    } else {
+      // Standard vertical positioning
+      y = Math.max(EDGE_PADDING, viewportHeight - menuHeight - EDGE_PADDING);
+
+      // Alternative: Align bottom of submenu with bottom of trigger
+      const bottomAlign = triggerRect.bottom - menuHeight;
+      if (bottomAlign >= EDGE_PADDING && bottomAlign < y) {
+        y = bottomAlign;
+      }
+    }
+  }
+
+  // PERFORMANCE FIX: Final bounds check with corner detection
+  // Ensure minimum gap between parent menu edges and submenu
+  x = Math.max(EDGE_PADDING, Math.min(x, viewportWidth - menuWidth - EDGE_PADDING));
+  y = Math.max(EDGE_PADDING, Math.min(y, viewportHeight - menuHeight - EDGE_PADDING));
+
+  // Corner overlap detection: If submenu would overlap parent menu, shift it
+  const parentLeft = triggerRect.left;
+  const parentRight = triggerRect.right;
+  const submenuLeft = x;
+  const submenuRight = x + menuWidth;
+
+  // Check if submenu overlaps parent horizontally (shouldn't happen, but safety check)
+  if (horizontalFlipped && submenuRight > parentLeft - MIN_GAP) {
+    x = Math.max(EDGE_PADDING, parentLeft - menuWidth - MIN_GAP);
+  } else if (!horizontalFlipped && submenuLeft < parentRight + MIN_GAP) {
+    x = parentRight + MIN_GAP;
+  }
+
+  return { x, y };
+}
+
+// ============================================================================
+// MENU ITEM COMPONENT (WITH SUBMENU SUPPORT)
+// ============================================================================
+
+interface MenuItemProps {
+  item: ContextMenuItemConfig;
+  onClose: () => void;
+  onSubmenuOpen: (submenu: ContextMenuItemConfig[], rect: DOMRect) => void;
+  onSubmenuClose: () => void;
+  isSubmenuActive: boolean;
+  itemId: string;
+  isFocused?: boolean;
+}
+
+const MenuItem: React.FC<MenuItemProps> = ({
+  item,
+  onClose,
+  onSubmenuOpen,
+  onSubmenuClose,
+  isSubmenuActive,
+  itemId,
+  isFocused = false
+}) => {
+  const itemRef = useRef<HTMLDivElement>(null);
+  const submenuRef = useRef<HTMLDivElement>(null);
+  const [isHovered, setIsHovered] = useState(false);
+  const closeTimeoutRef = useRef<NodeJS.Timeout>();
+
+  const hasSubmenu = item.submenu && item.submenu.length > 0;
+
+  // MT5-style hover intent: 300ms delay for submenus (MT5 standard)
+  const hoverIntent = useHoverIntent({ delay: 300, sensitivity: 7 });
+
+  // Safe hover triangle: prevents submenu closing when moving diagonally toward it
+  const safeTriangle = useSafeHoverTriangle({
+    parentElement: itemRef.current,
+    submenuElement: submenuRef.current,
+    tolerance: 100,
+  });
+
+  // Open submenu when hover intent is triggered
+  useEffect(() => {
+    if (hasSubmenu && hoverIntent.isHovering && itemRef.current) {
+      const rect = itemRef.current.getBoundingClientRect();
+      onSubmenuOpen(item.submenu!, rect);
+      setIsHovered(true);
+    }
+  }, [hoverIntent.isHovering, hasSubmenu, item.submenu, onSubmenuOpen]);
+
+  // Track safe zone and close submenu intelligently
+  useEffect(() => {
+    if (!hasSubmenu || !isSubmenuActive) return;
+
+    const checkSafeZone = () => {
+      const shouldStay = safeTriangle.shouldStayOpen();
+
+      if (!shouldStay && !hoverIntent.isHovering) {
+        // Clear any pending close
+        if (closeTimeoutRef.current) {
+          clearTimeout(closeTimeoutRef.current);
+        }
+
+        // Delay close to prevent flicker (100ms tolerance)
+        closeTimeoutRef.current = setTimeout(() => {
+          if (!safeTriangle.shouldStayOpen() && !hoverIntent.isHovering) {
+            onSubmenuClose();
+            setIsHovered(false);
+          }
+        }, 100);
+      }
+    };
+
+    const interval = setInterval(checkSafeZone, 50);
+    return () => {
+      clearInterval(interval);
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current);
+      }
+    };
+  }, [hasSubmenu, isSubmenuActive, safeTriangle, hoverIntent.isHovering, onSubmenuClose]);
+
+  const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
 
-    setPosition({ x: e.clientX, y: e.clientY });
-    setIsOpen(true);
-  }, [disabled]);
+    if (item.disabled) return;
 
-  const handleClick = useCallback(() => {
-    setIsOpen(false);
+    if (hasSubmenu) {
+      // Toggle submenu on click (secondary interaction method)
+      if (isSubmenuActive) {
+        onSubmenuClose();
+        setIsHovered(false);
+      } else if (itemRef.current) {
+        const rect = itemRef.current.getBoundingClientRect();
+        onSubmenuOpen(item.submenu!, rect);
+        setIsHovered(true);
+      }
+    } else if (item.action) {
+      item.action();
+      if (item.autoClose !== false) {
+        onClose();
+      }
+    }
+  };
+
+  const handleMouseEnter = (e: React.MouseEvent) => {
+    setIsHovered(true);
+    hoverIntent.onMouseEnter(e);
+
+    // For non-submenu items, close any active submenus immediately
+    if (!hasSubmenu) {
+      onSubmenuClose();
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    hoverIntent.onMouseMove(e);
+  };
+
+  const handleMouseLeave = (e: React.MouseEvent) => {
+    setIsHovered(false);
+    hoverIntent.onMouseLeave();
+  };
+
+  if (item.divider) {
+    return <div className="h-[1px] bg-zinc-700 my-1 mx-2"></div>;
+  }
+
+  return (
+    <div
+      ref={itemRef}
+      className={`flex items-center px-3 py-1.5 cursor-pointer group relative ${
+        isSubmenuActive || isHovered || isFocused
+          ? 'bg-[#3b82f6] text-white'
+          : 'text-zinc-300 hover:bg-[#3b82f6] hover:text-white'
+      } ${item.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+      onClick={handleClick}
+      onMouseEnter={handleMouseEnter}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      role="menuitem"
+      aria-disabled={item.disabled}
+      aria-haspopup={hasSubmenu ? 'true' : undefined}
+      aria-expanded={hasSubmenu && isSubmenuActive ? 'true' : 'false'}
+      tabIndex={-1}
+    >
+      <div className="w-5 flex items-center justify-center mr-1">
+        {item.checked && <Check size={12} />}
+        {item.icon && !item.checked && (
+          <span className="text-zinc-400 group-hover:text-white">{item.icon}</span>
+        )}
+      </div>
+      <span className="flex-1">{item.label}</span>
+      {item.shortcut && (
+        <span className="text-[10px] text-zinc-500 group-hover:text-zinc-200 ml-4 font-mono">
+          {item.shortcut}
+        </span>
+      )}
+      {hasSubmenu && <ChevronRight size={12} className="ml-2 text-zinc-500 group-hover:text-white" />}
+    </div>
+  );
+};
+
+// ============================================================================
+// MENU COMPONENT (PORTAL-BASED)
+// ============================================================================
+
+interface MenuProps {
+  items: ContextMenuItemConfig[];
+  position: Position;
+  onClose: () => void;
+  zIndex: number;
+  isSubmenu?: boolean;
+}
+
+const Menu: React.FC<MenuProps> = ({ items, position, onClose, zIndex, isSubmenu = false }) => {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [adjustedPosition, setAdjustedPosition] = useState(position);
+  const [activeSubmenu, setActiveSubmenu] = useState<{
+    items: ContextMenuItemConfig[];
+    triggerRect: DOMRect;
+  } | null>(null);
+  const [focusedIndex, setFocusedIndex] = useState(0);
+  const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [isPositioned, setIsPositioned] = useState(false);
+
+  // Calculate adjusted position after render using useLayoutEffect
+  // This prevents menu clipping at viewport edges (MT5 behavior)
+  useLayoutEffect(() => {
+    if (menuRef.current) {
+      const rect = menuRef.current.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+
+      const newPos = isSubmenu
+        ? position // Submenu position already calculated by parent
+        : calculateMenuPosition(
+            position.x,
+            position.y,
+            rect.width,
+            rect.height,
+            viewportWidth,
+            viewportHeight
+          );
+
+      setAdjustedPosition(newPos);
+      setIsPositioned(true); // Prevent flash of mispositioned menu
+    }
+  }, [position, isSubmenu]);
+
+  const handleSubmenuOpen = useCallback((submenuItems: ContextMenuItemConfig[], rect: DOMRect) => {
+    setActiveSubmenu({ items: submenuItems, triggerRect: rect });
   }, []);
 
+  const handleSubmenuClose = useCallback(() => {
+    setActiveSubmenu(null);
+  }, []);
+
+  // Keyboard navigation (MT5-style) with proper focus management
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const nonDividerItems = items.filter(item => !item.divider && !item.disabled);
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          e.stopPropagation();
+          setFocusedIndex(prev => {
+            const nextIndex = (prev + 1) % nonDividerItems.length;
+            // Scroll focused item into view
+            const itemIndex = items.indexOf(nonDividerItems[nextIndex]);
+            itemRefs.current[itemIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            return nextIndex;
+          });
+          break;
+
+        case 'ArrowUp':
+          e.preventDefault();
+          e.stopPropagation();
+          setFocusedIndex(prev => {
+            const prevIndex = (prev - 1 + nonDividerItems.length) % nonDividerItems.length;
+            // Scroll focused item into view
+            const itemIndex = items.indexOf(nonDividerItems[prevIndex]);
+            itemRefs.current[itemIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            return prevIndex;
+          });
+          break;
+
+        case 'ArrowRight':
+          e.preventDefault();
+          e.stopPropagation();
+          const currentItem = nonDividerItems[focusedIndex];
+          if (currentItem?.submenu && currentItem.submenu.length > 0) {
+            const itemIndex = items.indexOf(currentItem);
+            const itemElement = itemRefs.current[itemIndex];
+            if (itemElement) {
+              const rect = itemElement.getBoundingClientRect();
+              handleSubmenuOpen(currentItem.submenu, rect);
+            }
+          }
+          break;
+
+        case 'ArrowLeft':
+          e.preventDefault();
+          e.stopPropagation();
+          if (activeSubmenu) {
+            handleSubmenuClose();
+          } else if (isSubmenu) {
+            onClose();
+          }
+          break;
+
+        case 'Enter':
+        case ' ':
+          e.preventDefault();
+          e.stopPropagation();
+          const selectedItem = nonDividerItems[focusedIndex];
+          if (selectedItem?.submenu && selectedItem.submenu.length > 0) {
+            const itemIndex = items.indexOf(selectedItem);
+            const itemElement = itemRefs.current[itemIndex];
+            if (itemElement) {
+              const rect = itemElement.getBoundingClientRect();
+              handleSubmenuOpen(selectedItem.submenu, rect);
+            }
+          } else if (selectedItem?.action) {
+            selectedItem.action();
+            if (selectedItem.autoClose !== false) {
+              onClose();
+            }
+          }
+          break;
+
+        case 'Escape':
+          e.preventDefault();
+          e.stopPropagation();
+          if (activeSubmenu) {
+            handleSubmenuClose();
+          } else {
+            onClose();
+          }
+          break;
+
+        default:
+          // First-letter navigation (MT5 feature)
+          if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
+            const letter = e.key.toLowerCase();
+            const matchingIndex = nonDividerItems.findIndex(item =>
+              item.label.toLowerCase().startsWith(letter)
+            );
+            if (matchingIndex !== -1) {
+              setFocusedIndex(matchingIndex);
+              const itemIndex = items.indexOf(nonDividerItems[matchingIndex]);
+              itemRefs.current[itemIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+          }
+          break;
+      }
+    };
+
+    // Only attach listener when menu is focused or a submenu is active
+    if (menuRef.current) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [focusedIndex, items, activeSubmenu, isSubmenu, handleSubmenuOpen, handleSubmenuClose, onClose]);
+
+  // Focus management - set focus on menu when it opens (MT5 behavior)
+  useLayoutEffect(() => {
+    if (menuRef.current && !isSubmenu && isPositioned) {
+      // Delay focus to prevent immediate keyboard event conflicts
+      const timer = setTimeout(() => {
+        menuRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isSubmenu, isPositioned]);
+
+  return (
+    <>
+      <div
+        ref={menuRef}
+        className="fixed w-64 bg-[#1e1e1e] border border-zinc-600 shadow-2xl rounded-sm py-1 text-xs text-zinc-200 outline-none transition-opacity duration-100 max-h-[80vh] overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700"
+        style={{
+          left: `${adjustedPosition.x}px`,
+          top: `${adjustedPosition.y}px`,
+          zIndex,
+          opacity: isPositioned ? 1 : 0, // Prevent flash of mispositioned menu
+          pointerEvents: isPositioned ? 'auto' : 'none'
+        }}
+        tabIndex={-1}
+        role="menu"
+        aria-label="Context menu"
+      >
+        {items.map((item, index) => {
+          const itemId = `item-${index}`;
+          const nonDividerItems = items.filter(i => !i.divider && !i.disabled);
+          const nonDividerIndex = nonDividerItems.indexOf(item);
+          const isFocused = !item.divider && !item.disabled && nonDividerIndex === focusedIndex;
+
+          return (
+            <div
+              key={itemId}
+              ref={el => itemRefs.current[index] = el}
+            >
+              <MenuItem
+                item={item}
+                onClose={onClose}
+                onSubmenuOpen={handleSubmenuOpen}
+                onSubmenuClose={handleSubmenuClose}
+                isSubmenuActive={activeSubmenu !== null && index === items.indexOf(item)}
+                itemId={itemId}
+                isFocused={isFocused}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Render submenu with collision detection and higher z-index */}
+      {activeSubmenu && (
+        <SubmenuPortal
+          items={activeSubmenu.items}
+          triggerRect={activeSubmenu.triggerRect}
+          onClose={onClose}
+          zIndex={zIndex + 10} // Ensure submenus are always above parent menus
+        />
+      )}
+    </>
+  );
+};
+
+// ============================================================================
+// SUBMENU PORTAL (WITH VIEWPORT COLLISION DETECTION)
+// ============================================================================
+
+interface SubmenuPortalProps {
+  items: ContextMenuItemConfig[];
+  triggerRect: DOMRect;
+  onClose: () => void;
+  zIndex: number;
+}
+
+const SubmenuPortal: React.FC<SubmenuPortalProps> = ({ items, triggerRect, onClose, zIndex }) => {
+  const submenuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<Position>({ x: triggerRect.right, y: triggerRect.top });
+
+  useLayoutEffect(() => {
+    if (submenuRef.current) {
+      const rect = submenuRef.current.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+
+      const newPos = calculateSubmenuPosition(
+        triggerRect,
+        rect.width,
+        rect.height,
+        viewportWidth,
+        viewportHeight
+      );
+
+      setPosition(newPos);
+    }
+  }, [triggerRect]);
+
+  return (
+    <div
+      ref={submenuRef}
+      style={{
+        position: 'fixed',
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        zIndex
+      }}
+    >
+      <Menu items={items} position={position} onClose={onClose} zIndex={zIndex} isSubmenu />
+    </div>
+  );
+};
+
+// ============================================================================
+// MAIN CONTEXT MENU COMPONENT (PORTAL-BASED)
+// ============================================================================
+
+export const ContextMenu: React.FC<ContextMenuProps> = ({
+  items,
+  onClose,
+  position,
+  triggerSymbol
+}) => {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
+        onClose();
       }
     };
 
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setIsOpen(false);
+        onClose();
       }
     };
 
-    if (isOpen) {
+    // Delay to avoid immediate close from the opening click
+    const timer = setTimeout(() => {
       document.addEventListener('mousedown', handleClickOutside);
       document.addEventListener('keydown', handleEscape);
-    }
+    }, 0);
 
     return () => {
+      clearTimeout(timer);
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [isOpen]);
+  }, [onClose]);
 
-  // Adjust menu position to keep it on screen
-  useEffect(() => {
-    if (isOpen && menuRef.current) {
-      const menu = menuRef.current;
-      const rect = menu.getBoundingClientRect();
-      const { innerWidth, innerHeight } = window;
-
-      let { x, y } = position;
-
-      if (x + rect.width > innerWidth) {
-        x = innerWidth - rect.width - 8;
-      }
-
-      if (y + rect.height > innerHeight) {
-        y = innerHeight - rect.height - 8;
-      }
-
-      if (x !== position.x || y !== position.y) {
-        setPosition({ x, y });
-      }
-    }
-  }, [isOpen, position]);
-
-  return (
-    <>
-      <div onContextMenu={handleContextMenu} onClick={handleClick}>
-        {children}
-      </div>
-
-      {isOpen && (
+  // Render menu at document.body level using portal with proper z-index layering
+  // Base z-index: 9999 (main menu), submenus: 10009, 10019, etc. (increments by 10)
+  return createPortal(
+    <div ref={menuRef}>
+      {triggerSymbol && (
         <div
-          ref={menuRef}
-          className="context-menu"
+          className="fixed w-64 bg-[#1e1e1e] border border-zinc-600 shadow-2xl rounded-sm py-1 text-xs text-zinc-200"
           style={{
-            left: `${position.x}px`,
-            top: `${position.y}px`
+            top: position.y,
+            left: position.x,
+            zIndex: 9998 // Symbol header just below menu
           }}
         >
-          {items.map((item, index) => (
-            <div key={index}>
-              {item.divider ? (
-                <div className="context-menu-divider" />
-              ) : (
-                <button
-                  className={`context-menu-item w-full text-left flex items-center justify-between gap-4 ${
-                    item.disabled ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
-                  onClick={() => {
-                    if (!item.disabled) {
-                      item.onClick();
-                      setIsOpen(false);
-                    }
-                  }}
-                  disabled={item.disabled}
-                >
-                  <div className="flex items-center gap-2">
-                    {item.icon && <span className="w-4 h-4">{item.icon}</span>}
-                    <span>{item.label}</span>
-                  </div>
-                  {item.shortcut && (
-                    <span className="text-2xs text-zinc-500 font-mono">
-                      {item.shortcut}
-                    </span>
-                  )}
-                </button>
-              )}
-            </div>
-          ))}
+          <div className="px-3 py-1.5 text-[10px] font-bold text-emerald-400 border-b border-zinc-700 mb-1">
+            {triggerSymbol}
+          </div>
         </div>
       )}
-    </>
+      <Menu items={items} position={position} onClose={onClose} zIndex={9999} />
+    </div>,
+    document.body
   );
-}
+};
+
+// ============================================================================
+// UTILITY: SECTION HEADER
+// ============================================================================
+
+export const MenuSectionHeader: React.FC<{ label: string }> = ({ label }) => (
+  <div className="px-3 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider pl-2">
+    {label}
+  </div>
+);
+
+// ============================================================================
+// UTILITY: DIVIDER
+// ============================================================================
+
+export const MenuDivider: React.FC = () => (
+  <div className="h-[1px] bg-zinc-700 my-1 mx-2"></div>
+);
