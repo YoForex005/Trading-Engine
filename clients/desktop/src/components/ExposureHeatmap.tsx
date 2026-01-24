@@ -225,12 +225,12 @@ const renderHeatmap = (config: RenderConfig): void => {
 export const ExposureHeatmap = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const animationFrameRef = useRef<number>();
+  const animationFrameRef = useRef<number | undefined>(undefined);
   const updateBatchRef = useRef<ExposureCell[]>([]);
   const lastRenderTime = useRef<number>(0);
 
   // State
-  const [interval, setInterval] = useState<TimeInterval>('1h');
+  const [timeInterval, setTimeInterval] = useState<TimeInterval>('1h');
   const [data, setData] = useState<ExposureData>({
     cells: [],
     symbols: [],
@@ -250,7 +250,7 @@ export const ExposureHeatmap = () => {
     try {
       // TODO: Replace with actual API endpoint
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/analytics/exposure/heatmap?interval=${interval}`
+        `${import.meta.env.VITE_API_URL}/api/analytics/exposure/heatmap?interval=${timeInterval}`
       );
 
       if (!response.ok) throw new Error('Failed to fetch exposure data');
@@ -283,7 +283,7 @@ export const ExposureHeatmap = () => {
         timeRange: { start: now - 24 * 60 * 60 * 1000, end: now }
       });
     }
-  }, [interval]);
+  }, [timeInterval]);
 
   useEffect(() => {
     fetchExposureData();
@@ -354,7 +354,7 @@ export const ExposureHeatmap = () => {
       renderHeatmap({
         canvas: canvasRef.current,
         data,
-        interval,
+        interval: timeInterval,
         viewport,
         hoveredCell
       });
@@ -362,7 +362,7 @@ export const ExposureHeatmap = () => {
 
     lastRenderTime.current = now;
     animationFrameRef.current = requestAnimationFrame(render);
-  }, [data, interval, viewport, hoveredCell]);
+  }, [data, timeInterval, viewport, hoveredCell]);
 
   useEffect(() => {
     animationFrameRef.current = requestAnimationFrame(render);
@@ -476,9 +476,9 @@ export const ExposureHeatmap = () => {
           {(['15m', '1h', '4h', '1d'] as TimeInterval[]).map(int => (
             <button
               key={int}
-              onClick={() => setInterval(int)}
+              onClick={() => setTimeInterval(int)}
               className={`px-3 py-1 text-xs rounded ${
-                interval === int
+                timeInterval === int
                   ? 'bg-blue-600 text-white'
                   : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
               }`}

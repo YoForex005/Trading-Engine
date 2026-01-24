@@ -19,7 +19,8 @@ import {
   AlertTriangle,
   Clock,
 } from 'lucide-react';
-import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
+import { createChart, ColorType, LineSeries, AreaSeries } from 'lightweight-charts';
+import type { IChartApi } from 'lightweight-charts';
 
 // ============================================
 // Types
@@ -196,11 +197,10 @@ export const RuleEffectivenessDashboard = () => {
               <button
                 key={range}
                 onClick={() => setTimeRange(range)}
-                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                  timeRange === range
-                    ? 'bg-emerald-500 text-white'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
+                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${timeRange === range
+                  ? 'bg-emerald-500 text-white'
+                  : 'text-zinc-400 hover:text-white'
+                  }`}
               >
                 {range}
               </button>
@@ -368,13 +368,12 @@ export const RuleEffectivenessDashboard = () => {
                             {rankBadge ? (
                               <div className="flex items-center gap-1">
                                 <rankBadge.icon
-                                  className={`w-4 h-4 ${
-                                    rankBadge.color === 'gold'
-                                      ? 'text-yellow-400'
-                                      : rankBadge.color === 'silver'
+                                  className={`w-4 h-4 ${rankBadge.color === 'gold'
+                                    ? 'text-yellow-400'
+                                    : rankBadge.color === 'silver'
                                       ? 'text-zinc-400'
                                       : 'text-orange-600'
-                                  }`}
+                                    }`}
                                 />
                                 <span className="text-xs font-medium text-zinc-400">
                                   {rankBadge.label}
@@ -408,9 +407,8 @@ export const RuleEffectivenessDashboard = () => {
                           </td>
                           <td className="p-2">
                             <div
-                              className={`font-mono font-bold ${
-                                rule.totalPnL >= 0 ? 'text-green-400' : 'text-red-400'
-                              }`}
+                              className={`font-mono font-bold ${rule.totalPnL >= 0 ? 'text-green-400' : 'text-red-400'
+                                }`}
                             >
                               {rule.totalPnL >= 0 ? '+' : ''}${rule.totalPnL.toFixed(2)}
                             </div>
@@ -710,7 +708,7 @@ const RulePerformanceChart = ({ selectedRuleIds, timeRange }: RulePerformanceCha
         // Add series for each rule
         const colors = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899'];
         results.forEach((result, index) => {
-          const series = chart.addSeries({ type: 'Line',
+          const series = chart.addSeries(LineSeries, {
             color: colors[index % colors.length],
             lineWidth: 2,
           });
@@ -821,7 +819,7 @@ const DrawdownChart = ({ selectedRuleIds, timeRange }: DrawdownChartProps) => {
 
         const colors = ['#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16'];
         results.forEach((result, index) => {
-          const series = chart.addSeries({ type: 'Area',
+          const series = chart.addSeries(AreaSeries, {
             topColor: `${colors[index % colors.length]}40`,
             bottomColor: `${colors[index % colors.length]}00`,
             lineColor: colors[index % colors.length],

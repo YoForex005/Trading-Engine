@@ -6,6 +6,15 @@
 export { TradingChart, ChartControls } from './TradingChart';
 export type { ChartType, Timeframe } from './TradingChart';
 
+// Historical data components
+export { ChartWithHistory } from './ChartWithHistory';
+export { HistoryDownloader } from './HistoryDownloader';
+
+// Chart integration components
+export { ChartWithIndicators } from './ChartWithIndicators';
+export { IndicatorNavigator } from './IndicatorNavigator';
+export type { IndicatorInfo } from './IndicatorNavigator';
+
 export { OrderEntry } from './OrderEntry';
 export type { OrderType, OrderSide } from './OrderEntry';
 

@@ -1,0 +1,110 @@
+# RTX Trading Engine - Database Configuration
+
+# PostgreSQL / TimescaleDB Connection
+database:
+  # Primary database (orders, accounts, trades)
+  primary:
+    host: localhost
+    port: 5432
+    database: rtx_db
+    user: rtx_user
+    password: ${DB_PASSWORD} # Use environment variable
+    ssl_mode: require # disable, require, verify-ca, verify-full
+    pool:
+      max_connections: 50
+      min_connections: 10
+      max_idle_time: 5m
+      max_lifetime: 1h
+
+  # Tick storage (TimescaleDB)
+  tick_storage:
+    enabled: true
+    type: timescaledb
+    host: localhost
+    port: 5432
+    database: rtx_db
+    user: rtx_app
+    password: ${TICK_DB_PASSWORD} # Use environment variable
+    ssl_mode: require
+
+    # Connection pooling
+    pool:
+      max_connections: 50
+      min_connections: 10
+      max_idle_time: 5m
+      max_lifetime: 1h
+      health_check_interval: 30s
+
+    # Batch write configuration
+    batch:
+      size: 500 # Number of ticks per batch
+      flush_interval: 5s # Flush remaining ticks every 5 seconds
+      max_queue_size: 10000 # Max ticks in async queue
+
+    # In-memory cache (ring buffers)
+    cache:
+      enabled: true
+      max_ticks_per_symbol: 10000 # Keep last 10k ticks in memory
+
+    # Compression settings (handled by TimescaleDB)
+    compression:
+      enabled: true
+      compress_after: 7d # Compress chunks older than 7 days
+
+    # Retention policy (handled by TimescaleDB)
+    retention:
+      enabled: true
+      keep_duration: 6mo # Drop chunks older than 6 months
+
+  # Redis cache (optional)
+  redis:
+    enabled: false
+    host: localhost
+    port: 6379
+    password: ${REDIS_PASSWORD}
+    db: 0
+    pool_size: 10
+
+# Migration settings
+migration:
+  auto_migrate: true # Auto-run migrations on startup
+  directory: ./migrations
+  table: schema_migrations
+
+# Backup settings
+backup:
+  enabled: true
+  schedule:
+    incremental: "0 */6 * * *" # Every 6 hours (cron format)
+    full: "0 2 * * 0" # Sunday at 2 AM (cron format)
+  retention:
+    incremental_days: 7
+    full_weeks: 4
+  storage:
+    type: s3 # s3, azure, gcs, local
+    s3:
+      bucket: rtx-backups
+      region: us-east-1
+      prefix: ticks/
+      access_key: ${AWS_ACCESS_KEY}
+      secret_key: ${AWS_SECRET_KEY}
+
+# Monitoring
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090
+  grafana:
+    enabled: true
+    port: 3000
+
+# Logging
+logging:
+  level: info # debug, info, warn, error
+  format: json # json, text
+  output: stdout # stdout, file
+  file:
+    path: /var/log/rtx/database.log
+    max_size_mb: 100
+    max_backups: 10
+    max_age_days: 30

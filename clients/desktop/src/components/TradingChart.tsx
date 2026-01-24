@@ -7,9 +7,14 @@ import {
     LineSeries,
     BarSeries,
     AreaSeries,
+    HistogramSeries,
 } from 'lightweight-charts';
 import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts';
 import { X } from 'lucide-react';
+import { chartManager } from '../services/chartManager';
+import { drawingManager } from '../services/drawingManager';
+import { indicatorManager } from '../services/indicatorManager';
+import { useCurrentTick } from '../store/useMarketDataStore';
 
 export type ChartType = 'candlestick' | 'heikinAshi' | 'bar' | 'line' | 'area';
 export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
@@ -30,6 +35,16 @@ interface OHLC {
     high: number;
     low: number;
     close: number;
+    volume?: number;
+}
+
+// Helper function to combine historical and forming candles
+function getAllCandles(historicalCandles: OHLC[], formingCandle: OHLC | null): OHLC[] {
+    const allCandles = [...historicalCandles];
+    if (formingCandle) {
+        allCandles.push(formingCandle);
+    }
+    return allCandles;
 }
 
 export function TradingChart({
@@ -44,11 +59,21 @@ export function TradingChart({
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<any> | null>(null);
-    const candlesRef = useRef<OHLC[]>([]);
+    const volumeSeriesRef = useRef<ISeriesApi<'Histogram'>>();
+    const bidLineRef = useRef<any>(null);
+    const askLineRef = useRef<any>(null);
+
+    // Separate state: historical loaded once, forming updates from ticks
+    const historicalCandlesRef = useRef<OHLC[]>([]); // Loaded from API, never modified
+    const formingCandleRef = useRef<OHLC | null>(null); // Updates from real-time ticks
+
     const [isChartReady, setIsChartReady] = useState(false);
 
     // State for overlays
     const [overlayPositions, setOverlayPositions] = useState<any[]>([]);
+
+    // Get real-time tick data from Zustand store
+    const currentTick = useCurrentTick(symbol);
 
     // Initialize chart ONCE
     useEffect(() => {
@@ -62,8 +87,8 @@ export function TradingChart({
                     attributionLogo: false,
                 },
                 grid: {
-                    vertLines: { color: '#27272a' },
-                    horzLines: { color: '#27272a' },
+                    vertLines: { color: 'rgba(70, 70, 70, 0.3)', style: 2 }, // 2 = dotted
+                    horzLines: { color: 'rgba(70, 70, 70, 0.3)', style: 2 }, // 2 = dotted
                 },
                 crosshair: {
                     mode: CrosshairMode.Normal,
@@ -85,6 +110,10 @@ export function TradingChart({
 
             chartRef.current = chart;
 
+            // Set chart reference in managers
+            chartManager.setChart(chart);
+            indicatorManager.setChart(chart);
+
             const handleResize = () => {
                 if (chartContainerRef.current && chartRef.current) {
                     chartRef.current.applyOptions({
@@ -101,6 +130,12 @@ export function TradingChart({
             return () => {
                 window.removeEventListener('resize', handleResize);
                 setIsChartReady(false);
+
+                // Clear manager references
+                chartManager.setChart(null);
+                indicatorManager.setChart(null);
+                drawingManager.setChart(null, null);
+
                 chart.remove();
                 chartRef.current = null;
                 seriesRef.current = null;
@@ -127,13 +162,13 @@ export function TradingChart({
                 case 'candlestick':
                 case 'heikinAshi':
                     series = chart.addSeries(CandlestickSeries, {
-                        upColor: '#10b981', downColor: '#ef4444',
-                        borderUpColor: '#10b981', borderDownColor: '#ef4444',
-                        wickUpColor: '#10b981', wickDownColor: '#ef4444',
+                        upColor: '#14b8a6', downColor: '#ef4444',
+                        borderUpColor: '#14b8a6', borderDownColor: '#ef4444',
+                        wickUpColor: '#14b8a6', wickDownColor: '#ef4444',
                     });
                     break;
                 case 'bar':
-                    series = chart.addSeries(BarSeries, { upColor: '#10b981', downColor: '#ef4444' });
+                    series = chart.addSeries(BarSeries, { upColor: '#14b8a6', downColor: '#ef4444' });
                     break;
                 case 'line':
                     series = chart.addSeries(LineSeries, { color: '#10b981', lineWidth: 2 });
@@ -146,17 +181,52 @@ export function TradingChart({
                     break;
                 default:
                     series = chart.addSeries(CandlestickSeries, {
-                        upColor: '#10b981', downColor: '#ef4444',
-                        borderUpColor: '#10b981', borderDownColor: '#ef4444',
-                        wickUpColor: '#10b981', wickDownColor: '#ef4444',
+                        upColor: '#14b8a6', downColor: '#ef4444',
+                        borderUpColor: '#14b8a6', borderDownColor: '#ef4444',
+                        wickUpColor: '#14b8a6', wickDownColor: '#ef4444',
                     });
             }
 
             seriesRef.current = series;
 
-            if (candlesRef.current.length > 0) {
-                const formattedData = formatDataForSeries(candlesRef.current, chartType);
+            // Add volume histogram
+            if (volumeSeriesRef.current) {
+                try { chartRef.current.removeSeries(volumeSeriesRef.current); } catch (e) { }
+            }
+            const volumeSeries = chart.addSeries(HistogramSeries, {
+                color: '#06b6d4', // Cyan
+                priceFormat: {
+                    type: 'volume',
+                },
+                priceScaleId: '', // Use default scale
+                scaleMargins: {
+                    top: 0.8, // Position at bottom 20%
+                    bottom: 0,
+                },
+            });
+            volumeSeriesRef.current = volumeSeries;
+
+            // Update drawing manager with new series
+            drawingManager.setChart(chartRef.current, series);
+
+            // Get combined candles (historical + forming)
+            const allCandles = getAllCandles(historicalCandlesRef.current, formingCandleRef.current);
+            if (allCandles.length > 0) {
+                const formattedData = formatDataForSeries(allCandles, chartType);
                 series.setData(formattedData);
+
+                // Set volume data
+                if (volumeSeriesRef.current) {
+                    const volumeData = allCandles.map(bar => ({
+                        time: bar.time,
+                        value: bar.volume || 0,
+                        color: bar.close >= bar.open ? 'rgba(6, 182, 212, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+                    }));
+                    volumeSeriesRef.current.setData(volumeData);
+                }
+
+                // Update indicator manager with combined OHLC data
+                indicatorManager.setOHLCData(allCandles);
             }
         } catch (err) {
             console.error('Error creating chart series:', err);
@@ -169,63 +239,139 @@ export function TradingChart({
             if (!seriesRef.current) return;
 
             try {
-                const res = await fetch(`http://localhost:8080/ohlc?symbol=${symbol}&timeframe=${timeframe}&limit=500`);
+                // FIXED: Correct port (7999) and endpoint (/api/history/ticks)
+                // Backend server runs on port 7999 (see backend/cmd/server/main.go:1915)
+                // Historical tick data API at /api/history/ticks (see backend/api/history.go)
+                const dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+                const res = await fetch(`http://localhost:7999/api/history/ticks?symbol=${symbol}&date=${dateStr}&limit=5000`);
 
                 if (!res.ok) {
-                    candlesRef.current = [];
+                    console.warn(`No historical data for ${symbol}: ${res.status} ${res.statusText}`);
+                    historicalCandlesRef.current = [];
+                    formingCandleRef.current = null;
                     seriesRef.current.setData([]);
                     return;
                 }
 
                 const data = await res.json();
 
-                if (Array.isArray(data) && data.length > 0) {
-                    const candles: OHLC[] = data.map((d: any) => ({
-                        time: d.time as Time,
-                        open: d.open, high: d.high, low: d.low, close: d.close,
-                    }));
+                // Convert tick data to OHLC candles
+                if (data.ticks && Array.isArray(data.ticks) && data.ticks.length > 0) {
+                    const candles = buildOHLCFromTicks(data.ticks, timeframe);
 
-                    candlesRef.current = candles;
-                    const formattedData = formatDataForSeries(candles, chartType);
-                    seriesRef.current.setData(formattedData);
+                    if (candles.length > 0) {
+                        // Only update historical candles, forming candle stays separate
+                        historicalCandlesRef.current = candles;
+
+                        // Reset forming candle when new historical data is loaded
+                        formingCandleRef.current = null;
+
+                        // Get combined candles for display
+                        const allCandles = getAllCandles(candles, formingCandleRef.current);
+                        const formattedData = formatDataForSeries(allCandles, chartType);
+                        seriesRef.current.setData(formattedData);
+
+                        // Set volume data
+                        if (volumeSeriesRef.current && allCandles.length > 0) {
+                            const volumeData = allCandles.map(bar => ({
+                                time: bar.time,
+                                value: bar.volume || 0,
+                                color: bar.close >= bar.open ? 'rgba(6, 182, 212, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+                            }));
+                            volumeSeriesRef.current.setData(volumeData);
+                        }
+
+                        // Update indicator manager with combined data
+                        indicatorManager.setOHLCData(allCandles);
+                    } else {
+                        console.warn(`No candles built from ${data.ticks.length} ticks for ${symbol}`);
+                        historicalCandlesRef.current = [];
+                        formingCandleRef.current = null;
+                        seriesRef.current.setData([]);
+                    }
                 } else {
-                    candlesRef.current = [];
+                    console.warn(`No tick data returned for ${symbol}`);
+                    historicalCandlesRef.current = [];
+                    formingCandleRef.current = null;
                     seriesRef.current.setData([]);
+                    if (volumeSeriesRef.current) {
+                        volumeSeriesRef.current.setData([]);
+                    }
                 }
             } catch (err) {
-                console.error('Error fetching historical data:', err);
-                candlesRef.current = [];
+                console.error(`Error fetching historical data for ${symbol}:`, err);
+                historicalCandlesRef.current = [];
             }
         };
 
         fetchHistory();
     }, [symbol, timeframe, chartType]);
 
-    // Update candles with new price
+    // Update candles with real-time tick data (MT5-correct time-bucket aggregation)
     useEffect(() => {
-        if (!currentPrice || !seriesRef.current) return;
+        if (!currentTick || !seriesRef.current) return;
 
-        const price = (currentPrice.bid + currentPrice.ask) / 2;
-        const now = Math.floor(Date.now() / 1000) as Time;
+        const price = (currentTick.bid + currentTick.ask) / 2;
+        const tickTime = Math.floor(Date.now() / 1000);
         const tfSeconds = getTimeframeSeconds(timeframe);
-        const candleTime = (Math.floor((now as number) / tfSeconds) * tfSeconds) as Time;
 
-        if (candlesRef.current.length === 0) {
-            candlesRef.current.push({ time: candleTime, open: price, high: price, low: price, close: price });
-        } else {
-            const lastCandle = candlesRef.current[candlesRef.current.length - 1];
-            if (lastCandle.time === candleTime) {
-                lastCandle.close = price;
-                lastCandle.high = Math.max(lastCandle.high, price);
-                lastCandle.low = Math.min(lastCandle.low, price);
-                seriesRef.current.update(lastCandle);
-            } else {
-                const newCandle = { time: candleTime, open: price, high: price, low: price, close: price };
-                candlesRef.current.push(newCandle);
-                seriesRef.current.update(newCandle);
-            }
+        // MT5-CORRECT: Calculate time bucket for this tick
+        const candleTime = (Math.floor(tickTime / tfSeconds) * tfSeconds) as Time;
+
+        // Initialize forming candle if needed
+        if (!formingCandleRef.current) {
+            formingCandleRef.current = {
+                time: candleTime,
+                open: price,
+                high: price,
+                low: price,
+                close: price,
+                volume: 1
+            };
+            seriesRef.current.update(formingCandleRef.current);
+            return;
         }
-    }, [currentPrice, timeframe]);
+
+        // Check if we need to start a new candle (NEW TIME BUCKET)
+        if (formingCandleRef.current.time !== candleTime) {
+            // Close the previous candle (move to historical)
+            historicalCandlesRef.current.push(formingCandleRef.current);
+
+            // Start a new forming candle
+            formingCandleRef.current = {
+                time: candleTime,
+                open: price,
+                high: price,
+                low: price,
+                close: price,
+                volume: 1
+            };
+
+            // Update chart with the new candle
+            seriesRef.current.update(formingCandleRef.current);
+
+            // Update volume series with closed candle
+            if (volumeSeriesRef.current && historicalCandlesRef.current.length > 0) {
+                const closedCandle = historicalCandlesRef.current[historicalCandlesRef.current.length - 1];
+                volumeSeriesRef.current.update({
+                    time: closedCandle.time,
+                    value: closedCandle.volume || 0,
+                    color: closedCandle.close >= closedCandle.open
+                        ? 'rgba(6, 182, 212, 0.5)'
+                        : 'rgba(239, 68, 68, 0.5)',
+                });
+            }
+        } else {
+            // Update the forming candle (SAME TIME BUCKET)
+            formingCandleRef.current.high = Math.max(formingCandleRef.current.high, price);
+            formingCandleRef.current.low = Math.min(formingCandleRef.current.low, price);
+            formingCandleRef.current.close = price;
+            formingCandleRef.current.volume = (formingCandleRef.current.volume || 0) + 1;
+
+            // Update chart with updated forming candle
+            seriesRef.current.update(formingCandleRef.current);
+        }
+    }, [currentTick, timeframe]);
 
     // Update overlay positions on scroll/zoom
     useEffect(() => {
@@ -315,9 +461,158 @@ export function TradingChart({
         };
     }, [draggingState, positions, onModifyPosition]);
 
+    // Command bus subscriptions (will work once Agent 1 creates commandBus)
+    useEffect(() => {
+        // Note: This assumes commandBus will be created by Agent 1
+        // When commandBus is available, these subscriptions will activate
+
+        // Try to import commandBus dynamically
+        let unsubscribers: Array<() => void> = [];
+
+        const setupCommandBus = async () => {
+            try {
+                // Dynamic import to avoid errors if not yet created
+                const { commandBus } = await import('../services/commandBus');
+
+                // Subscribe to crosshair toggle
+                const unsubCrosshair = commandBus.subscribe('TOGGLE_CROSSHAIR', () => {
+                    chartManager.toggleCrosshair();
+                });
+
+                // Subscribe to zoom in
+                const unsubZoomIn = commandBus.subscribe('ZOOM_IN', () => {
+                    chartManager.zoomIn();
+                });
+
+                // Subscribe to zoom out
+                const unsubZoomOut = commandBus.subscribe('ZOOM_OUT', () => {
+                    chartManager.zoomOut();
+                });
+
+                // Subscribe to fit content
+                const unsubFit = commandBus.subscribe('FIT_CONTENT', () => {
+                    chartManager.fitContent();
+                });
+
+                // Subscribe to drawing tool selection
+                const unsubTrendline = commandBus.subscribe('SELECT_TRENDLINE', () => {
+                    drawingManager.startDrawing('trendline');
+                });
+
+                const unsubHLine = commandBus.subscribe('SELECT_HLINE', () => {
+                    drawingManager.startDrawing('hline');
+                });
+
+                const unsubVLine = commandBus.subscribe('SELECT_VLINE', () => {
+                    drawingManager.startDrawing('vline');
+                });
+
+                const unsubText = commandBus.subscribe('SELECT_TEXT', () => {
+                    drawingManager.startDrawing('text');
+                });
+
+                unsubscribers = [
+                    unsubCrosshair,
+                    unsubZoomIn,
+                    unsubZoomOut,
+                    unsubFit,
+                    unsubTrendline,
+                    unsubHLine,
+                    unsubVLine,
+                    unsubText
+                ];
+            } catch (error) {
+                // commandBus not yet available, will work when Agent 1 completes
+                console.log('Command bus not yet available');
+            }
+        };
+
+        setupCommandBus();
+
+        return () => {
+            unsubscribers.forEach(unsub => unsub());
+        };
+    }, []);
+
+    // Load drawings and indicators for symbol
+    useEffect(() => {
+        if (!symbol) return;
+
+        // Load saved drawings
+        drawingManager.loadFromStorage(symbol);
+
+        // Load saved indicators
+        indicatorManager.loadFromStorage(symbol);
+
+        return () => {
+            // Save on unmount
+            drawingManager.saveToStorage(symbol);
+            indicatorManager.saveToStorage(symbol);
+        };
+    }, [symbol]);
+
+    // Update drawing positions on chart scroll/zoom
+    useEffect(() => {
+        if (!chartRef.current || !seriesRef.current) return;
+
+        const timeScale = chartRef.current.timeScale();
+
+        const handleVisibleRangeChange = () => {
+            drawingManager.updateDrawingPositions();
+        };
+
+        timeScale.subscribeVisibleTimeRangeChange(handleVisibleRangeChange);
+
+        return () => {
+            timeScale.unsubscribeVisibleTimeRangeChange(handleVisibleRangeChange);
+        };
+    }, [isChartReady]);
+
+    // Update bid/ask price lines with real-time ticks
+    useEffect(() => {
+        if (!seriesRef.current || !currentTick) return;
+
+        try {
+            // Remove previous price lines
+            if (bidLineRef.current) {
+                seriesRef.current.removePriceLine(bidLineRef.current);
+                bidLineRef.current = null;
+            }
+            if (askLineRef.current) {
+                seriesRef.current.removePriceLine(askLineRef.current);
+                askLineRef.current = null;
+            }
+
+            // Create new bid line
+            bidLineRef.current = seriesRef.current.createPriceLine({
+                price: currentTick.bid,
+                color: '#ef4444', // Red
+                lineWidth: 1,
+                lineStyle: 2, // Dashed
+                axisLabelVisible: true,
+                title: `Bid ${currentTick.bid.toFixed(5)}`,
+            });
+
+            // Create new ask line
+            askLineRef.current = seriesRef.current.createPriceLine({
+                price: currentTick.ask,
+                color: '#14b8a6', // Teal
+                lineWidth: 1,
+                lineStyle: 2, // Dashed
+                axisLabelVisible: true,
+                title: `Ask ${currentTick.ask.toFixed(5)}`,
+            });
+        } catch (error) {
+            console.error('Error updating bid/ask price lines:', error);
+        }
+    }, [currentTick]);
+
     return (
         <div className="relative w-full h-full bg-[#131722]">
             <div ref={chartContainerRef} className="w-full h-full" />
+
+            {/* Drawing overlay container */}
+            <div className="chart-drawing-overlay absolute inset-0 pointer-events-none" />
 
             {/* HTML Overlays */}
             <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -442,6 +737,46 @@ function toHeikinAshi(candle: OHLC, prevCandle?: OHLC): OHLC {
     const haHigh = Math.max(candle.high, haOpen, haClose);
     const haLow = Math.min(candle.low, haOpen, haClose);
     return { time: candle.time, open: haOpen, high: haHigh, low: haLow, close: haClose };
+}
+
+/**
+ * Converts tick data from backend API to OHLC candles
+ * Backend returns: { timestamp: number (unix ms), bid: number, ask: number, spread: number }
+ */
+function buildOHLCFromTicks(ticks: any[], timeframe: Timeframe): OHLC[] {
+    if (!ticks || ticks.length === 0) return [];
+
+    const tfSeconds = getTimeframeSeconds(timeframe);
+    const candleMap = new Map<number, OHLC>();
+
+    // Group ticks into candles by time bucket
+    for (const tick of ticks) {
+        const price = (tick.bid + tick.ask) / 2; // Mid price
+        const timestamp = Math.floor(tick.timestamp / 1000); // Convert ms to seconds
+        const candleTime = (Math.floor(timestamp / tfSeconds) * tfSeconds) as Time;
+
+        if (!candleMap.has(candleTime as number)) {
+            // Create new candle
+            candleMap.set(candleTime as number, {
+                time: candleTime,
+                open: price,
+                high: price,
+                low: price,
+                close: price,
+                volume: 1,
+            });
+        } else {
+            // Update existing candle
+            const candle = candleMap.get(candleTime as number)!;
+            candle.high = Math.max(candle.high, price);
+            candle.low = Math.min(candle.low, price);
+            candle.close = price;
+            candle.volume = (candle.volume || 0) + 1; // Tick count as volume
+        }
+    }
+
+    // Sort candles by time
+    return Array.from(candleMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
 }
 
 // Chart Controls Component

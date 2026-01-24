@@ -1,24 +1,30 @@
 package logging
 
 import (
+	"compress/gzip"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 )
 
+// FileLock is implemented in platform-specific files:
+// - filelock_windows.go for Windows (LockFileEx)
+// - filelock_unix.go for Unix/Linux (flock)
+
 // RotatingFileWriter provides automatic log rotation based on size and time
 type RotatingFileWriter struct {
-	mu              sync.Mutex
-	filename        string
-	file            *os.File
-	maxSize         int64         // Maximum size in bytes before rotation
-	maxAge          time.Duration // Maximum age before rotation
-	maxBackups      int           // Maximum number of backup files to keep
-	currentSize     int64
-	createdAt       time.Time
+	mu                 sync.Mutex
+	filename           string
+	file               *os.File
+	maxSize            int64         // Maximum size in bytes before rotation
+	maxAge             time.Duration // Maximum age before rotation
+	maxBackups         int           // Maximum number of backup files to keep
+	currentSize        int64
+	createdAt          time.Time
 	compressionEnabled bool
 }
 
@@ -128,6 +134,41 @@ func (rfw *RotatingFileWriter) shouldRotate() bool {
 
 // rotate performs the log rotation
 func (rfw *RotatingFileWriter) rotate() error {
+	// SECURITY: Acquire exclusive lock to prevent concurrent rotation
+	// This prevents race conditions where multiple goroutines try to rotate simultaneously
+	lock, err := NewFileLock(rfw.filename)
+	if err != nil {
+		return fmt.Errorf("failed to create rotation lock: %w", err)
+	}
+
+	if err := lock.Lock(); err != nil {
+		return fmt.Errorf("failed to acquire rotation lock: %w", err)
+	}
+	defer lock.Unlock() // SAFETY: Always release lock, even on panic
+
+	// Check if file still needs rotation (another goroutine may have rotated)
+	info, err := os.Stat(rfw.filename)
+	if err != nil {
+		// File doesn't exist - already rotated or deleted
+		if os.IsNotExist(err) {
+			// Reopen the file
+			file, reopenErr := os.OpenFile(rfw.filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if reopenErr != nil {
+				return reopenErr
+			}
+			rfw.file = file
+			rfw.currentSize = 0
+			rfw.createdAt = time.Now()
+			return nil
+		}
+		return err
+	}
+
+	// Another goroutine already rotated - no action needed
+	if info.Size() < rfw.maxSize {
+		return nil
+	}
+
 	// Close current file
 	if err := rfw.file.Close(); err != nil {
 		return err
@@ -223,11 +264,72 @@ func (rfw *RotatingFileWriter) cleanupOldBackups() {
 	}
 }
 
-// compressFile compresses a file using gzip (placeholder - requires gzip import)
+// compressFile compresses a file using gzip asynchronously
+// PERFORMANCE FIX #4: Async file compression
+// Compression runs in background goroutine to prevent blocking log writes
 func compressFile(filename string) {
-	// TODO: Implement gzip compression
-	// This would require importing "compress/gzip"
-	// For now, this is a placeholder
+	go func() {
+		// PERFORMANCE: Non-blocking compression with panic recovery
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[LogRotation] PANIC during compression of %s: %v", filename, r)
+			}
+		}()
+
+		// Actual compression with error handling
+		if err := gzipCompressFile(filename); err != nil {
+			log.Printf("[LogRotation] ERROR: Compression failed for %s: %v", filename, err)
+			return
+		}
+
+		log.Printf("[LogRotation] INFO: Successfully compressed %s", filename)
+	}()
+}
+
+// gzipCompressFile performs the actual gzip compression
+func gzipCompressFile(srcPath string) error {
+	// Open source file
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("failed to open source: %w", err)
+	}
+	defer src.Close()
+
+	// Create compressed output
+	dstPath := srcPath + ".gz"
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output: %w", err)
+	}
+	defer dst.Close()
+
+	// Compress
+	gzWriter := gzip.NewWriter(dst)
+	defer gzWriter.Close()
+
+	if _, err := io.Copy(gzWriter, src); err != nil {
+		os.Remove(dstPath) // Clean up partial file on error
+		return fmt.Errorf("compression failed: %w", err)
+	}
+
+	// Close gzip writer to flush
+	if err := gzWriter.Close(); err != nil {
+		os.Remove(dstPath)
+		return fmt.Errorf("failed to flush compressed data: %w", err)
+	}
+
+	// Close destination file
+	if err := dst.Close(); err != nil {
+		os.Remove(dstPath)
+		return fmt.Errorf("failed to close output file: %w", err)
+	}
+
+	// Remove original after successful compression
+	if err := os.Remove(srcPath); err != nil {
+		log.Printf("[LogRotation] WARNING: Failed to remove original file %s: %v", srcPath, err)
+	}
+
+	return nil
 }
 
 // MultiWriter writes to multiple writers simultaneously

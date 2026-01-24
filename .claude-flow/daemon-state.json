@@ -1,46 +1,51 @@
 {
   "running": true,
-  "startedAt": "2026-01-18T08:46:05.707Z",
+  "startedAt": "2026-01-19T08:24:48.613Z",
   "workers": {
     "map": {
-      "runCount": 0,
-      "successCount": 0,
+      "runCount": 10,
+      "successCount": 10,
       "failureCount": 0,
-      "averageDurationMs": 0,
-      "isRunning": false,
-      "nextRun": "2026-01-18T08:46:05.707Z"
+      "averageDurationMs": 1.2,
+      "lastRun": "2026-01-19T10:39:48.696Z",
+      "nextRun": "2026-01-19T10:54:48.697Z",
+      "isRunning": false
     },
     "audit": {
-      "runCount": 0,
-      "successCount": 0,
+      "runCount": 14,
+      "successCount": 14,
       "failureCount": 0,
-      "averageDurationMs": 0,
-      "isRunning": false,
-      "nextRun": "2026-01-18T08:48:05.708Z"
+      "averageDurationMs": 454.85714285714283,
+      "lastRun": "2026-01-19T10:39:49.134Z",
+      "nextRun": "2026-01-19T10:46:54.647Z",
+      "isRunning": false
     },
     "optimize": {
-      "runCount": 0,
-      "successCount": 0,
+      "runCount": 9,
+      "successCount": 9,
       "failureCount": 0,
-      "averageDurationMs": 0,
-      "isRunning": false,
-      "nextRun": "2026-01-18T08:50:05.708Z"
+      "averageDurationMs": 6.555555555555555,
+      "lastRun": "2026-01-19T10:28:48.738Z",
+      "nextRun": "2026-01-19T10:43:48.739Z",
+      "isRunning": false
     },
     "consolidate": {
-      "runCount": 0,
-      "successCount": 0,
+      "runCount": 5,
+      "successCount": 5,
       "failureCount": 0,
-      "averageDurationMs": 0,
-      "isRunning": false,
-      "nextRun": "2026-01-18T08:52:05.708Z"
+      "averageDurationMs": 0.2,
+      "lastRun": "2026-01-19T10:39:48.697Z",
+      "nextRun": "2026-01-19T11:00:48.667Z",
+      "isRunning": false
     },
     "testgaps": {
-      "runCount": 0,
-      "successCount": 0,
+      "runCount": 7,
+      "successCount": 7,
       "failureCount": 0,
-      "averageDurationMs": 0,
-      "isRunning": false,
-      "nextRun": "2026-01-18T08:54:05.708Z"
+      "averageDurationMs": 67.71428571428571,
+      "lastRun": "2026-01-19T10:39:49.133Z",
+      "nextRun": "2026-01-19T10:52:48.715Z",
+      "isRunning": false
     },
     "predict": {
       "runCount": 0,
@@ -59,9 +64,9 @@
   },
   "config": {
     "autoStart": false,
-    "logDir": "/Users/epic1st/Documents/trading engine/.claude-flow/logs",
-    "stateFile": "/Users/epic1st/Documents/trading engine/.claude-flow/daemon-state.json",
-    "maxConcurrent": 2,
+    "logDir": "D:\\Tading engine\\Trading-Engine\\.claude-flow\\logs",
+    "stateFile": "D:\\Tading engine\\Trading-Engine\\.claude-flow\\daemon-state.json",
+    "maxConcurrent": 4,
     "workerTimeoutMs": 300000,
     "resourceThresholds": {
       "maxCpuLoad": 2,
@@ -126,5 +131,5 @@
       }
     ]
   },
-  "savedAt": "2026-01-18T08:46:05.708Z"
+  "savedAt": "2026-01-19T10:39:49.134Z"
 }

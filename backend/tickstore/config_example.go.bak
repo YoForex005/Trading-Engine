@@ -1,0 +1,91 @@
+package tickstore
+
+// This file contains example configurations for different storage backends.
+// Use these as templates for initializing the tick store in your application.
+
+import "log"
+
+// ExampleSQLiteOnly demonstrates SQLite-only storage (recommended for production)
+func ExampleSQLiteOnly() *OptimizedTickStore {
+	config := TickStoreConfig{
+		BrokerID:         "BROKER-001",
+		MaxTicksPerSymbol: 10000,                // Ring buffer size for fast queries
+		Backend:          BackendSQLite,         // SQLite only
+		SQLiteBasePath:   "data/ticks/db",       // Database directory
+		EnableJSONLegacy: false,                 // Disable JSON writes
+	}
+
+	store := NewOptimizedTickStoreWithConfig(config)
+	log.Printf("Initialized SQLite-only tick store")
+	return store
+}
+
+// ExampleDualStorage demonstrates dual storage (SQLite + JSON for migration period)
+func ExampleDualStorage() *OptimizedTickStore {
+	config := TickStoreConfig{
+		BrokerID:         "BROKER-001",
+		MaxTicksPerSymbol: 10000,
+		Backend:          BackendDual,           // Both SQLite and JSON
+		SQLiteBasePath:   "data/ticks/db",
+		EnableJSONLegacy: true,                  // Keep writing JSON files
+	}
+
+	store := NewOptimizedTickStoreWithConfig(config)
+	log.Printf("Initialized dual storage (SQLite + JSON)")
+	return store
+}
+
+// ExampleJSONOnly demonstrates JSON-only storage (backwards compatible, default)
+func ExampleJSONOnly() *OptimizedTickStore {
+	// This is the default behavior when using NewOptimizedTickStore()
+	store := NewOptimizedTickStore("BROKER-001", 10000)
+	log.Printf("Initialized JSON-only tick store (legacy mode)")
+	return store
+}
+
+// ExampleCustomSQLiteConfig demonstrates custom SQLite configuration
+func ExampleCustomSQLiteConfig() *OptimizedTickStore {
+	config := TickStoreConfig{
+		BrokerID:         "BROKER-001",
+		MaxTicksPerSymbol: 50000,                // Larger ring buffer
+		Backend:          BackendSQLite,
+		SQLiteBasePath:   "E:/tick-data/db",     // Custom path (e.g., fast SSD)
+		EnableJSONLegacy: false,
+	}
+
+	store := NewOptimizedTickStoreWithConfig(config)
+	log.Printf("Initialized SQLite tick store with custom configuration")
+	return store
+}
+
+// ProductionConfig returns the recommended production configuration
+func ProductionConfig(brokerID string) TickStoreConfig {
+	return TickStoreConfig{
+		BrokerID:         brokerID,
+		MaxTicksPerSymbol: 10000,
+		Backend:          BackendSQLite,         // SQLite for persistence
+		SQLiteBasePath:   "data/ticks/db",
+		EnableJSONLegacy: false,                 // No JSON overhead
+	}
+}
+
+// MigrationConfig returns configuration for migration period (dual storage)
+func MigrationConfig(brokerID string) TickStoreConfig {
+	return TickStoreConfig{
+		BrokerID:         brokerID,
+		MaxTicksPerSymbol: 10000,
+		Backend:          BackendDual,           // Dual storage during migration
+		SQLiteBasePath:   "data/ticks/db",
+		EnableJSONLegacy: true,                  // Keep JSON for comparison
+	}
+}
+
+// DevelopmentConfig returns configuration for development/testing
+func DevelopmentConfig(brokerID string) TickStoreConfig {
+	return TickStoreConfig{
+		BrokerID:         brokerID,
+		MaxTicksPerSymbol: 1000,                 // Smaller buffer for dev
+		Backend:          BackendJSON,           // JSON only for simplicity
+		EnableJSONLegacy: true,
+	}
+}

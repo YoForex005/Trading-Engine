@@ -1,36 +1,132 @@
 @import "tailwindcss";
 
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
-  --primary: #3b82f6;
-  --primary-foreground: #ffffff;
-  --muted: #27272a;
-  --muted-foreground: #a1a1aa;
-  --card: #18181b;
-  --card-foreground: #fafafa;
-  --border: #27272a;
-  --destructive: #ef4444;
-  --success: #10b981;
+  /* RTX5 Manager Theme - Broker Terminal / Win32 Style */
+  --background: #121316;
+  /* Slightly lighter than pure black for contrast */
+  --foreground: #F0F0F0;
+  /* Sharp bright white/grey */
+
+  --primary: #F5C542;
+  /* MT Yellow */
+  --primary-foreground: #000000;
+
+  --panel: #1E2026;
+  /* Slightly distinct panel bg */
+  --panel-border: #383A42;
+  /* Dull Grey Border */
+
+  --selection-bg: #2B3D55;
+  /* Win32 Dark Blue Selection */
+  --selection-fg: #FFFFFF;
+
+  --font-sans: 'Roboto Condensed', 'Inter Tight', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Consolas', monospace;
 }
 
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: none;
+  /* Sharper, uglier text */
+  -moz-osx-font-smoothing: grayscale;
+  @apply antialiased overflow-hidden text-[11px] leading-tight;
 }
 
-/* Custom Scrollbar */
+/* Global Reset for Brutality */
+* {
+  border-radius: 0 !important;
+  /* NUKE ROUNDED CORNERS */
+  box-shadow: none !important;
+  /* NUKE SHADOWS */
+  transition: none !important;
+  /* NUKE ANIMATIONS - Instant feedback */
+}
+
+/* Ugly Thin Scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
+  background: #1A1C20;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--background);
+  background: #1A1C20;
+  border-left: 1px solid #333;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--muted);
-  border-radius: 4px;
+  background: #444;
+  border: 1px solid #1A1C20;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #666;
+  /* Dull grey hover */
+}
+
+::-webkit-scrollbar-corner {
+  background: #1A1C20;
+}
+
+/* Utility Classes for MT Feel */
+.rtx-panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+}
+
+.rtx-table-row {
+  /* Base row style */
+}
+
+.rtx-table-row:hover {
+  background: #25272E;
+  /* Very subtle hover */
+}
+
+.rtx-table-row.selected {
+  background: var(--selection-bg) !important;
+  color: var(--selection-fg) !important;
+}
+
+/* Inputs - Sharp & Ugly */
+input,
+select,
+textarea {
+  background: #0B0C0E;
+  border: 1px solid #383A42;
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #666;
+  outline: 1px dotted #888;
+  /* Win32 dotted outline style if possible, or just sharp border */
+  outline-offset: -1px;
+}
+
+/* Text Colors */
+.text-rtx-active {
+  color: #2ECC71;
+}
+
+.text-rtx-warning {
+  color: #F5C542;
+}
+
+.text-rtx-suspended {
+  color: #E74C3C;
+}
+
+.text-rtx-profit {
+  color: #2ECC71;
+}
+
+.text-rtx-loss {
+  color: #E74C3C;
 }

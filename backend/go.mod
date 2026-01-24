@@ -9,10 +9,13 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.10.9
+	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.2
 	golang.org/x/crypto v0.46.0
 	golang.org/x/text v0.32.0
+	golang.org/x/time v0.14.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (

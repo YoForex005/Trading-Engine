@@ -1,0 +1,528 @@
+package tickstore
+
+import (
+	"database/sql"
+	"fmt"
+	"log"
+	"path/filepath"
+	"sync"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+// SQLiteStore provides persistent tick storage with connection pooling
+// and async batch writes to prevent blocking the hot path.
+type SQLiteStore struct {
+	mu sync.RWMutex
+
+	// Connection pool
+	dbPool   []*sql.DB
+	poolSize int
+	poolIdx  int32
+
+	// Current active database
+	currentDB     *sql.DB
+	currentDBPath string
+	currentDate   string
+
+	// Async write queue
+	writeQueue chan *Tick
+	batchSize  int
+	stopChan   chan struct{}
+	wg         sync.WaitGroup
+
+	// Base path for database files
+	basePath string
+
+	// Statistics
+	ticksWritten   int64
+	ticksSkipped   int64
+	writeErrors    int64
+	dbRotations    int64
+}
+
+// SQLiteConfig holds configuration for SQLite storage
+type SQLiteConfig struct {
+	BasePath  string // Base directory for database files
+	PoolSize  int    // Number of database connections in pool
+	BatchSize int    // Number of ticks per batch write
+	QueueSize int    // Size of async write queue
+}
+
+// NewSQLiteStore creates a new SQLite-based tick store
+func NewSQLiteStore(cfg SQLiteConfig) (*SQLiteStore, error) {
+	// Set defaults
+	if cfg.PoolSize == 0 {
+		cfg.PoolSize = 5
+	}
+	if cfg.BatchSize == 0 {
+		cfg.BatchSize = 500
+	}
+	if cfg.QueueSize == 0 {
+		cfg.QueueSize = 10000
+	}
+	if cfg.BasePath == "" {
+		cfg.BasePath = "data/ticks/db"
+	}
+
+	store := &SQLiteStore{
+		dbPool:     make([]*sql.DB, 0, cfg.PoolSize),
+		poolSize:   cfg.PoolSize,
+		writeQueue: make(chan *Tick, cfg.QueueSize),
+		batchSize:  cfg.BatchSize,
+		stopChan:   make(chan struct{}),
+		basePath:   cfg.BasePath,
+	}
+
+	// Initialize current database for today
+	if err := store.rotateToCurrent(); err != nil {
+		return nil, fmt.Errorf("failed to initialize database: %w", err)
+	}
+
+	// Start async batch writer
+	store.wg.Add(1)
+	go store.asyncBatchWriter()
+
+	// Start daily rotation checker
+	store.wg.Add(1)
+	go store.dailyRotationChecker()
+
+	log.Printf("[SQLiteStore] Initialized with pool_size=%d, batch_size=%d, base_path=%s",
+		cfg.PoolSize, cfg.BatchSize, cfg.BasePath)
+
+	return store, nil
+}
+
+// StoreTick queues a tick for async persistence (non-blocking)
+func (s *SQLiteStore) StoreTick(tick *Tick) error {
+	select {
+	case s.writeQueue <- tick:
+		return nil
+	default:
+		// Queue full - skip to prevent blocking
+		s.ticksSkipped++
+		return fmt.Errorf("write queue full, tick dropped")
+	}
+}
+
+// asyncBatchWriter processes ticks from the queue in batches
+func (s *SQLiteStore) asyncBatchWriter() {
+	defer s.wg.Done()
+
+	batch := make([]*Tick, 0, s.batchSize)
+	flushTimer := time.NewTicker(5 * time.Second)
+	defer flushTimer.Stop()
+
+	for {
+		select {
+		case <-s.stopChan:
+			// Flush remaining batch before exiting
+			if len(batch) > 0 {
+				s.writeBatch(batch)
+			}
+			return
+
+		case tick := <-s.writeQueue:
+			batch = append(batch, tick)
+			if len(batch) >= s.batchSize {
+				s.writeBatch(batch)
+				batch = make([]*Tick, 0, s.batchSize)
+			}
+
+		case <-flushTimer.C:
+			// Periodic flush for small batches
+			if len(batch) > 0 {
+				s.writeBatch(batch)
+				batch = make([]*Tick, 0, s.batchSize)
+			}
+		}
+	}
+}
+
+// writeBatch writes a batch of ticks to the database with retry logic
+func (s *SQLiteStore) writeBatch(batch []*Tick) {
+	if len(batch) == 0 {
+		return
+	}
+
+	// Get current database (with rotation check)
+	db := s.getCurrentDB()
+	if db == nil {
+		log.Printf("[SQLiteStore] ERROR: No database available for write")
+		s.writeErrors++
+		return
+	}
+
+	// Retry logic: up to 3 attempts
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		err = s.executeBatchWrite(db, batch)
+		if err == nil {
+			s.ticksWritten += int64(len(batch))
+			if len(batch) >= 100 {
+				log.Printf("[SQLiteStore] Wrote batch of %d ticks (attempt %d)", len(batch), attempt)
+			}
+			return
+		}
+
+		// Retry after brief delay
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt*100) * time.Millisecond)
+		}
+	}
+
+	// All retries failed
+	s.writeErrors++
+	log.Printf("[SQLiteStore] ERROR: Failed to write batch after 3 attempts: %v", err)
+}
+
+// executeBatchWrite performs the actual database write within a transaction
+func (s *SQLiteStore) executeBatchWrite(db *sql.DB, batch []*Tick) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() // Rollback if not committed
+
+	// Prepare statement
+	stmt, err := tx.Prepare(`
+		INSERT OR IGNORE INTO ticks (symbol, timestamp, bid, ask, spread, lp_source)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	// Execute batch inserts
+	for _, tick := range batch {
+		_, err := stmt.Exec(
+			tick.Symbol,
+			tick.Timestamp.UnixMilli(),
+			tick.Bid,
+			tick.Ask,
+			tick.Spread,
+			tick.LP,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert tick: %w", err)
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// getCurrentDB returns the current database, rotating if date changed
+func (s *SQLiteStore) getCurrentDB() *sql.DB {
+	s.mu.RLock()
+	currentDate := time.Now().Format("2006-01-02")
+	if currentDate == s.currentDate && s.currentDB != nil {
+		db := s.currentDB
+		s.mu.RUnlock()
+		return db
+	}
+	s.mu.RUnlock()
+
+	// Date changed or no DB - rotate
+	s.rotateToCurrent()
+
+	s.mu.RLock()
+	db := s.currentDB
+	s.mu.RUnlock()
+	return db
+}
+
+// rotateToCurrent rotates to the current day's database
+func (s *SQLiteStore) rotateToCurrent() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	currentDate := time.Now().Format("2006-01-02")
+	if currentDate == s.currentDate && s.currentDB != nil {
+		return nil // Already on current date
+	}
+
+	// Construct database path: data/ticks/db/YYYY/MM/ticks_YYYY-MM-DD.db
+	t := time.Now()
+	dbDir := filepath.Join(s.basePath, t.Format("2006"), t.Format("01"))
+	dbPath := filepath.Join(dbDir, fmt.Sprintf("ticks_%s.db", currentDate))
+
+	// Create directory if needed
+	if err := ensureDir(dbDir); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Open database
+	db, err := s.openDatabase(dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	// Close old database if exists
+	if s.currentDB != nil {
+		if err := s.currentDB.Close(); err != nil {
+			log.Printf("[SQLiteStore] WARNING: Failed to close old database: %v", err)
+		}
+	}
+
+	s.currentDB = db
+	s.currentDBPath = dbPath
+	s.currentDate = currentDate
+	s.dbRotations++
+
+	log.Printf("[SQLiteStore] Rotated to database: %s", dbPath)
+	return nil
+}
+
+// openDatabase opens a SQLite database with performance optimizations
+func (s *SQLiteStore) openDatabase(dbPath string) (*sql.DB, error) {
+	// Connection string with performance options
+	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_synchronous=NORMAL&cache=shared&_busy_timeout=5000", dbPath)
+
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	// Set connection pool limits
+	db.SetMaxOpenConns(s.poolSize)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(time.Hour)
+
+	// Test connection
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	// Initialize schema if new database
+	if err := s.initSchema(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to initialize schema: %w", err)
+	}
+
+	// Set performance pragmas
+	pragmas := []string{
+		"PRAGMA cache_size = -64000",    // 64MB cache
+		"PRAGMA temp_store = MEMORY",    // In-memory temp tables
+		"PRAGMA mmap_size = 268435456",  // 256MB memory-mapped I/O
+	}
+
+	for _, pragma := range pragmas {
+		if _, err := db.Exec(pragma); err != nil {
+			log.Printf("[SQLiteStore] WARNING: Failed to set pragma: %s: %v", pragma, err)
+		}
+	}
+
+	return db, nil
+}
+
+// initSchema creates the schema if it doesn't exist
+func (s *SQLiteStore) initSchema(db *sql.DB) error {
+	schema := `
+	CREATE TABLE IF NOT EXISTS ticks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		symbol VARCHAR(20) NOT NULL,
+		timestamp INTEGER NOT NULL,
+		bid REAL NOT NULL,
+		ask REAL NOT NULL,
+		spread REAL NOT NULL,
+		volume INTEGER DEFAULT 0,
+		lp_source VARCHAR(50),
+		flags INTEGER DEFAULT 0,
+		created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_ticks_symbol_timestamp ON ticks(symbol, timestamp DESC);
+	CREATE INDEX IF NOT EXISTS idx_ticks_timestamp ON ticks(timestamp DESC);
+	CREATE INDEX IF NOT EXISTS idx_ticks_symbol ON ticks(symbol);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_ticks_unique ON ticks(symbol, timestamp);
+
+	CREATE TABLE IF NOT EXISTS symbols (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		symbol VARCHAR(20) UNIQUE NOT NULL,
+		description VARCHAR(255),
+		asset_class VARCHAR(50),
+		is_active BOOLEAN DEFAULT 1,
+		first_tick_at INTEGER,
+		last_tick_at INTEGER,
+		total_ticks INTEGER DEFAULT 0,
+		created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+		updated_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+	);
+	`
+
+	if _, err := db.Exec(schema); err != nil {
+		return fmt.Errorf("failed to create schema: %w", err)
+	}
+
+	return nil
+}
+
+// dailyRotationChecker checks for date changes and rotates the database
+func (s *SQLiteStore) dailyRotationChecker() {
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopChan:
+			return
+		case <-ticker.C:
+			currentDate := time.Now().Format("2006-01-02")
+			s.mu.RLock()
+			needRotation := currentDate != s.currentDate
+			s.mu.RUnlock()
+
+			if needRotation {
+				log.Printf("[SQLiteStore] Date changed, rotating database...")
+				if err := s.rotateToCurrent(); err != nil {
+					log.Printf("[SQLiteStore] ERROR: Failed to rotate database: %v", err)
+				}
+			}
+		}
+	}
+}
+
+// GetRecentTicks retrieves recent ticks for a symbol
+func (s *SQLiteStore) GetRecentTicks(symbol string, limit int) ([]Tick, error) {
+	db := s.getCurrentDB()
+	if db == nil {
+		return nil, fmt.Errorf("no database available")
+	}
+
+	rows, err := db.Query(`
+		SELECT timestamp, bid, ask, spread, lp_source
+		FROM ticks
+		WHERE symbol = ?
+		ORDER BY timestamp DESC
+		LIMIT ?
+	`, symbol, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var ticks []Tick
+	for rows.Next() {
+		var tick Tick
+		var ts int64
+		if err := rows.Scan(&ts, &tick.Bid, &tick.Ask, &tick.Spread, &tick.LP); err != nil {
+			return nil, fmt.Errorf("scan failed: %w", err)
+		}
+		tick.Timestamp = time.UnixMilli(ts)
+		tick.Symbol = symbol
+		ticks = append(ticks, tick)
+	}
+
+	return ticks, nil
+}
+
+// GetTicksInRange retrieves ticks within a time range
+func (s *SQLiteStore) GetTicksInRange(symbol string, startTime, endTime time.Time) ([]Tick, error) {
+	db := s.getCurrentDB()
+	if db == nil {
+		return nil, fmt.Errorf("no database available")
+	}
+
+	rows, err := db.Query(`
+		SELECT timestamp, bid, ask, spread, lp_source
+		FROM ticks
+		WHERE symbol = ?
+		  AND timestamp BETWEEN ? AND ?
+		ORDER BY timestamp ASC
+	`, symbol, startTime.UnixMilli(), endTime.UnixMilli())
+	if err != nil {
+		return nil, fmt.Errorf("query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var ticks []Tick
+	for rows.Next() {
+		var tick Tick
+		var ts int64
+		if err := rows.Scan(&ts, &tick.Bid, &tick.Ask, &tick.Spread, &tick.LP); err != nil {
+			return nil, fmt.Errorf("scan failed: %w", err)
+		}
+		tick.Timestamp = time.UnixMilli(ts)
+		tick.Symbol = symbol
+		ticks = append(ticks, tick)
+	}
+
+	return ticks, nil
+}
+
+// GetStats returns storage statistics
+func (s *SQLiteStore) GetStats() map[string]interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return map[string]interface{}{
+		"ticks_written":   s.ticksWritten,
+		"ticks_skipped":   s.ticksSkipped,
+		"write_errors":    s.writeErrors,
+		"db_rotations":    s.dbRotations,
+		"current_db_path": s.currentDBPath,
+		"current_date":    s.currentDate,
+		"queue_size":      len(s.writeQueue),
+		"queue_capacity":  cap(s.writeQueue),
+	}
+}
+
+// Stop gracefully stops the SQLite store
+func (s *SQLiteStore) Stop() error {
+	log.Printf("[SQLiteStore] Stopping...")
+
+	// Signal workers to stop
+	close(s.stopChan)
+
+	// Wait for workers to finish
+	s.wg.Wait()
+
+	// Close current database
+	s.mu.Lock()
+	if s.currentDB != nil {
+		if err := s.currentDB.Close(); err != nil {
+			log.Printf("[SQLiteStore] ERROR: Failed to close database: %v", err)
+		}
+	}
+	s.mu.Unlock()
+
+	log.Printf("[SQLiteStore] Stopped. Stats: written=%d, skipped=%d, errors=%d",
+		s.ticksWritten, s.ticksSkipped, s.writeErrors)
+
+	return nil
+}
+
+// Flush forces a flush of pending writes
+func (s *SQLiteStore) Flush() error {
+	// Wait for queue to drain (with timeout)
+	timeout := time.After(30 * time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			return fmt.Errorf("flush timeout: %d ticks still in queue", len(s.writeQueue))
+		case <-ticker.C:
+			if len(s.writeQueue) == 0 {
+				log.Printf("[SQLiteStore] Flush complete")
+				return nil
+			}
+		}
+	}
+}
+
+// Helper function to ensure directory exists
+func ensureDir(dir string) error {
+	return os.MkdirAll(dir, 0755)
+}

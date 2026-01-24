@@ -1,0 +1,329 @@
+================================================================================
+QUOTE STREAMING RESOURCE MONITORING - LOAD TEST GUIDE
+================================================================================
+
+OVERVIEW
+--------
+This guide walks you through monitoring PC resource usage during quote streaming
+tests on the Trading Engine backend. The test will:
+
+1. Start the backend server (backend/cmd/server/server.exe)
+2. Monitor CPU and memory usage for 2 minutes
+3. Sample metrics every 5 seconds
+4. Generate a comprehensive report
+
+KEY METRICS TRACKED
+-------------------
+
+PROCESS METRICS (go.exe / server.exe):
+  - CPU Usage (%)           : Percentage of CPU time used by the process
+  - Memory Usage (MB)       : Working set memory (RAM actively used)
+  - Private Memory (MB)     : Private memory allocated to process
+  - Thread Count            : Number of active threads
+
+SYSTEM METRICS:
+  - System CPU (%)          : Total system CPU utilization
+  - System Memory (MB)      : Total system memory in use
+  - System Memory (%)       : Percentage of total system memory used
+  - Available Memory (MB)   : Free memory available
+
+MEMORY LEAK INDICATORS
+----------------------
+Memory leak suspected if ANY of these are true:
+  ✗ Memory growth rate > 50 MB/minute
+  ✗ Memory continuously increases without plateauing
+  ✗ Memory never decreases during test
+
+STABILITY THRESHOLDS
+--------------------
+CRITICAL (Stop test immediately):
+  - Process CPU > 90%
+  - Process Memory > 2GB (2048 MB)
+  - System becomes unresponsive
+
+WARNING (Monitor closely):
+  - Process CPU > 80%
+  - Process Memory > 1.5GB (1536 MB)
+  - System CPU > 85%
+  - System Memory > 90%
+  - Memory growth rate > 50 MB/minute
+
+ACCEPTABLE RANGES:
+  - Process CPU: 10-50% (typical for active streaming)
+  - Process Memory: 50-500 MB (depends on tick cache size)
+  - Memory growth: 0-10 MB/minute (minimal growth expected)
+  - System CPU: < 60% (room for other processes)
+  - System Memory: < 80% (room for OS and other apps)
+
+================================================================================
+HOW TO RUN THE TEST
+================================================================================
+
+METHOD 1: AUTOMATED (RECOMMENDED)
+----------------------------------
+Run the complete orchestration script:
+
+  powershell -ExecutionPolicy Bypass -File run_load_test.ps1
+
+This will:
+  1. Start monitoring
+  2. Start the server
+  3. Run load test simultaneously
+  4. Generate results CSV
+  5. Display summary report
+
+METHOD 2: MANUAL WITH MONITORING ONLY
+--------------------------------------
+Run just the resource monitoring:
+
+  powershell -ExecutionPolicy Bypass -File monitor_resources.ps1
+
+This will:
+  1. Start the server
+  2. Collect resource metrics for 2 minutes
+  3. Generate monitoring_results.csv
+  4. Display summary report
+
+METHOD 3: MANUAL WITH SEPARATE LOAD TEST
+-----------------------------------------
+If you want to run the server and load test separately:
+
+TERMINAL 1 - Start server:
+  cd backend\cmd\server
+  .\server.exe
+
+TERMINAL 2 - Wait 10 seconds, then start monitoring:
+  powershell -ExecutionPolicy Bypass -File monitor_resources.ps1
+
+TERMINAL 3 (Optional) - Start load test after 15 seconds:
+  powershell -ExecutionPolicy Bypass -File load_test_quotes.ps1 -RequestsPerSecond 10
+
+================================================================================
+ANALYZING THE RESULTS
+================================================================================
+
+OUTPUT FILES
+-----------
+After running the test, you'll get:
+  - monitoring_results.csv       : Raw metrics (import into Excel)
+  - Console output               : Real-time monitoring display
+
+CONSOLE OUTPUT
+--------------
+Each line shows:
+  [#] timestamp | Process: CPU=X% Mem=YMB | System: CPU=Z% Mem=WMMB (V%) | Threads=N
+
+Example:
+  [1] 2026-01-19 14:30:15.123 | Process: CPU=12% Mem=125MB | System: CPU=45% Mem=8450MB (52%) | Threads=24
+
+INTERPRETING THE REPORT
+-----------------------
+The script generates statistics:
+
+Peak CPU Usage (%)
+  - Maximum CPU usage during test
+  - Indicates peak processing load
+  - Acceptable: < 80%, Ideal: < 50%
+
+Average CPU Usage (%)
+  - Mean CPU usage across test
+  - Indicates baseline processing requirements
+  - Acceptable: 5-30%
+
+Peak Memory Usage (MB)
+  - Maximum memory at any point
+  - Indicates worst-case memory consumption
+  - Acceptable: < 1500 MB, Ideal: < 500 MB
+
+Average Memory Usage (MB)
+  - Mean memory during test
+  - Indicates typical running memory needs
+  - Acceptable: 50-300 MB
+
+Memory Growth (MB)
+  - Total increase from start to end
+  - Positive value = potential leak
+  - Acceptable: < 50 MB over 2 minutes
+
+Memory Growth Rate (MB/minute)
+  - Rate of memory increase
+  - Indicates severity of potential leak
+  - Acceptable: < 10 MB/minute
+
+System CPU/Memory
+  - Total system resource usage
+  - Should remain stable and not spike
+
+STABILITY ASSESSMENT
+--------------------
+The script automatically checks for:
+  ✓ Memory leaks      - Sustained memory growth
+  ✓ CPU spikes        - CPU usage exceeding thresholds
+  ✓ System stability  - Total system resource availability
+  ✓ Thread safety     - Thread count stability
+
+================================================================================
+COMMON ISSUES & SOLUTIONS
+================================================================================
+
+ISSUE: "Cannot reach server at http://localhost:8080"
+SOLUTION:
+  - Verify server.exe exists at backend\cmd\server\server.exe
+  - Check firewall isn't blocking port 8080
+  - Ensure no other process is running on port 8080
+  - Check server logs for startup errors
+
+ISSUE: "High memory growth detected"
+SOLUTION:
+  - Check if tick cache is getting too large
+  - Verify database queries aren't accumulating results
+  - Look for un-freed resources in WebSocket connections
+  - Check for goroutine leaks in concurrent operations
+  - Review connection pooling settings
+
+ISSUE: "High CPU usage"
+SOLUTION:
+  - Reduce RequestsPerSecond in load test
+  - Check for busy loops or inefficient algorithms
+  - Verify database queries are optimized
+  - Check WebSocket handling for inefficiencies
+  - Monitor goroutine count for leaks
+
+ISSUE: "Server process terminated during monitoring"
+SOLUTION:
+  - Check Windows Event Viewer for crash details
+  - Review server log files
+  - Check system resources (might be out of memory)
+  - Verify server binary isn't corrupted
+  - Try rebuilding: go build -o server.exe ./cmd/server
+
+ISSUE: "System becomes unresponsive"
+SOLUTION:
+  - Reduce RequestsPerSecond immediately
+  - Stop the load test
+  - Reduce monitoring duration
+  - Check for other resource-intensive processes
+  - Increase system RAM or free up memory
+
+================================================================================
+CSV DATA ANALYSIS
+================================================================================
+
+Import monitoring_results.csv into Excel for detailed analysis:
+
+Columns:
+  1. Timestamp              : When the sample was taken
+  2. ElapsedSeconds         : Seconds since monitoring started
+  3. ProcessCPU_Percent     : Process CPU usage (%)
+  4. ProcessMemory_MB       : Process working set memory (MB)
+  5. ProcessPrivateMem_MB   : Process private memory (MB)
+  6. SystemCPU_Percent     : Total system CPU (%)
+  7. SystemMemory_MB       : Total system memory in use (MB)
+  8. SystemMemory_Percent  : System memory utilization (%)
+  9. ThreadCount            : Number of process threads
+
+EXCEL ANALYSIS TIPS:
+  - Create line charts for CPU and Memory trends
+  - Use conditional formatting to highlight > 80% CPU
+  - Calculate memory growth rate: (Last Value - First Value) / Time (minutes)
+  - Identify memory plateau point (when growth stabilizes)
+  - Compare process memory vs system memory patterns
+
+================================================================================
+PERFORMANCE OPTIMIZATION CHECKLIST
+================================================================================
+
+If memory growth detected:
+  [ ] Review goroutine creation/cleanup
+  [ ] Check connection pooling and cleanup
+  [ ] Verify cache eviction policies
+  [ ] Look for message buffer accumulation
+  [ ] Check for held locks preventing cleanup
+
+If CPU usage high:
+  [ ] Profile hot code paths
+  [ ] Optimize database queries
+  [ ] Reduce request processing overhead
+  [ ] Check for unnecessary allocations
+  [ ] Review WebSocket message handling
+
+If system becomes unstable:
+  [ ] Lower concurrent requests
+  [ ] Increase test duration to 60 seconds
+  [ ] Run test during off-peak hours
+  [ ] Close other applications
+  [ ] Increase system virtual memory
+
+================================================================================
+NEXT STEPS AFTER TEST
+================================================================================
+
+1. REVIEW THE REPORT
+   - Compare metrics against expected values
+   - Identify any anomalies
+
+2. OPTIMIZE IF NEEDED
+   - Address memory leaks
+   - Improve performance bottlenecks
+   - Increase resource efficiency
+
+3. RETEST
+   - After making changes, run test again
+   - Compare before/after metrics
+   - Verify improvements
+
+4. DOCUMENT RESULTS
+   - Save CSV file with timestamp
+   - Document any issues found
+   - Track performance improvements over time
+
+5. STRESS TEST (OPTIONAL)
+   - Increase RequestsPerSecond to 20, 50, 100
+   - Test with longer duration (5-10 minutes)
+   - Identify breaking points
+
+================================================================================
+USEFUL POWERSHELL COMMANDS
+================================================================================
+
+View monitoring results:
+  Import-Csv monitoring_results.csv | Format-Table
+
+Get statistics from CSV:
+  $data = Import-Csv monitoring_results.csv
+  $data | Measure-Object -Property ProcessCPU_Percent -Maximum
+  $data | Measure-Object -Property ProcessMemory_MB -Maximum
+
+Export to Excel:
+  $data | Export-Excel -Path results.xlsx -AutoSize
+
+Create charts (requires Windows 10+):
+  # Import csv and create charts manually in Excel
+
+Real-time monitoring (without load test):
+  Get-Process server | Select-Object CPU, WorkingSet, Threads -AutoSize | Format-Table -AutoRefresh
+
+Monitor for 5 minutes continuously:
+  while($true) {
+    Get-Process server | Select-Object @{n='Time';e={Get-Date}}, CPU, @{n='Memory(MB)';e={$_.WorkingSet/1MB}}
+    Start-Sleep 5
+  }
+
+================================================================================
+SUPPORT & DOCUMENTATION
+================================================================================
+
+For more information:
+  - Check backend/api/server.go for API endpoint definitions
+  - Review WebSocket handler in backend/ws/ directory
+  - See database configuration in backend/config/
+  - Check tick store implementation in backend/tickstore/
+
+Performance monitoring best practices:
+  - Run tests multiple times for consistent results
+  - Close background applications before testing
+  - Run during stable system state (not during updates)
+  - Monitor both process and system metrics
+  - Document all test conditions and parameters
+
+================================================================================

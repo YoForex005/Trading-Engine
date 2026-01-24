@@ -1,0 +1,276 @@
+================================================================================
+WEBSOCKET QUOTE DATA FLOW ANALYSIS - EXECUTIVE SUMMARY
+================================================================================
+Analysis Date: 2026-01-20
+Status: COMPLETE - All findings stored in Swarm Memory
+
+================================================================================
+COMPLETE MESSAGE FLOW (Backend to Frontend)
+================================================================================
+
+1. LP MANAGER (Multiple Adapters)
+   - OANDA, Binance, FIX gateway feed quotes
+   - Output: Channel with Quote objects
+   - Status: Multi-source aggregation
+
+2. MAIN GOROUTINE (backend/cmd/server/main.go:334-353)
+   - Receives quotes from lpMgr.GetQuotesChan()
+   - Calculates spread: ask - bid
+   - Calls hub.BroadcastTick(tick)
+   - Logs: [Main] Piping quote #X to Hub
+
+3. HUB.BROADCASTTICK() (backend/ws/hub.go:139-213)
+   - Always updates h.latestPrices[symbol]
+   - Checks h.disabledSymbols[symbol] - FILTERS if disabled
+   - Throttles: drops if price change < 0.0001% (60-80% reduction normal)
+   - Non-blocking send to broadcast channel (drops if buffer full)
+
+4. HUB.RUN() BROADCAST LOOP (backend/ws/hub.go:238-293)
+   - Receives messages from broadcast channel
+   - Non-blocking send to each connected client
+   - On new client: sends initial prices from latestPrices (excluding disabled)
+
+5. WEBSOCKET CLIENT WRITE PUMP (backend/ws/hub.go:325-335)
+   - Receives messages from client.send channel
+   - Writes to WebSocket connection
+   - Fails if connection closes
+
+6. FRONTEND WEBSOCKET (clients/desktop/src/App.tsx:135-177)
+   - Connects: ws://localhost:7999/ws?token={authToken}
+   - Receives: JSON with type:"tick"
+   - Buffers in tickBuffer.current (useRef, not state)
+
+7. FRONTEND TICK FLUSH (clients/desktop/src/App.tsx:181-187)
+   - 100ms interval flush
+   - Batches all buffered ticks into state update
+   - Max 10 updates/second regardless of WebSocket frequency
+
+8. FRONTEND DISPLAY (MarketWatchPanel)
+   - Receives ticks: Record<string, Tick>
+   - Displays: symbol, bid, ask, spread, timestamp, lp
+   - Empty rows when ticks[symbol] undefined or all zeros
+
+================================================================================
+ROOT CAUSES OF EMPTY ROWS (Priority Order)
+================================================================================
+
+CRITICAL (Complete Blockage):
+1. DISABLED SYMBOLS
+   - Location: backend/ws/hub.go:149
+   - Symbol in h.disabledSymbols map → no broadcast to WebSocket
+   - Solution: Check which symbols are disabled, why they're disabled
+
+2. LP NOT SENDING QUOTES
+   - Location: backend/lpmanager adapters
+   - No adapter connected or configured
+   - Solution: Verify LP credentials and connection status
+
+HIGH (Partial/Timing):
+3. NO INITIAL DATA (New Symbols)
+   - Location: backend/ws/hub.go:250-260
+   - Symbol added but no quote received yet → latestPrices[symbol] = nil
+   - New client connects → gets nothing
+   - Solution: Pre-populate initial prices or wait for first quote
+
+MEDIUM (Normal, By Design):
+4. THROTTLING (60-80% of ticks dropped)
+   - Location: backend/ws/hub.go:170
+   - Threshold: 0.0001% relative price change
+   - Prevents: CPU overload, reduces network bandwidth
+   - Effect: Stale data if market calm, but not missing quotes entirely
+   - Solution: Accept as normal or increase threshold
+
+LOW (Load-Dependent):
+5. BUFFER OVERFLOW
+   - Location: hub.go:207, client send at :284
+   - Non-blocking sends drop if buffer full (4096 channel)
+   - Rare in normal conditions
+   - Solution: Increase buffer size if seeing > 85% reduction rate
+
+================================================================================
+SPREAD CALCULATION LOCATION
+================================================================================
+
+WHERE: backend/cmd/server/main.go:346
+```
+Spread: quote.Ask - quote.Bid,
+```
+
+JSON MESSAGE INCLUDES:
+```json
+{
+    "type": "tick",
+    "symbol": "EURUSD",
+    "bid": 1.09350,
+    "ask": 1.09365,
+    "spread": 0.00015,
+    "timestamp": 1705768900,
+    "lp": "OANDA"
+}
+```
+
+FRONTEND DISPLAY:
+- Column in MarketWatchPanel shows spread value
+- Pre-calculated on backend, displayed as-is on frontend
+- No recalculation on frontend
+
+================================================================================
+THROTTLING MECHANISMS (Normal Operation)
+================================================================================
+
+BACKEND THROTTLING: backend/ws/hub.go:155-184
+- Threshold: 0.000001 = 0.0001% relative change
+- Compares: (newBid - lastBid) / lastBid
+- Takes absolute value for both directions
+- Impact: 60-80% reduction normal (reduces CPU by 60-80%)
+- Still updates: B-Book engine, tickStore (just no broadcast)
+
+FRONTEND BUFFERING: clients/desktop/src/App.tsx:181-187
+- 100ms flush interval (setInterval)
+- Batches all ticks for same symbol (last one wins)
+- Effect: Max 10 state updates/second
+- Optimization: Reduces React render frequency
+
+COMBINED EFFECT:
+- High-frequency quotes (100 Hz) → ~10 Hz backend → ~10 Hz frontend
+- Appears as smooth, delayed updates to user
+
+================================================================================
+DEBUGGING QUICK REFERENCE
+================================================================================
+
+To identify empty rows:
+1. Check backend logs for '[Hub] Stats: throttled=X' - normal if > 60%
+2. Check which symbols show empty
+3. Is symbol in hub.disabledSymbols? (Check UpdateDisabledSymbols calls)
+4. Is LP sending quotes for that symbol? (Check LogFile for adapter status)
+5. Check latestPrices contains data
+6. Test: Manually trigger quote via API to see if it appears
+
+To verify data flow:
+1. Grep backend logs for 'Piping quote' entries
+2. Check WebSocket connection: browser console should show '[WS] connected'
+3. Open DevTools → Network → WS → frame should show JSON messages
+4. Check JSON includes all required fields: symbol, bid, ask, spread, type
+5. Check React DevTools → ticks state is updating
+
+To test spread calculation:
+1. Manually verify spread = ask - bid in incoming JSON
+2. Ensure ask > bid (spread > 0)
+3. Check if MarketWatchPanel receives the spread field
+4. Verify column is configured to display spread
+
+================================================================================
+KEY FILES TO MONITOR
+================================================================================
+
+BACKEND:
+- backend/cmd/server/main.go (LP quote piping)
+- backend/ws/hub.go (main logic, throttling, broadcasting)
+- backend/lpmanager/ (LP adapters, quote aggregation)
+- backend/fix/gateway.go (FIX protocol handler if using FIX)
+
+FRONTEND:
+- clients/desktop/src/App.tsx (WebSocket connection, tick buffering)
+- clients/desktop/src/components/layout/MarketWatchPanel.tsx (display)
+- clients/desktop/src/store/useAppStore.tsx (global state)
+
+LOGS:
+- Backend: Look for '[Hub]', '[Main]', 'Piping quote', 'Stats' lines
+- Frontend: Browser console for '[WS]' lines
+
+================================================================================
+CRITICAL INSIGHTS FOR CODER AGENT
+================================================================================
+
+INSIGHT 1: Empty Rows Are NOT Throttling
+- Throttling (60-80% drop) is by design
+- Empty rows = missing from latestPrices or disabled symbol
+- These are 2 different issues
+
+INSIGHT 2: Disabled Symbols Are Complete Blockage
+- If symbol disabled, NO data reaches frontend EVER
+- Check hub.UpdateDisabledSymbols() and hub.ToggleSymbol() calls
+- Verify which symbols are disabled and WHY
+
+INSIGHT 3: New Clients Get Only What's in latestPrices
+- latestPrices is cached by hub.Run() goroutine
+- If symbol never received a quote, latestPrices[symbol] = nil
+- New client connects → gets nothing for that symbol
+- Wait for first quote from LP, then reconnect client
+
+INSIGHT 4: Spread is Pre-Calculated Backend
+- Frontend receives spread in JSON, no recalculation
+- If spread is 0 or missing, check JSON from WebSocket
+- If JSON looks good but frontend shows nothing, check display component
+
+INSIGHT 5: Stats Line Is Gold
+- Every 60 seconds: '[Hub] Stats: received=X, broadcast=Y, throttled=Z (R%)'
+- If R% > 85%: possible buffer overflow, increase buffer size
+- If Y is 0: broadcast channel not working or all throttled
+- If broadcast > received: impossible, logic error
+
+================================================================================
+RECOMMENDATIONS FOR FIXES
+================================================================================
+
+SHORT TERM:
+1. Add symbol status API: GET /api/debug/ws-status
+   Returns: for each symbol: enabled/disabled, last_tick_time, tick_count
+
+2. Add debug logging: Log latestPrices content on new client connect
+   See which symbols have data and which are nil
+
+3. Check LP Manager: Verify all LPs configured and connected
+   Look for failed connection messages
+
+MEDIUM TERM:
+1. Pre-populate initial prices: Don't wait for first quote
+   Create empty tick for each symbol on startup
+
+2. Increase throttle threshold: 0.000001 to 0.00001 (0.001%)
+   Or disable throttling, let frontend batch at 100ms instead
+
+3. Add Prometheus metrics: Track hub stats over time
+   Monitor: ticks_received, ticks_broadcast, ticks_throttled, clients_connected
+
+LONG TERM:
+1. Implement client-specific subscriptions
+   Only send ticks for symbols client subscribed to
+
+2. Add WebSocket heartbeat: Keep-alive every 30 seconds
+   Detect stale connections earlier
+
+3. Add quote distribution analysis
+   Track: which symbols, which LPs, quote frequency per symbol
+
+================================================================================
+ANALYSIS ARTIFACTS STORED IN SWARM MEMORY
+================================================================================
+
+All findings have been stored in pattern memory (patterns namespace):
+- ws-quote-flow-analysis (complete flow analysis)
+- ws-throttling-mechanisms (throttling and filtering details)
+- debugging-empty-rows (quick diagnostic guide)
+
+Retrieved via:
+  npx @claude-flow/cli@latest memory search --query "websocket" --namespace patterns
+
+Additional documentation:
+  - WEBSOCKET_QUOTE_FLOW_ANALYSIS.md (detailed markdown)
+  - This file: WS_ANALYSIS_SUMMARY.txt (quick reference)
+
+================================================================================
+STATUS: ANALYSIS COMPLETE
+================================================================================
+
+All 5 dimensions analyzed:
+✓ Backend WebSocket implementation (ws/hub.go)
+✓ Quote message format and structure (MarketTick struct)
+✓ Spread calculation location (main.go:346, backend only)
+✓ Quote flow failures (disabled symbols, throttling, no initial data)
+✓ Filtering and throttling mechanisms (disabledSymbols, price change threshold)
+
+Ready for coder agent implementation of fixes.
+
+================================================================================

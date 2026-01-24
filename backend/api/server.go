@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/epic1st/rtx/backend/abook"
 	"github.com/epic1st/rtx/backend/auth"
@@ -28,7 +30,7 @@ type Server struct {
 	smartRouter     *router.SmartRouter
 	fixGateway      *fix.FIXGateway
 	hub             *ws.Hub
-	tickStore       *tickstore.TickStore
+	tickStore       tickstore.TickStorageService // Interface for both TickStore and OptimizedTickStore
 	orderService    *orders.OrderService
 	positionManager *orders.PositionManager
 	trailingService *orders.TrailingStopService
@@ -67,7 +69,7 @@ func (s *Server) SetHub(hub *ws.Hub) {
 	s.hub = hub
 }
 
-func (s *Server) SetTickStore(ts *tickstore.TickStore) {
+func (s *Server) SetTickStore(ts tickstore.TickStorageService) {
 	s.tickStore = ts
 }
 
@@ -89,6 +91,11 @@ func (s *Server) GetTrailingService() *orders.TrailingStopService {
 // GetRiskCalculator returns the risk calculator
 func (s *Server) GetRiskCalculator() *risk.RiskCalculator {
 	return s.riskCalculator
+}
+
+// GetFIXGateway returns the FIX gateway for market data access
+func (s *Server) GetFIXGateway() *fix.FIXGateway {
+	return s.fixGateway
 }
 
 func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
@@ -599,6 +606,175 @@ func (s *Server) HandleClosePosition(w http.ResponseWriter, r *http.Request) {
 
 	// Legacy OANDA logic removed
 	http.Error(w, "No LP connection", http.StatusServiceUnavailable)
+}
+
+// SymbolSpecification represents detailed trading specifications for a symbol
+type SymbolSpecification struct {
+	Symbol        string  `json:"symbol"`
+	Description   string  `json:"description"`
+	ContractSize  float64 `json:"contractSize"`
+	PipValue      float64 `json:"pipValue"`
+	PipPosition   int     `json:"pipPosition"` // Decimal places (2=0.01, 5=0.00001)
+	MinLot        float64 `json:"minLot"`
+	MaxLot        float64 `json:"maxLot"`
+	LotStep       float64 `json:"lotStep"`
+	MarginRate    float64 `json:"marginRate"`   // Margin requirement (e.g. 0.01 = 1%)
+	SwapLong      float64 `json:"swapLong"`
+	SwapShort     float64 `json:"swapShort"`
+	Commission    float64 `json:"commission"`
+	Currency      string  `json:"currency"`
+	BaseCurrency  string  `json:"baseCurrency"`
+	QuoteCurrency string  `json:"quoteCurrency"`
+}
+
+// getSymbolSpecification returns trading specifications for a symbol
+func getSymbolSpecification(symbol string) *SymbolSpecification {
+	// Hardcoded specs for major pairs (TODO: move to database)
+	specs := map[string]SymbolSpecification{
+		"EURUSD": {
+			Symbol:        "EURUSD",
+			Description:   "Euro vs US Dollar",
+			ContractSize:  100000,
+			PipValue:      10.0,
+			PipPosition:   5,
+			MinLot:        0.01,
+			MaxLot:        100.0,
+			LotStep:       0.01,
+			MarginRate:    0.01, // 1% margin
+			SwapLong:      -0.5,
+			SwapShort:     0.2,
+			Commission:    0.0,
+			Currency:      "USD",
+			BaseCurrency:  "EUR",
+			QuoteCurrency: "USD",
+		},
+		"GBPUSD": {
+			Symbol:        "GBPUSD",
+			Description:   "British Pound vs US Dollar",
+			ContractSize:  100000,
+			PipValue:      10.0,
+			PipPosition:   5,
+			MinLot:        0.01,
+			MaxLot:        100.0,
+			LotStep:       0.01,
+			MarginRate:    0.01,
+			SwapLong:      -0.8,
+			SwapShort:     0.3,
+			Commission:    0.0,
+			Currency:      "USD",
+			BaseCurrency:  "GBP",
+			QuoteCurrency: "USD",
+		},
+		"USDJPY": {
+			Symbol:        "USDJPY",
+			Description:   "US Dollar vs Japanese Yen",
+			ContractSize:  100000,
+			PipValue:      1000.0,
+			PipPosition:   3,
+			MinLot:        0.01,
+			MaxLot:        100.0,
+			LotStep:       0.01,
+			MarginRate:    0.01,
+			SwapLong:      -0.3,
+			SwapShort:     0.1,
+			Commission:    0.0,
+			Currency:      "USD",
+			BaseCurrency:  "USD",
+			QuoteCurrency: "JPY",
+		},
+		"XAUUSD": {
+			Symbol:        "XAUUSD",
+			Description:   "Gold vs US Dollar",
+			ContractSize:  100,
+			PipValue:      1.0,
+			PipPosition:   2,
+			MinLot:        0.01,
+			MaxLot:        50.0,
+			LotStep:       0.01,
+			MarginRate:    0.02, // 2% margin
+			SwapLong:      -2.5,
+			SwapShort:     0.5,
+			Commission:    0.0,
+			Currency:      "USD",
+			BaseCurrency:  "XAU",
+			QuoteCurrency: "USD",
+		},
+		"USDCHF": {
+			Symbol:        "USDCHF",
+			Description:   "US Dollar vs Swiss Franc",
+			ContractSize:  100000,
+			PipValue:      10.0,
+			PipPosition:   5,
+			MinLot:        0.01,
+			MaxLot:        100.0,
+			LotStep:       0.01,
+			MarginRate:    0.01,
+			SwapLong:      -0.4,
+			SwapShort:     0.15,
+			Commission:    0.0,
+			Currency:      "USD",
+			BaseCurrency:  "USD",
+			QuoteCurrency: "CHF",
+		},
+		"AUDUSD": {
+			Symbol:        "AUDUSD",
+			Description:   "Australian Dollar vs US Dollar",
+			ContractSize:  100000,
+			PipValue:      10.0,
+			PipPosition:   5,
+			MinLot:        0.01,
+			MaxLot:        100.0,
+			LotStep:       0.01,
+			MarginRate:    0.01,
+			SwapLong:      -0.6,
+			SwapShort:     0.25,
+			Commission:    0.0,
+			Currency:      "USD",
+			BaseCurrency:  "AUD",
+			QuoteCurrency: "USD",
+		},
+	}
+
+	if spec, ok := specs[symbol]; ok {
+		return &spec
+	}
+	return nil
+}
+
+// HandleGetSymbolSpec returns symbol specifications
+func (s *Server) HandleGetSymbolSpec(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Extract symbol from path /api/symbols/{symbol}/spec
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	symbol := parts[3]
+
+	// Validate symbol
+	if !regexp.MustCompile(`^[A-Z0-9]+$`).MatchString(symbol) {
+		http.Error(w, "Invalid symbol", http.StatusBadRequest)
+		return
+	}
+
+	// Get symbol specifications
+	spec := getSymbolSpecification(symbol)
+	if spec == nil {
+		http.Error(w, "Symbol not found", http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(spec)
 }
 
 func (s *Server) HandleGetTicks(w http.ResponseWriter, r *http.Request) {

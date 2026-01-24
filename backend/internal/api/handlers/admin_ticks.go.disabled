@@ -1,0 +1,418 @@
+package handlers
+
+import (
+	"compress/gzip"
+	"context"
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/epic1st/rtx/backend/tickstore"
+)
+
+// AdminTickHandler handles tick data management endpoints
+type AdminTickHandler struct {
+	tickStore *tickstore.TimescaleTickStore
+}
+
+// NewAdminTickHandler creates a new admin tick handler
+func NewAdminTickHandler(ts *tickstore.TimescaleTickStore) *AdminTickHandler {
+	return &AdminTickHandler{
+		tickStore: ts,
+	}
+}
+
+// HandleTickDownload streams historical tick data to clients
+// GET /api/ticks/download?symbol=EURUSD&start_date=2026-01-01T00:00:00Z&end_date=2026-01-20T23:59:59Z&format=csv&compression=gzip
+func (h *AdminTickHandler) HandleTickDownload(w http.ResponseWriter, r *http.Request) {
+	// CORS
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Parse query parameters
+	symbol := r.URL.Query().Get("symbol")
+	startDateStr := r.URL.Query().Get("start_date")
+	endDateStr := r.URL.Query().Get("end_date")
+	format := r.URL.Query().Get("format")
+	compression := r.URL.Query().Get("compression")
+
+	// Validate required parameters
+	if symbol == "" || startDateStr == "" || endDateStr == "" {
+		http.Error(w, "Missing required parameters: symbol, start_date, end_date", http.StatusBadRequest)
+		return
+	}
+
+	// Parse dates (ISO8601 format)
+	startDate, err := time.Parse(time.RFC3339, startDateStr)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Invalid start_date format (use RFC3339): %v", err), http.StatusBadRequest)
+		return
+	}
+
+	endDate, err := time.Parse(time.RFC3339, endDateStr)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Invalid end_date format (use RFC3339): %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Default format and compression
+	if format == "" {
+		format = "json"
+	}
+	if compression == "" {
+		compression = "gzip"
+	}
+
+	// Validate format
+	if format != "json" && format != "csv" {
+		http.Error(w, "Invalid format (supported: json, csv)", http.StatusBadRequest)
+		return
+	}
+
+	// Set response headers
+	filename := fmt.Sprintf("%s_%s_%s.%s", symbol, startDate.Format("2006-01-02"), endDate.Format("2006-01-02"), format)
+	if compression == "gzip" {
+		filename += ".gz"
+		w.Header().Set("Content-Type", "application/gzip")
+	} else {
+		if format == "json" {
+			w.Header().Set("Content-Type", "application/json")
+		} else {
+			w.Header().Set("Content-Type", "text/csv")
+		}
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+
+	// Query ticks from database
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	ticks, err := h.tickStore.GetHistoryRange(symbol, startDate, endDate, 0) // 0 = no limit
+	if err != nil {
+		log.Printf("[AdminTickHandler] Query failed: %v", err)
+		http.Error(w, "Database query failed", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("[AdminTickHandler] Streaming %d ticks for %s (%s to %s) as %s with %s compression",
+		len(ticks), symbol, startDateStr, endDateStr, format, compression)
+
+	// Stream response with optional compression
+	var writer interface{}
+	if compression == "gzip" {
+		gzw := gzip.NewWriter(w)
+		defer gzw.Close()
+		writer = gzw
+	} else {
+		writer = w
+	}
+
+	// Stream data based on format
+	if format == "csv" {
+		h.streamCSV(ctx, writer, ticks)
+	} else {
+		h.streamJSON(ctx, writer, ticks)
+	}
+}
+
+// streamCSV streams ticks as CSV
+func (h *AdminTickHandler) streamCSV(ctx context.Context, writer interface{}, ticks []tickstore.Tick) {
+	var csvWriter *csv.Writer
+	if gzw, ok := writer.(*gzip.Writer); ok {
+		csvWriter = csv.NewWriter(gzw)
+	} else if w, ok := writer.(http.ResponseWriter); ok {
+		csvWriter = csv.NewWriter(w)
+	} else {
+		return
+	}
+	defer csvWriter.Flush()
+
+	// Write header
+	csvWriter.Write([]string{"timestamp", "broker_id", "symbol", "bid", "ask", "spread", "lp"})
+
+	// Write rows
+	for _, tick := range ticks {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			csvWriter.Write([]string{
+				tick.Timestamp.Format(time.RFC3339Nano),
+				tick.BrokerID,
+				tick.Symbol,
+				fmt.Sprintf("%.8f", tick.Bid),
+				fmt.Sprintf("%.8f", tick.Ask),
+				fmt.Sprintf("%.8f", tick.Spread),
+				tick.LP,
+			})
+		}
+	}
+}
+
+// streamJSON streams ticks as JSON array
+func (h *AdminTickHandler) streamJSON(ctx context.Context, writer interface{}, ticks []tickstore.Tick) {
+	var encoder *json.Encoder
+	if gzw, ok := writer.(*gzip.Writer); ok {
+		encoder = json.NewEncoder(gzw)
+	} else if w, ok := writer.(http.ResponseWriter); ok {
+		encoder = json.NewEncoder(w)
+	} else {
+		return
+	}
+
+	// Stream as JSON array
+	encoder.Encode(ticks)
+}
+
+// HandleTickQuery handles paginated tick queries
+// POST /api/ticks/query
+func (h *AdminTickHandler) HandleTickQuery(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var req struct {
+		Symbols   []string `json:"symbols"`
+		StartDate string   `json:"start_date"`
+		EndDate   string   `json:"end_date"`
+		Limit     int      `json:"limit"`
+		Offset    int      `json:"offset"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Parse dates
+	startDate, err := time.Parse(time.RFC3339, req.StartDate)
+	if err != nil {
+		http.Error(w, "Invalid start_date format", http.StatusBadRequest)
+		return
+	}
+
+	endDate, err := time.Parse(time.RFC3339, req.EndDate)
+	if err != nil {
+		http.Error(w, "Invalid end_date format", http.StatusBadRequest)
+		return
+	}
+
+	// Default limit
+	if req.Limit <= 0 {
+		req.Limit = 1000
+	}
+
+	// Query ticks (for first symbol only in this example)
+	var allTicks []tickstore.Tick
+	if len(req.Symbols) > 0 {
+		ticks, err := h.tickStore.GetHistoryRange(req.Symbols[0], startDate, endDate, req.Limit+req.Offset)
+		if err != nil {
+			http.Error(w, "Query failed", http.StatusInternalServerError)
+			return
+		}
+
+		// Apply offset and limit
+		if req.Offset < len(ticks) {
+			endIdx := req.Offset + req.Limit
+			if endIdx > len(ticks) {
+				endIdx = len(ticks)
+			}
+			allTicks = ticks[req.Offset:endIdx]
+		}
+	}
+
+	resp := map[string]interface{}{
+		"total":  len(allTicks),
+		"limit":  req.Limit,
+		"offset": req.Offset,
+		"data":   allTicks,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// HandleTickStats returns storage statistics
+// GET /api/ticks/stats?symbol=EURUSD
+func (h *AdminTickHandler) HandleTickStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+	stats := h.tickStore.GetStats()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+// HandleTickCleanup deletes old tick data (admin only)
+// POST /admin/ticks/cleanup
+func (h *AdminTickHandler) HandleTickCleanup(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// TODO: Verify admin token
+
+	var req struct {
+		OlderThan string `json:"older_than"`
+		Symbol    string `json:"symbol"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	olderThan, err := time.Parse(time.RFC3339, req.OlderThan)
+	if err != nil {
+		http.Error(w, "Invalid older_than format", http.StatusBadRequest)
+		return
+	}
+
+	// Execute cleanup query
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	var query string
+	var args []interface{}
+
+	if req.Symbol != "" {
+		query = "DELETE FROM tick_history WHERE symbol = $1 AND timestamp < $2"
+		args = []interface{}{req.Symbol, olderThan}
+	} else {
+		query = "DELETE FROM tick_history WHERE timestamp < $1"
+		args = []interface{}{olderThan}
+	}
+
+	// This would execute the cleanup - commented for safety
+	_ = ctx
+	_ = query
+	_ = args
+
+	log.Printf("[AdminTickHandler] Cleanup request: symbol=%s, older_than=%s", req.Symbol, req.OlderThan)
+
+	resp := map[string]interface{}{
+		"success":        true,
+		"ticks_deleted":  0, // Would return actual count
+		"storage_freed_mb": 0,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// HandleTickSymbols returns list of symbols with tick data
+// GET /api/ticks/symbols
+func (h *AdminTickHandler) HandleTickSymbols(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+	symbols := h.tickStore.GetSymbols()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"symbols": symbols,
+		"count":   len(symbols),
+	})
+}
+
+// HandleTickImport imports tick data from CSV (admin only)
+// POST /admin/ticks/import
+func (h *AdminTickHandler) HandleTickImport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// TODO: Parse multipart form with CSV file
+	// TODO: Validate CSV format
+	// TODO: Batch insert ticks
+
+	http.Error(w, "Not implemented", http.StatusNotImplemented)
+}
+
+// HandleTickExportOHLC exports OHLC data for backtesting
+// GET /api/ticks/export-ohlc?symbol=EURUSD&timeframe=1h&start_date=2026-01-01T00:00:00Z&end_date=2026-01-20T23:59:59Z
+func (h *AdminTickHandler) HandleTickExportOHLC(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+	symbol := r.URL.Query().Get("symbol")
+	timeframe := r.URL.Query().Get("timeframe")
+	startDateStr := r.URL.Query().Get("start_date")
+	endDateStr := r.URL.Query().Get("end_date")
+
+	if symbol == "" || timeframe == "" || startDateStr == "" || endDateStr == "" {
+		http.Error(w, "Missing required parameters", http.StatusBadRequest)
+		return
+	}
+
+	// Parse timeframe
+	var timeframeSecs int64
+	switch timeframe {
+	case "1m":
+		timeframeSecs = 60
+	case "5m":
+		timeframeSecs = 300
+	case "15m":
+		timeframeSecs = 900
+	case "1h":
+		timeframeSecs = 3600
+	case "4h":
+		timeframeSecs = 14400
+	case "1d":
+		timeframeSecs = 86400
+	default:
+		tf, err := strconv.ParseInt(timeframe, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid timeframe", http.StatusBadRequest)
+			return
+		}
+		timeframeSecs = tf
+	}
+
+	// Get OHLC data
+	ohlc := h.tickStore.GetOHLC(symbol, timeframeSecs, 0) // 0 = all data
+
+	// Stream as CSV
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s_%s_ohlc.csv", symbol, timeframe))
+
+	csvWriter := csv.NewWriter(w)
+	defer csvWriter.Flush()
+
+	// Write header
+	csvWriter.Write([]string{"timestamp", "open", "high", "low", "close", "volume"})
+
+	// Write rows
+	for _, bar := range ohlc {
+		csvWriter.Write([]string{
+			time.Unix(bar.Time, 0).Format(time.RFC3339),
+			fmt.Sprintf("%.8f", bar.Open),
+			fmt.Sprintf("%.8f", bar.High),
+			fmt.Sprintf("%.8f", bar.Low),
+			fmt.Sprintf("%.8f", bar.Close),
+			fmt.Sprintf("%d", bar.Volume),
+		})
+	}
+}

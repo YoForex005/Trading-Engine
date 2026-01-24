@@ -23,7 +23,9 @@ import (
 	"github.com/epic1st/rtx/backend/internal/alerts"
 	"github.com/epic1st/rtx/backend/internal/api/handlers"
 	"github.com/epic1st/rtx/backend/internal/api/websocket"
+	"github.com/epic1st/rtx/backend/internal/compression"
 	"github.com/epic1st/rtx/backend/internal/core"
+	"github.com/epic1st/rtx/backend/internal/middleware"
 	"github.com/epic1st/rtx/backend/lpmanager"
 	"github.com/epic1st/rtx/backend/lpmanager/adapters"
 	"github.com/epic1st/rtx/backend/tickstore"
@@ -69,12 +71,12 @@ type HistoricalTick struct {
 
 // HistoricalDataCache stores loaded historical tick data
 type HistoricalDataCache struct {
-	Ticks      []HistoricalTick
-	LastIndex  int
-	Symbol     string
-	AvgSpread  float64
-	PipSize    float64
-	mu         sync.RWMutex
+	Ticks     []HistoricalTick
+	LastIndex int
+	Symbol    string
+	AvgSpread float64
+	PipSize   float64
+	mu        sync.RWMutex
 }
 
 // Global cache for historical data
@@ -235,11 +237,13 @@ func main() {
 	log.Printf("║        %s Mode + %s LP                 ║", brokerConfig.ExecutionMode, brokerConfig.PriceFeedLP)
 	log.Println("╚═══════════════════════════════════════════════════════════╝")
 
-	// Initialize OPTIMIZED tick storage with:
+	// Initialize OPTIMIZED tick storage with SQLite backend:
 	// - Ring buffers (bounded memory, O(1) operations)
 	// - Quote throttling (skip < 0.001% price changes)
 	// - Async batch writer (non-blocking disk persistence)
-	tickStore := tickstore.NewOptimizedTickStore("default", brokerConfig.MaxTicksPerSymbol)
+	// - SQLite persistent storage with daily rotation
+	tickStoreConfig := tickstore.ProductionConfig("BROKER-001")
+	tickStore := tickstore.NewOptimizedTickStoreWithConfig(tickStoreConfig)
 
 	// Initialize B-Book engine
 	bbookEngine := core.NewEngine()
@@ -281,6 +285,21 @@ func main() {
 	// Initialize Analytics WebSocket Hub
 	analyticsHub := websocket.InitializeAnalyticsHub(authService)
 	log.Println("[Analytics] Real-time analytics WebSocket hub initialized")
+
+	// Initialize Compression Service
+	var compressor *compression.Compressor
+	if retentionCfg, err := compression.LoadRetentionConfig("backend/config/retention.yaml"); err != nil {
+		log.Printf("[Compression] Failed to load retention config: %v (compression disabled)", err)
+	} else {
+		compressorCfg := retentionCfg.ToCompressorConfig()
+		compressor = compression.NewCompressor(compressorCfg)
+		if compressor.IsEnabled() {
+			compressor.Start()
+			log.Println("[Compression] Compression scheduler started - scans every 7 days")
+		} else {
+			log.Println("[Compression] Compression disabled by configuration")
+		}
+	}
 
 	apiHandler.SetHub(hub)
 
@@ -407,10 +426,43 @@ func main() {
 	}
 
 	// ============================================
+	// INITIALIZE RATE LIMITING
+	// ============================================
+	rateLimitConfig, err := config.LoadRateLimitingConfig()
+	if err != nil {
+		log.Printf("[RateLimit] Failed to load rate limiting config: %v (using defaults)", err)
+		rateLimitConfig = config.RateLimitingConfig{
+			Enabled:           true,
+			RequestsPerSecond: 10,
+			RequestsPerMinute: 500,
+			BurstSize:         20,
+			CleanupInterval:   "5m",
+			ClientTimeout:     "10m",
+		}
+	}
+
+	var rateLimiter *middleware.RateLimiter
+	if rateLimitConfig.Enabled {
+		// Create rate limiter with config
+		rlConfig := middleware.RateLimitConfig{
+			RequestsPerSecond: rateLimitConfig.RequestsPerSecond,
+			RequestsPerMinute: rateLimitConfig.RequestsPerMinute,
+			BurstSize:         rateLimitConfig.BurstSize,
+			CleanupInterval:   config.ParseDuration(rateLimitConfig.CleanupInterval),
+			ClientTimeout:     config.ParseDuration(rateLimitConfig.ClientTimeout),
+		}
+
+		rateLimiter = middleware.NewRateLimiter(rlConfig)
+		log.Printf("[RateLimit] Rate limiting enabled: %.0f req/s, burst=%d", rlConfig.RequestsPerSecond, rlConfig.BurstSize)
+	} else {
+		log.Println("[RateLimit] Rate limiting disabled")
+	}
+
+	// ============================================
 	// REGISTER API ROUTES
 	// ============================================
 
-	// Health
+	// Health (no rate limit)
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -697,6 +749,16 @@ func main() {
 	// Positions (B-Book)
 	http.HandleFunc("/api/symbols", apiHandler.HandleGetSymbols)
 
+	// Symbol Specification API - must be before /api/symbols/available to avoid conflicts
+	http.HandleFunc("/api/symbols/", func(w http.ResponseWriter, r *http.Request) {
+		// Handle /api/symbols/{symbol}/spec
+		if strings.HasSuffix(r.URL.Path, "/spec") {
+			server.HandleGetSymbolSpec(w, r)
+			return
+		}
+		http.Error(w, "Not found", http.StatusNotFound)
+	})
+
 	// Symbol Management API (for Market Watch)
 	http.HandleFunc("/api/symbols/available", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -853,10 +915,10 @@ func main() {
 
 		log.Printf("[API] Subscribed to %s market data (MDReqID: %s)", req.Symbol, mdReqID)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success":  true,
-			"symbol":   req.Symbol,
-			"mdReqId":  mdReqID,
-			"message":  "Subscribed successfully",
+			"success": true,
+			"symbol":  req.Symbol,
+			"mdReqId": mdReqID,
+			"message": "Subscribed successfully",
 		})
 	})
 
@@ -879,6 +941,75 @@ func main() {
 
 		subscribedSymbols := fixGateway.GetSubscribedSymbols()
 		json.NewEncoder(w).Encode(subscribedSymbols)
+	})
+
+	// Unsubscribe from a symbol (removes from FIX market data subscriptions)
+	http.HandleFunc("/api/symbols/unsubscribe", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			Symbol string `json:"symbol"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		if req.Symbol == "" {
+			http.Error(w, "Symbol is required", http.StatusBadRequest)
+			return
+		}
+
+		fixGateway := server.GetFIXGateway()
+		if fixGateway == nil {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "FIX gateway not available",
+			})
+			return
+		}
+
+		// Check if symbol is subscribed
+		if !fixGateway.IsSymbolSubscribed(req.Symbol) {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"symbol":  req.Symbol,
+				"message": "Symbol not subscribed",
+			})
+			return
+		}
+
+		// Unsubscribe via YOFX2 (market data session)
+		err := fixGateway.UnsubscribeMarketDataBySymbol("YOFX2", req.Symbol)
+		if err != nil {
+			log.Printf("[API] Symbol unsubscription failed for %s: %v", req.Symbol, err)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"symbol":  req.Symbol,
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		log.Printf("[API] Unsubscribed from %s market data", req.Symbol)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"symbol":  req.Symbol,
+			"message": "Unsubscribed successfully",
+		})
 	})
 
 	http.HandleFunc("/api/positions", apiHandler.HandleGetPositions)
@@ -935,6 +1066,68 @@ func main() {
 	http.HandleFunc("/api/analytics/exposure/heatmap", apiHandler.HandleExposureHeatmap)
 	http.HandleFunc("/api/analytics/exposure/current", apiHandler.HandleCurrentExposure)
 	http.HandleFunc("/api/analytics/exposure/history/", apiHandler.HandleExposureHistory)
+
+	// Diagnostics - Market Data Status
+	http.HandleFunc("/api/diagnostics/market-data", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		fixGateway := server.GetFIXGateway()
+		diagnostics := map[string]interface{}{
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+
+		if fixGateway == nil {
+			diagnostics["status"] = "unavailable"
+			diagnostics["error"] = "FIX gateway not initialized"
+			diagnostics["subscriptions"] = []string{}
+			diagnostics["activeStreams"] = 0
+			json.NewEncoder(w).Encode(diagnostics)
+			return
+		}
+
+		// Get subscribed symbols
+		subscribedSymbols := fixGateway.GetSubscribedSymbols()
+		diagnostics["status"] = "connected"
+		diagnostics["subscriptions"] = subscribedSymbols
+		diagnostics["activeStreams"] = len(subscribedSymbols)
+
+		// Get FIX session status
+		fixStatus := fixGateway.GetStatus()
+		diagnostics["fixSessions"] = fixStatus
+
+		// Get tick stats from hub
+		tickMutex.RLock()
+		tickStats := make(map[string]interface{})
+		for symbol, tick := range latestTicks {
+			tickStats[symbol] = map[string]interface{}{
+				"bid":       tick.Bid,
+				"ask":       tick.Ask,
+				"spread":    tick.Spread,
+				"timestamp": tick.Timestamp,
+			}
+		}
+		tickMutex.RUnlock()
+
+		diagnostics["latestTicks"] = tickStats
+		diagnostics["totalTicksReceived"] = totalTickCount
+
+		// Calculate latency stats (if available)
+		latencyStats := map[string]interface{}{
+			"average": "N/A",
+			"min":     "N/A",
+			"max":     "N/A",
+		}
+		diagnostics["latency"] = latencyStats
+
+		json.NewEncoder(w).Encode(diagnostics)
+	})
 
 	// ===== ADMIN ENDPOINTS =====
 	// For deposit/withdraw/adjust (Super	// Admin Endpoints
@@ -1059,6 +1252,151 @@ func main() {
 
 	// Create LP Handler
 	lpHandler := handlers.NewLPHandler(lpMgr)
+
+	// ===== HISTORICAL DATA API =====
+	// Create history API handler
+	historyHandler := api.NewHistoryHandler(tickStore)
+
+	// Register history routes on a router (using http.DefaultServeMux for now)
+	// In production, use gorilla/mux for better routing
+	// CRITICAL FIX: Register query parameter endpoint for frontend
+	// Frontend uses: GET /api/history/ticks?symbol=EURUSD&date=2026-01-20&limit=5000
+	http.HandleFunc("/api/history/ticks", historyHandler.HandleGetTicksQuery)
+
+	// Path-based endpoint (legacy): GET /api/history/ticks/EURUSD
+	http.HandleFunc("/api/history/ticks/", func(w http.ResponseWriter, r *http.Request) {
+		// Extract symbol from path
+		parts := strings.Split(r.URL.Path, "/")
+		if len(parts) >= 5 && parts[4] != "" {
+			// Store symbol in mux.Vars equivalent
+			r = r.WithContext(r.Context())
+			historyHandler.HandleGetTicks(w, r)
+		} else {
+			http.Error(w, "Symbol required", http.StatusBadRequest)
+		}
+	})
+	http.HandleFunc("/api/history/ticks/bulk", historyHandler.HandleBulkDownload)
+	http.HandleFunc("/api/history/available", historyHandler.HandleGetAvailable)
+	http.HandleFunc("/api/history/symbols", historyHandler.HandleGetSymbols)
+	http.HandleFunc("/admin/history/backfill", historyHandler.HandleBackfill)
+	log.Println("[HistoryAPI] Historical data API routes registered")
+
+	// ===== ADMIN HISTORY MANAGEMENT (Comprehensive Controls) =====
+	adminHistoryHandler := api.NewAdminHistoryHandler(tickStore, authService)
+	http.HandleFunc("/admin/history/stats", adminHistoryHandler.HandleGetStats)
+	http.HandleFunc("/admin/history/import", adminHistoryHandler.HandleImportData)
+	http.HandleFunc("/admin/history/cleanup", adminHistoryHandler.HandleCleanupOldData)
+	http.HandleFunc("/admin/history/compress", adminHistoryHandler.HandleCompressData)
+	http.HandleFunc("/admin/history/backup", adminHistoryHandler.HandleBackup)
+	http.HandleFunc("/admin/history/monitoring", adminHistoryHandler.HandleGetMonitoring)
+	log.Println("[AdminHistory] Admin data management routes registered")
+
+	// ===== COMPRESSION MANAGEMENT ENDPOINTS =====
+	// Get compression metrics
+	http.HandleFunc("/admin/compression/metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+
+		if compressor == nil {
+			http.Error(w, "Compression service not initialized", http.StatusServiceUnavailable)
+			return
+		}
+
+		metrics := compressor.GetMetrics()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"filesCompressed":  metrics.FilesCompressed,
+			"bytesOriginal":    metrics.BytesOriginal,
+			"bytesCompressed":  metrics.BytesCompressed,
+			"bytesSaved":       metrics.BytesOriginal - metrics.BytesCompressed,
+			"compressionRatio": float64(metrics.BytesCompressed) / float64(metrics.BytesOriginal+1),
+			"errorCount":       metrics.ErrorCount,
+			"lastError":        metrics.LastError,
+			"lastCompression":  metrics.LastCompression,
+		})
+	})
+
+	// Trigger manual compression
+	http.HandleFunc("/admin/compression/trigger", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if compressor == nil {
+			http.Error(w, "Compression service not initialized", http.StatusServiceUnavailable)
+			return
+		}
+
+		if !compressor.IsEnabled() {
+			http.Error(w, "Compression is disabled", http.StatusBadRequest)
+			return
+		}
+
+		// Run compression in background
+		go compressor.TriggerCompression()
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "Compression scan triggered in background",
+		})
+	})
+
+	// Compress specific file manually
+	http.HandleFunc("/admin/compression/file", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if compressor == nil {
+			http.Error(w, "Compression service not initialized", http.StatusServiceUnavailable)
+			return
+		}
+
+		var req struct {
+			FilePath string `json:"filePath"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		if req.FilePath == "" {
+			http.Error(w, "filePath is required", http.StatusBadRequest)
+			return
+		}
+
+		if err := compressor.CompressFile(req.FilePath); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":  true,
+			"filePath": req.FilePath,
+			"message":  "File compressed successfully",
+		})
+	})
+
+	log.Println("[Compression] Compression management endpoints registered")
 
 	// ===== ADMIN LP MANAGEMENT ENDPOINTS (v1 - /admin/lps) =====
 	http.HandleFunc("/admin/lps", func(w http.ResponseWriter, r *http.Request) {
@@ -1326,6 +1664,14 @@ func main() {
 				}
 				log.Printf("[FIX] Auto-subscribing to %d forex symbols on YOFX2...", len(forexSymbols))
 				for _, symbol := range forexSymbols {
+					// Step 1: Request security definition (35=c) for FIX 4.4 compliance
+					if _, err := fixGateway.RequestSecurityDefinition("YOFX2", symbol); err != nil {
+						log.Printf("[FIX] SecurityDefinition request failed for %s: %v", symbol, err)
+					} else {
+						log.Printf("[FIX] SecurityDefinition requested for %s", symbol)
+					}
+
+					// Step 2: Subscribe to market data (35=V)
 					if _, err := fixGateway.SubscribeMarketData("YOFX2", symbol); err != nil {
 						log.Printf("[FIX] Failed to subscribe %s: %v", symbol, err)
 					} else {
@@ -1551,11 +1897,39 @@ func main() {
 	if brokerConfig.DefaultBalance > 0 {
 		log.Printf("  Demo Account: Demo User | Balance: $%.2f", brokerConfig.DefaultBalance)
 	}
+	if compressor != nil && compressor.IsEnabled() {
+		cfg := compressor.GetConfig()
+		log.Println("")
+		log.Println("  DATA COMPRESSION:")
+		log.Printf("    Enabled: Yes | Schedule: %s | Max Age: %d seconds", cfg.Schedule, cfg.MaxAgeSeconds)
+		log.Printf("    Data Dir: %s | Max Concurrency: %d", cfg.DataDir, cfg.MaxConcurrency)
+		log.Println("    Metrics: GET /admin/compression/metrics")
+		log.Println("    Manual Trigger: POST /admin/compression/trigger")
+		log.Println("    Compress File: POST /admin/compression/file")
+	}
 	log.Println("═══════════════════════════════════════════════════════════")
+
+	// Gracefully shutdown services on exit
+	if rateLimiter != nil {
+		defer rateLimiter.Stop()
+	}
+	if compressor != nil && compressor.IsEnabled() {
+		defer compressor.Stop()
+	}
 
 	port := ":" + cfg.Port
 	log.Printf("Starting server on port %s", port)
-	if err := http.ListenAndServe(port, nil); err != nil {
+
+	// Create HTTP server with rate limiting middleware
+	var handler http.Handler
+	if rateLimiter != nil {
+		// Wrap all routes with rate limiting (except excluded paths)
+		handler = rateLimiter.MiddlewareWithExclusions(rateLimitConfig.Exclusions)(http.DefaultServeMux)
+	} else {
+		handler = http.DefaultServeMux
+	}
+
+	if err := http.ListenAndServe(port, handler); err != nil {
 		log.Fatal(err)
 	}
 }

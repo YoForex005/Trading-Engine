@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
     CandlestickChart,
     LineChart,
@@ -17,6 +17,9 @@ import {
     LayoutTemplate
 } from 'lucide-react';
 import type { ChartType, Timeframe } from '../TradingChart';
+import { useToolbarState } from '../../hooks/useToolbarState';
+import { registerKeyboardShortcutsWithInputCheck } from '../../services/keyboardShortcuts';
+import { useCommandBus } from '../../hooks/useCommandBus';
 
 interface TopToolbarProps {
     chartType: ChartType;
@@ -33,6 +36,28 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
     onChartTypeChange,
     onTimeframeChange
 }) => {
+    const { state: toolbarState, dispatch: dispatchToolbar } = useToolbarState();
+    const { dispatch: dispatchCommand } = useCommandBus();
+
+    // Register keyboard shortcuts on mount
+    useEffect(() => {
+        const unregister = registerKeyboardShortcutsWithInputCheck(dispatchCommand);
+        return unregister;
+    }, [dispatchCommand]);
+
+    // Sync props with toolbar state
+    useEffect(() => {
+        if (chartType !== toolbarState.chartType) {
+            dispatchToolbar({ type: 'SET_CHART_TYPE', chartType });
+        }
+    }, [chartType, toolbarState.chartType, dispatchToolbar]);
+
+    useEffect(() => {
+        if (timeframe !== toolbarState.timeframe) {
+            dispatchToolbar({ type: 'SET_TIMEFRAME', timeframe });
+        }
+    }, [timeframe, toolbarState.timeframe, dispatchToolbar]);
+
     return (
         <div className="flex flex-col z-50 relative">
             {/* 1. Header Bar (Topmost) */}
@@ -52,6 +77,8 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
                 timeframe={timeframe}
                 onChartTypeChange={onChartTypeChange}
                 onTimeframeChange={onTimeframeChange}
+                toolbarState={toolbarState}
+                dispatchCommand={dispatchCommand}
             />
         </div>
     );
@@ -101,48 +128,138 @@ const HeaderBar = ({ symbol, timeframe, account, server }: { symbol: string, tim
     </div>
 );
 
+interface MainToolbarProps extends TopToolbarProps {
+    toolbarState: any;
+    dispatchCommand: (cmd: Command) => void;
+}
+
 const MainToolbar = ({
     chartType,
     timeframe,
     onChartTypeChange,
-    onTimeframeChange
-}: TopToolbarProps) => {
+    onTimeframeChange,
+    toolbarState,
+    dispatchCommand
+}: MainToolbarProps) => {
     return (
         <div className="h-10 bg-gradient-to-b from-[#252525] to-[#1e1e1e] border-b border-black flex items-center px-2 gap-3 shadow-md">
             {/* Section 1: Trading Actions */}
             <ToolbarGroup>
-                <ToolButton icon={<Play size={15} className="fill-emerald-500 text-emerald-500" />} label="Algo Trading" activeColor="emerald" />
-                <ToolButton icon={<Layers size={15} />} label="New Order" />
+                <ToolButton
+                    icon={<Play size={15} className="fill-emerald-500 text-emerald-500" />}
+                    label="Algo Trading"
+                    activeColor="emerald"
+                    onClick={() => dispatchCommand({ type: 'TOGGLE_ALGO_TRADING', payload: {} })}
+                />
+                <ToolButton
+                    icon={<Layers size={15} />}
+                    label="New Order (F9)"
+                    title="Open Order Panel (F9)"
+                    onClick={() => {
+                        // Simulate F9 key press to trigger order panel
+                        const event = new KeyboardEvent('keydown', {
+                            key: 'F9',
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        window.dispatchEvent(event);
+                    }}
+                />
             </ToolbarGroup>
 
             <Divider />
 
             {/* Section 2: Chart Controls */}
             <ToolbarGroup>
-                <ToolButton active={chartType === 'bar'} onClick={() => onChartTypeChange('bar')} icon={<BarChart3 size={16} />} title="Bar Chart" />
-                <ToolButton active={chartType === 'candlestick'} onClick={() => onChartTypeChange('candlestick')} icon={<CandlestickChart size={16} />} title="Candlesticks" />
-                <ToolButton active={chartType === 'area'} onClick={() => onChartTypeChange('area')} icon={<LineChart size={16} />} title="Line Chart" />
+                <ToolButton
+                    active={chartType === 'bar'}
+                    onClick={() => {
+                        onChartTypeChange('bar');
+                        dispatchCommand({ type: 'SET_CHART_TYPE', payload: { chartType: 'bar' } });
+                    }}
+                    icon={<BarChart3 size={16} />}
+                    title="Bar Chart"
+                />
+                <ToolButton
+                    active={chartType === 'candlestick'}
+                    onClick={() => {
+                        onChartTypeChange('candlestick');
+                        dispatchCommand({ type: 'SET_CHART_TYPE', payload: { chartType: 'candlestick' } });
+                    }}
+                    icon={<CandlestickChart size={16} />}
+                    title="Candlesticks"
+                />
+                <ToolButton
+                    active={chartType === 'area'}
+                    onClick={() => {
+                        onChartTypeChange('area');
+                        dispatchCommand({ type: 'SET_CHART_TYPE', payload: { chartType: 'area' } });
+                    }}
+                    icon={<LineChart size={16} />}
+                    title="Line Chart"
+                />
             </ToolbarGroup>
 
             <Divider />
 
             {/* Section 3: Tools */}
             <ToolbarGroup>
-                <ToolButton icon={<Crosshair size={16} />} active />
-                <ToolButton icon={<ZoomIn size={16} />} />
-                <ToolButton icon={<ZoomOut size={16} />} />
-                <ToolButton icon={<LayoutTemplate size={16} />} />
+                <ToolButton
+                    icon={<Crosshair size={16} />}
+                    active={toolbarState.crosshairEnabled}
+                    onClick={() => dispatchCommand({ type: 'TOGGLE_CROSSHAIR', payload: {} })}
+                    title="Crosshair (C)"
+                />
+                <ToolButton
+                    icon={<ZoomIn size={16} />}
+                    onClick={() => dispatchCommand({ type: 'ZOOM_IN', payload: {} })}
+                    title="Zoom In (+)"
+                />
+                <ToolButton
+                    icon={<ZoomOut size={16} />}
+                    onClick={() => dispatchCommand({ type: 'ZOOM_OUT', payload: {} })}
+                    title="Zoom Out (-)"
+                />
+                <ToolButton
+                    icon={<LayoutTemplate size={16} />}
+                    onClick={() => dispatchCommand({ type: 'TILE_WINDOWS', payload: { mode: 'grid' } })}
+                    title="Tile Windows (Grid Layout)"
+                />
             </ToolbarGroup>
 
             <Divider />
 
             {/* Section 4: Drawing Tools */}
             <ToolbarGroup>
-                <ToolButton icon={<MousePointer2 size={15} />} />
-                <ToolButton icon={<Minus size={15} className="rotate-45" />} />
-                <ToolButton icon={<Minus size={15} />} />
-                <ToolButton icon={<Type size={15} />} />
-                <div className="text-zinc-600 text-[10px] cursor-pointer hover:text-zinc-400 transition-colors">
+                <ToolButton
+                    icon={<MousePointer2 size={15} />}
+                    active={toolbarState.activeTool === null}
+                    onClick={() => dispatchCommand({ type: 'SELECT_TOOL', payload: { tool: 'cursor' } })}
+                    title="Cursor (Esc)"
+                />
+                <ToolButton
+                    icon={<Minus size={15} className="rotate-45" />}
+                    active={toolbarState.activeTool === 'trendline'}
+                    onClick={() => dispatchCommand({ type: 'SELECT_TOOL', payload: { tool: 'trendline' } })}
+                    title="Trendline (T)"
+                />
+                <ToolButton
+                    icon={<Minus size={15} />}
+                    active={toolbarState.activeTool === 'hline'}
+                    onClick={() => dispatchCommand({ type: 'SELECT_TOOL', payload: { tool: 'hline' } })}
+                    title="Horizontal Line (H)"
+                />
+                <ToolButton
+                    icon={<Type size={15} />}
+                    active={toolbarState.activeTool === 'text'}
+                    onClick={() => dispatchCommand({ type: 'SELECT_TOOL', payload: { tool: 'text' } })}
+                    title="Text (X)"
+                />
+                <div
+                    className="text-zinc-600 text-[10px] cursor-pointer hover:text-zinc-400 transition-colors"
+                    onClick={() => dispatchCommand({ type: 'OPEN_DRAWING_TOOLS_MENU', payload: {} })}
+                    title="More Drawing Tools"
+                >
                     <ChevronDown size={12} />
                 </div>
             </ToolbarGroup>
@@ -154,7 +271,10 @@ const MainToolbar = ({
                 {(['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1', 'MN'] as string[]).map((tf) => (
                     <button
                         key={tf}
-                        onClick={() => onTimeframeChange(tf.toLowerCase() as Timeframe)}
+                        onClick={() => {
+                            onTimeframeChange(tf.toLowerCase() as Timeframe);
+                            dispatchCommand({ type: 'SET_TIMEFRAME', payload: { timeframe: tf.toLowerCase() } });
+                        }}
                         className={`px-2.5 py-1 text-[10px] font-bold rounded-[3px] transition-all ${timeframe.toUpperCase() === tf
                             ? 'bg-blue-600 text-white shadow-sm'
                             : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'

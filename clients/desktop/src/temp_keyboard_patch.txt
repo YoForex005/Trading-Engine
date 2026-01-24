@@ -1,0 +1,21 @@
+This patch adds:
+1. Import useKeyboardShortcuts hook
+2. Add MT5 keyboard shortcuts (F9, Alt+B, Ctrl+U, F10)
+3. Integrate shortcuts with existing handlers
+
+Changes to MarketWatchPanel.tsx:
+
+Line 4: Add import
+from: import { useContextMenu } from '../../hooks';
+to: import { useContextMenu, useKeyboardShortcuts } from '../../hooks';
+
+After line 363 (after handleOpenSymbols), add:
+
+    // Global keyboard shortcuts integration (MT5-style)
+    useKeyboardShortcuts({
+        NEW_ORDER: handleNewOrder,
+        DEPTH_OF_MARKET: handleDepthOfMarket,
+        SYMBOLS_DIALOG: handleOpenSymbols,
+        POPUP_PRICES: handlePopupPrices,
+        CLOSE_MODAL: () => contextMenu.close(),
+    });

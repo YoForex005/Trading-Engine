@@ -1,0 +1,138 @@
+/**
+ * Command Bus Type Definitions
+ * Centralized type-safe command dispatcher for RTX Terminal toolbar
+ * Supports full event replay capability and type-safe payloads
+ */
+
+/**
+ * Union type of all possible commands in the terminal
+ * Each command has a unique type and strongly-typed payload
+ */
+export type Command =
+  // Order Management Commands
+  | {
+      type: 'OPEN_ORDER_PANEL';
+      payload: { symbol: string; price: { bid: number; ask: number } };
+    }
+  // Chart Type Commands
+  | {
+      type: 'SET_CHART_TYPE';
+      payload: { chartType: 'candlestick' | 'bar' | 'line' | 'area' };
+    }
+  // Indicator Commands
+  | {
+      type: 'OPEN_INDICATOR_NAVIGATOR';
+      payload: Record<string, never>;
+    }
+  // Chart Tool Commands
+  | {
+      type: 'TOGGLE_CROSSHAIR';
+      payload: Record<string, never>;
+    }
+  | {
+      type: 'ZOOM_IN';
+      payload: Record<string, never>;
+    }
+  | {
+      type: 'ZOOM_OUT';
+      payload: Record<string, never>;
+    }
+  // Window Management Commands
+  | {
+      type: 'TILE_WINDOWS';
+      payload: { mode: 'horizontal' | 'vertical' | 'grid' };
+    }
+  // Drawing Tool Commands
+  | {
+      type: 'SELECT_TOOL';
+      payload: {
+        tool: 'cursor' | 'trendline' | 'hline' | 'vline' | 'text';
+      };
+    }
+  // Timeframe Commands
+  | {
+      type: 'SET_TIMEFRAME';
+      payload: { timeframe: string };
+    }
+  // Indicator Management
+  | {
+      type: 'ADD_INDICATOR';
+      payload: { name: string; params: Record<string, any> };
+    }
+  // Drawing Persistence
+  | {
+      type: 'SAVE_DRAWING';
+      payload: { type: string; points: Array<{ x: number; y: number }> };
+    }
+  | {
+      type: 'DELETE_DRAWING';
+      payload: { id: string };
+    };
+
+/**
+ * Extract the type from a command
+ * Useful for type-safe command handling
+ */
+export type CommandType = Command['type'];
+
+/**
+ * Extract the payload type for a specific command type
+ * @example PayloadFor<'SET_CHART_TYPE'> => { chartType: 'candlestick' | 'bar' | 'line' | 'area' }
+ */
+export type PayloadFor<T extends CommandType> = Extract<
+  Command,
+  { type: T }
+>['payload'];
+
+/**
+ * Command handler type for a specific command type
+ */
+export type CommandHandler<T extends CommandType = CommandType> = (
+  payload: PayloadFor<T>
+) => void | Promise<void>;
+
+/**
+ * Unsubscribe function returned by subscribe
+ */
+export type Unsubscribe = () => void;
+
+/**
+ * Command Bus Interface
+ * Implements the pub/sub pattern for centralized command dispatching
+ */
+export interface CommandBus {
+  /**
+   * Dispatch a command to all subscribed handlers
+   * @param command - The command to dispatch
+   */
+  dispatch(command: Command): void;
+
+  /**
+   * Subscribe to a specific command type
+   * @param type - The command type to listen for
+   * @param handler - Function to call when command is dispatched
+   * @returns Unsubscribe function to remove the listener
+   */
+  subscribe<T extends CommandType>(
+    type: T,
+    handler: CommandHandler<T>
+  ): Unsubscribe;
+
+  /**
+   * Get the command history (last 100 commands)
+   * Useful for debugging and replay
+   */
+  getHistory(): Command[];
+
+  /**
+   * Clear the command history
+   */
+  clearHistory(): void;
+
+  /**
+   * Replay a sequence of commands
+   * Useful for testing and debugging
+   * @param commands - Array of commands to replay
+   */
+  replay(commands: Command[]): Promise<void>;
+}

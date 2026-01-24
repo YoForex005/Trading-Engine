@@ -225,8 +225,7 @@ function calculateMACD(
 
 function calculateIndicators(ohlcv: OHLCV[], indicators: string[]): Record<string, unknown> {
   const closePrices = ohlcv.map((candle) => candle.close);
-  const highPrices = ohlcv.map((candle) => candle.high);
-  const lowPrices = ohlcv.map((candle) => candle.low);
+
 
   const result: Record<string, unknown> = {};
 
@@ -322,4 +321,4 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
 };
 
 // Export for TypeScript types
-export {};
+export { };

@@ -1,0 +1,261 @@
+================================================================================
+MARKET DATA PIPELINE - QUICK TEST REFERENCE
+================================================================================
+
+SETUP (Do this first):
+  1. Start backend:    cd backend/cmd/server && go run main.go
+  2. Start Redis:      redis-server
+  3. Verify:           curl http://localhost:8080/api/admin/pipeline-stats
+
+================================================================================
+QUICK HEALTH CHECK (5 minutes)
+================================================================================
+
+Run automated health check:
+  Linux/Mac:    ./scripts/pipeline_health_check.sh
+  Windows:      PowerShell -ExecutionPolicy Bypass -File scripts/verify_pipeline.ps1
+
+Expected output:
+  ✓ Backend Service
+  ✓ Redis
+  ✓ FIX Gateway
+  ✓ Pipeline Latency
+  ✓ No Dropped Ticks
+  OVERALL STATUS: HEALTHY
+
+================================================================================
+VERIFY EACH COMPONENT
+================================================================================
+
+1. FIX CONNECTION TEST (1 minute)
+   Command:  tail -f backend/fixstore/YOFX2.msgs | grep "35=A"
+   Expect:   Logon message within 10 seconds
+   Verify:   Shows "35=A" (logon) and "35=0" (heartbeat every 30s)
+
+2. MARKET DATA TEST (1 minute)
+   Command:  tail -f backend/fixstore/YOFX2.msgs | grep "35=D" | head -5
+   Expect:   Market data quotes for EURUSD, GBPUSD, etc.
+   Verify:   Multiple symbols with bid/ask prices
+
+3. PIPELINE TEST (1 minute)
+   Command:  curl http://localhost:8080/api/admin/pipeline-stats | jq '.data | {ticks_received, avg_latency_ms}'
+   Expect:   {"ticks_received": 1250, "avg_latency_ms": 3.5}
+   Verify:   ticks_received > 0, latency < 10ms
+
+4. REDIS TEST (1 minute)
+   Command:  redis-cli LLEN market_data:EURUSD
+   Expect:   (integer) 847
+   Verify:   Count increases when you run again
+
+5. WEBSOCKET TEST (1 minute)
+   Command:
+     TOKEN=$(curl -s -X POST http://localhost:8080/api/login \
+       -H "Content-Type: application/json" \
+       -d '{"username":"trader","password":"trader"}' | jq -r '.token')
+     wscat -c "ws://localhost:8080/ws?token=$TOKEN"
+   Expect:   Connected and receiving market_tick messages
+   Verify:   Continuous stream of JSON market data
+
+================================================================================
+AUTOMATED E2E TEST (30 seconds)
+================================================================================
+
+Command:  cd backend/cmd/test_e2e && go run main.go -duration 30s
+
+Expected output:
+  ✓ Backend health check passed
+  ✓ Redis connection OK
+  ✓ WebSocket connected
+  Receiving market data... (collecting for 30s)
+
+  Total ticks received: 850
+  Valid ticks: 845
+  Unique symbols: 15
+  ✓ TEST PASSED
+
+================================================================================
+LOAD TEST (60 seconds)
+================================================================================
+
+Command:  cd backend/cmd/load_test && go run main.go -ticks-per-sec 1000 -clients 10 -duration 60s
+
+Monitor in another terminal:
+  watch -n 1 'curl -s http://localhost:8080/api/admin/pipeline-stats | jq ".data | {ticks_received, avg_latency_ms, dropped}"'
+
+Expected:
+  Sustained 1000+ ticks/sec
+  Latency < 15ms
+  Dropped = 0
+
+================================================================================
+MANUAL DATA VERIFICATION COMMANDS
+================================================================================
+
+Check FIX status:
+  curl http://localhost:8080/api/admin/fix-status | jq .YOFX2
+
+Check pipeline stats:
+  curl http://localhost:8080/api/admin/pipeline-stats | jq '.data | {ticks_received, avg_latency_ms, dropped, clients_connected}'
+
+Check Redis tick count for each symbol:
+  redis-cli KEYS 'market_data:*' | xargs -I {} redis-cli LLEN {}
+
+View latest tick for EURUSD:
+  redis-cli LINDEX market_data:EURUSD 0 | jq .
+
+Count OHLC bars:
+  redis-cli LLEN ohlc:EURUSD:1m
+  redis-cli LLEN ohlc:EURUSD:5m
+  redis-cli LLEN ohlc:EURUSD:1h
+
+Get OHLC data via API:
+  curl "http://localhost:8080/api/ohlc?symbol=EURUSD&timeframe=1m&limit=5"
+
+Monitor FIX messages in real-time:
+  tail -f backend/fixstore/YOFX2.msgs
+
+Count types of FIX messages:
+  grep "35=" backend/fixstore/YOFX2.msgs | cut -d'|' -f3 | sort | uniq -c
+
+Get ingestion rate (ticks/sec):
+  (Count1=$(curl -s http://localhost:8080/api/admin/pipeline-stats | jq '.data.ticks_received'); \
+   sleep 10; \
+   Count2=$(curl -s http://localhost:8080/api/admin/pipeline-stats | jq '.data.ticks_received'); \
+   echo "Rate: $(( (Count2 - Count1) / 10 )) ticks/sec")
+
+================================================================================
+COMMON ISSUES & QUICK FIXES
+================================================================================
+
+NO MARKET DATA RECEIVED:
+  Check: tail -f backend/fixstore/YOFX2.msgs
+  If no output: FIX not connected
+  Fix: Verify LP credentials in backend/fix/config/sessions.json
+
+HIGH LATENCY (>20ms):
+  Check: top -n 1 (view CPU usage)
+  If >80% CPU: System overloaded
+  Fix: Increase buffer sizes in config, reduce concurrent clients
+
+WEBSOCKET DISCONNECTS:
+  Check: Browser console for "[WS] error" messages
+  If "401": Token expired
+  Fix: Re-login or clear localStorage
+
+MEMORY GROWING:
+  Check: htop (watch memory % grow)
+  If >1GB: Memory leak
+  Fix: Restart backend, check for connection leaks
+
+================================================================================
+FRONTEND TESTING CHECKLIST
+================================================================================
+
+1. Open http://localhost:3000
+2. Login with trader/trader
+3. Check Market Watch:
+   ☐ Prices updating in real-time
+   ☐ Bid < Ask always
+   ☐ Spread < 5 pips for major pairs
+   ☐ Timestamp updating with each tick
+
+4. Check Charts (navigate to Charts tab):
+   ☐ OHLC candles display correctly
+   ☐ Green candle = close > open
+   ☐ Red candle = close < open
+   ☐ High >= Open,Close >= Low
+
+5. Monitor latency:
+   ☐ Press F12 (Developer Tools)
+   ☐ Open Console tab
+   ☐ Look for [WS] messages
+   ☐ Should see <1 second between price updates
+
+================================================================================
+SUCCESS CRITERIA
+================================================================================
+
+PASS if ALL are true:
+  ✓ FIX connected (heartbeat visible)
+  ✓ 100+ ticks/sec flowing
+  ✓ Average latency < 10ms
+  ✓ 0 dropped ticks
+  ✓ WebSocket connected
+  ✓ Frontend shows live prices
+  ✓ Charts display correctly
+
+FAIL if ANY of these:
+  ✗ FIX won't connect
+  ✗ No ticks flowing
+  ✗ Latency > 20ms
+  ✗ Continuous dropped ticks
+  ✗ WebSocket fails to connect
+  ✗ Frontend shows stale/incorrect prices
+  ✗ Memory grows unbounded
+
+================================================================================
+TEST EXECUTION TIMES
+================================================================================
+
+Quick Health Check:      5 minutes
+Component Tests:        30 minutes
+Integration Tests:      20 minutes
+Frontend Tests:         15 minutes
+Load Test:              5 minutes (optional)
+                        ──────────
+TOTAL:                 70 minutes
+
+================================================================================
+KEY FILES & DOCUMENTATION
+================================================================================
+
+Full test plan:           docs/E2E_TEST_PLAN.md
+Manual checklist:         docs/MANUAL_VERIFICATION_CHECKLIST.md
+This reference:           docs/QUICK_TEST_REFERENCE.txt
+
+Backend health check:     scripts/pipeline_health_check.sh (Linux/Mac)
+                         scripts/verify_pipeline.ps1 (Windows)
+
+E2E automated test:       backend/cmd/test_e2e/main.go
+Load test tool:          backend/cmd/load_test/main.go
+
+================================================================================
+REFERENCE VALUES (Expected Ranges)
+================================================================================
+
+Tick Ingestion Rate:        100-1000 ticks/sec
+Average Latency:            2-10ms
+Peak Latency (p95):         10-20ms
+WebSocket Broadcast Rate:   50-500 msgs/sec (throttled)
+Memory Usage:               100-500MB (1 day data)
+CPU Usage:                  10-50% (normal load)
+FIX Connection Time:        5-10 seconds
+Drop Rate:                  0% (normal) to <1% (under extreme load)
+Buffer Utilization:         <50% (safe)
+
+OHLC Bar Generation:
+  1-minute bars:  60 per hour
+  5-minute bars:  12 per hour
+  1-hour bars:    1 per hour
+
+Redis Key Retention:
+  Ticks:          1000-5000 per symbol (latest)
+  OHLC bars:      ~2000 per symbol/timeframe
+
+================================================================================
+NEED HELP?
+================================================================================
+
+1. Check full test plan:  cat docs/E2E_TEST_PLAN.md
+2. Run health check:      ./scripts/pipeline_health_check.sh
+3. Check backend logs:    tail -f backend/fixstore/YOFX2.msgs
+4. Check Redis:           redis-cli MONITOR
+5. Check system resources: htop
+
+All issues should have a diagnosis section in E2E_TEST_PLAN.md
+
+================================================================================
+Last Updated: 2025-01-20
+Version: 1.0
+Status: Ready for Testing
+================================================================================

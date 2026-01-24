@@ -70,6 +70,11 @@ type userRateState struct {
 	lastMessageRefill time.Time
 	violations        int
 	lastViolation     time.Time
+	// PERFORMANCE FIX #2: Integer arithmetic for token precision
+	// Accumulate fractional nanoseconds to prevent precision loss over time
+	// Previous float math: 0.9s × 5 orders/s = 4.5 → truncates to 4 (lost tokens)
+	orderNanos        int64 // Fractional nanoseconds for order tokens
+	messageNanos      int64 // Fractional nanoseconds for message tokens
 }
 
 // NewRateLimiter creates a new rate limiter
@@ -227,26 +232,40 @@ func (rl *RateLimiter) GetSessionCount(userID string) int {
 func (rl *RateLimiter) refillTokens(state *userRateState) {
 	now := time.Now()
 
-	// Refill order tokens
-	orderElapsed := now.Sub(state.lastOrderRefill)
-	orderTokensToAdd := int(orderElapsed.Seconds() * float64(state.tier.OrdersPerSecond))
+	// PERFORMANCE FIX #2: Integer arithmetic prevents precision loss over time
+	// Previous float math: 0.9s × 5 orders/s = 4.5 → truncates to 4 (lost tokens)
+	// New approach: Track nanoseconds, no precision loss
+
+	// Calculate order tokens using integer arithmetic
+	elapsed := now.Sub(state.lastOrderRefill).Nanoseconds()
+	state.orderNanos += elapsed
+
+	// tokens = (nanos × rate) / 1e9
+	orderTokensToAdd := (state.orderNanos * int64(state.tier.OrdersPerSecond)) / 1_000_000_000
 	if orderTokensToAdd > 0 {
-		state.orderTokens += orderTokensToAdd
+		state.orderTokens += int(orderTokensToAdd)
 		if state.orderTokens > state.tier.BurstSize {
 			state.orderTokens = state.tier.BurstSize
 		}
+		// Update remaining nanoseconds after token addition
+		state.orderNanos -= orderTokensToAdd * 1_000_000_000 / int64(state.tier.OrdersPerSecond)
 		state.lastOrderRefill = now
 	}
 
-	// Refill message tokens
-	messageElapsed := now.Sub(state.lastMessageRefill)
-	messageTokensToAdd := int(messageElapsed.Seconds() * float64(state.tier.MessagesPerSecond))
+	// Calculate message tokens using integer arithmetic
+	messageElapsed := now.Sub(state.lastMessageRefill).Nanoseconds()
+	state.messageNanos += messageElapsed
+
+	// tokens = (nanos × rate) / 1e9
+	messageTokensToAdd := (state.messageNanos * int64(state.tier.MessagesPerSecond)) / 1_000_000_000
 	if messageTokensToAdd > 0 {
-		state.messageTokens += messageTokensToAdd
+		state.messageTokens += int(messageTokensToAdd)
 		maxMessageBurst := state.tier.BurstSize * 5
 		if state.messageTokens > maxMessageBurst {
 			state.messageTokens = maxMessageBurst
 		}
+		// Update remaining nanoseconds after token addition
+		state.messageNanos -= messageTokensToAdd * 1_000_000_000 / int64(state.tier.MessagesPerSecond)
 		state.lastMessageRefill = now
 	}
 }

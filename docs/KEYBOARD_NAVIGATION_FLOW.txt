@@ -1,0 +1,142 @@
+RTX Market Watch - Keyboard Navigation Flow Diagram
+===================================================
+
+GLOBAL SHORTCUTS (Always Active)
+┌────────────────────────────────────────────────────────────┐
+│  F9      → Open New Order Dialog                           │
+│  F10     → Open Popup Prices                               │
+│  Alt+B   → Open Depth of Market                            │
+│  Ctrl+U  → Open Symbols Dialog                             │
+│  Escape  → Close Active Modal/Menu                         │
+└────────────────────────────────────────────────────────────┘
+
+CONTEXT MENU NAVIGATION
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  Right-click Symbol                                         │
+│         │                                                   │
+│         ▼                                                   │
+│  ┌─────────────────┐                                        │
+│  │ Context Menu    │  ← Auto-focus first item              │
+│  ├─────────────────┤                                        │
+│  │ ► New Order  F9 │  ← Focused (blue highlight)           │
+│  │   Quick Buy     │                                        │
+│  │   Quick Sell    │                                        │
+│  │   Chart Window  │                                        │
+│  │ ─────────────── │  ← Divider (auto-skipped)             │
+│  │   Sets       ⯈  │  ← Submenu (chevron indicator)        │
+│  │   Sort       ⯈  │                                        │
+│  │   Export        │                                        │
+│  └─────────────────┘                                        │
+│                                                             │
+│  ARROW DOWN (↓)                                             │
+│  ├─ Move focus to next item                                │
+│  └─ Wrap to first item at bottom                           │
+│                                                             │
+│  ARROW UP (↑)                                               │
+│  ├─ Move focus to previous item                            │
+│  └─ Wrap to last item at top                               │
+│                                                             │
+│  ARROW RIGHT (→)                                            │
+│  └─ Open submenu (if has ⯈)                                │
+│         │                                                   │
+│         ▼                                                   │
+│  ┌─────────────────┐    ┌──────────────────┐               │
+│  │ Context Menu    │    │ Submenu          │               │
+│  ├─────────────────┤    ├──────────────────┤               │
+│  │   New Order     │    │ ► forex.all      │ ← Focused     │
+│  │   ...           │    │   forex.major    │               │
+│  │ ► Sets       ⯈──┼───▶│   forex.crosses  │               │
+│  │   Sort       ⯈  │    │ ──────────────── │               │
+│  │   Export        │    │   Save as...     │               │
+│  └─────────────────┘    └──────────────────┘               │
+│                                    │                        │
+│                         ARROW LEFT (←)                      │
+│                         └─ Close submenu                    │
+│                                                             │
+│  ENTER / SPACE                                              │
+│  ├─ Execute action (if regular item)                       │
+│  ├─ Open submenu (if has ⯈)                                │
+│  └─ Close menu after execution                             │
+│                                                             │
+│  ESCAPE                                                     │
+│  ├─ Close submenu first (if open)                          │
+│  └─ Then close main menu                                   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+FOCUS MANAGEMENT
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  Menu Opens                                                 │
+│       │                                                     │
+│       ├─ First non-disabled item focused                   │
+│       ├─ Visual indicator (blue background)                │
+│       └─ Focus trapped (Tab doesn't escape)                │
+│                                                             │
+│  Navigation                                                 │
+│       │                                                     │
+│       ├─ Skip dividers automatically                        │
+│       ├─ Skip disabled items automatically                 │
+│       └─ Wrap around at top/bottom                         │
+│                                                             │
+│  Menu Closes                                                │
+│       │                                                     │
+│       └─ Focus returns to trigger element                  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+ACCESSIBILITY ATTRIBUTES
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  <div role="menu" aria-label="Context menu" tabIndex={-1}> │
+│    <div                                                     │
+│      role="menuitem"                                        │
+│      aria-disabled={disabled}                              │
+│      aria-haspopup={hasSubmenu}                            │
+│      aria-expanded={submenuOpen}                           │
+│      tabIndex={-1}                                         │
+│    >                                                        │
+│      Menu Item                                             │
+│    </div>                                                   │
+│  </div>                                                     │
+│                                                             │
+│  ✓ Screen reader announces items                           │
+│  ✓ Disabled state announced                                │
+│  ✓ Submenu state announced                                 │
+│  ✓ Keyboard navigable                                      │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+VISUAL STATES
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  Default        │ text-zinc-300                             │
+│  Hover          │ bg-[#3b82f6] text-white                   │
+│  Keyboard Focus │ bg-[#3b82f6] text-white  (same as hover) │
+│  Disabled       │ opacity-50 cursor-not-allowed             │
+│  Divider        │ h-[1px] bg-zinc-700                       │
+│  Shortcut Label │ text-[10px] text-zinc-500 font-mono      │
+│  Submenu Arrow  │ ChevronRight (12px)                       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+IMPLEMENTATION NOTES
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  • Focus state (isFocused) and hover state (isHovered)     │
+│    use same visual styling                                 │
+│  • Keyboard and mouse interactions work simultaneously     │
+│  • No breaking changes to existing behavior               │
+│  • All event listeners properly cleaned up on unmount     │
+│  • Performance optimized (minimal re-renders)              │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+Legend:
+  ► = Focused item
+  ⯈ = Has submenu
+  → = Keyboard action
+  ├─ = Flow connection
+  └─ = End of flow
+  ─────── = Divider

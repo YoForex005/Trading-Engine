@@ -17,7 +17,10 @@ export type ShortcutAction =
   | 'BUY_MARKET'
   | 'SELL_MARKET'
   | 'SAVE_LAYOUT'
-  | 'LOAD_LAYOUT';
+  | 'LOAD_LAYOUT'
+  | 'DEPTH_OF_MARKET'
+  | 'SYMBOLS_DIALOG'
+  | 'POPUP_PRICES';
 
 export interface ShortcutConfig {
   key: string;
@@ -30,6 +33,7 @@ export interface ShortcutConfig {
 
 const DEFAULT_SHORTCUTS: ShortcutConfig[] = [
   { key: 'F9', action: 'NEW_ORDER', description: 'Open new order dialog' },
+  { key: 'F10', action: 'POPUP_PRICES', description: 'Open popup prices' },
   { key: 'Escape', action: 'CLOSE_MODAL', description: 'Close modal/dialog' },
   { key: 'F11', action: 'TOGGLE_CHART', description: 'Toggle chart fullscreen' },
   { key: 'ArrowUp', action: 'NEXT_SYMBOL', description: 'Select next symbol' },
@@ -38,6 +42,8 @@ const DEFAULT_SHORTCUTS: ShortcutConfig[] = [
   { key: '-', ctrl: true, action: 'DECREASE_VOLUME', description: 'Decrease volume' },
   { key: 'b', ctrl: true, action: 'BUY_MARKET', description: 'Buy market order' },
   { key: 's', ctrl: true, action: 'SELL_MARKET', description: 'Sell market order' },
+  { key: 'b', alt: true, action: 'DEPTH_OF_MARKET', description: 'Open depth of market' },
+  { key: 'u', ctrl: true, action: 'SYMBOLS_DIALOG', description: 'Open symbols dialog' },
   { key: 'w', ctrl: true, shift: true, action: 'CLOSE_ALL', description: 'Close all positions' },
   { key: 's', ctrl: true, shift: true, action: 'SAVE_LAYOUT', description: 'Save workspace layout' },
   { key: 'l', ctrl: true, shift: true, action: 'LOAD_LAYOUT', description: 'Load workspace layout' },

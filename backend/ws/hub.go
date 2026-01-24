@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -54,6 +55,13 @@ type Hub struct {
 	lastBroadcast map[string]float64
 	throttleMu    sync.RWMutex
 
+	// MT5 Compatibility Mode: When enabled, broadcast ALL ticks without throttling
+	// This is required for professional trading terminals (MT5, cTrader, etc.) that
+	// expect every tick to be delivered for accurate charting and execution.
+	// WARNING: Enabling this will increase CPU and network usage by 60-80%
+	// Enable by setting environment variable: MT5_MODE=true
+	mt5Mode bool
+
 	// Stats for monitoring
 	ticksReceived  int64
 	ticksThrottled int64
@@ -72,6 +80,9 @@ type MarketTick struct {
 }
 
 func NewHub() *Hub {
+	// Check for MT5 compatibility mode (disabled by default for backward compatibility)
+	mt5Mode := os.Getenv("MT5_MODE") == "true"
+
 	h := &Hub{
 		clients:         make(map[*Client]bool),
 		broadcast:       make(chan []byte, 4096), // Larger buffer to handle bursts
@@ -80,6 +91,16 @@ func NewHub() *Hub {
 		latestPrices:    make(map[string]*MarketTick),
 		disabledSymbols: make(map[string]bool),
 		lastBroadcast:   make(map[string]float64),
+		mt5Mode:         mt5Mode,
+	}
+
+	// Log MT5 mode status on startup
+	if mt5Mode {
+		log.Printf("[Hub] MT5 COMPATIBILITY MODE ENABLED - Broadcasting ALL ticks (no throttling)")
+		log.Printf("[Hub] WARNING: This will increase CPU/network usage by 60-80%%")
+	} else {
+		log.Printf("[Hub] Standard mode - Throttling enabled (broadcasts reduced by 60-80%%)")
+		log.Printf("[Hub] To enable MT5 mode, set environment variable: MT5_MODE=true")
 	}
 
 	// Start stats logging
@@ -123,12 +144,11 @@ func (h *Hub) ToggleSymbol(symbol string, disabled bool) {
 	h.disabledSymbols[symbol] = disabled
 }
 
-
 // UpdateSymbol updates symbol specifications in the hub
 func (h *Hub) UpdateSymbol(spec *core.SymbolSpec) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	
+
 	// The hub maintains disabled status, actual spec is in engine
 	// Preserve disabled state if it exists
 	if h.disabledSymbols[spec.Symbol] {
@@ -136,16 +156,34 @@ func (h *Hub) UpdateSymbol(spec *core.SymbolSpec) {
 		h.disabledSymbols[spec.Symbol] = true
 	}
 }
+
 // BroadcastTick broadcasts a market tick to all clients with THROTTLING
 // Throttling reduces CPU load by 60-80% by skipping tiny price changes
 func (h *Hub) BroadcastTick(tick *MarketTick) {
 	atomic.AddInt64(&h.ticksReceived, 1)
 
+	// ============================================
+	// CRITICAL FIX: ALWAYS PERSIST TICKS FIRST
+	// Storage happens BEFORE any filtering/throttling
+	// This ensures ALL market data is captured regardless of:
+	// - WebSocket client connections
+	// - Symbol enabled/disabled status
+	// - Price change throttling
+	// ============================================
+	if h.tickStore != nil {
+		h.tickStore.StoreTick(tick.Symbol, tick.Bid, tick.Ask, tick.Spread, tick.LP, time.Now())
+	}
+
+	// Update B-Book engine (needs all prices for accurate execution)
+	if h.bbookEngine != nil {
+		h.bbookEngine.UpdatePrice(tick.Symbol, tick.Bid, tick.Ask)
+	}
+
 	// Update latest price (always - needed for queries)
 	h.mu.Lock()
 	h.latestPrices[tick.Symbol] = tick
 
-	// Skip broadcast if symbol is disabled
+	// Skip broadcast if symbol is disabled (but tick is already stored above)
 	if h.disabledSymbols[tick.Symbol] {
 		h.mu.Unlock()
 		return
@@ -155,48 +193,37 @@ func (h *Hub) BroadcastTick(tick *MarketTick) {
 	// ============================================
 	// THROTTLING: Skip broadcast if price change < 0.0001% (1/100th of a pip)
 	// This reduces broadcast volume by 60-80% and prevents CPU overload
+	// NOTE: Tick is already stored above, throttling only affects broadcast
+	//
+	// MT5 MODE: When mt5Mode=true, throttling is DISABLED to ensure
+	// 100% tick delivery for professional trading terminals that require
+	// every tick for accurate charting, order execution, and backtesting.
 	// ============================================
-	h.throttleMu.RLock()
-	lastPrice, exists := h.lastBroadcast[tick.Symbol]
-	h.throttleMu.RUnlock()
+	if !h.mt5Mode {
+		// Standard mode: Apply throttling to reduce CPU/network load
+		h.throttleMu.RLock()
+		lastPrice, exists := h.lastBroadcast[tick.Symbol]
+		h.throttleMu.RUnlock()
 
-	if exists && lastPrice > 0 {
-		priceChange := (tick.Bid - lastPrice) / lastPrice
-		if priceChange < 0 {
-			priceChange = -priceChange
-		}
-
-		// Skip if change < 0.0001% - still update engine & store but skip broadcast
-		if priceChange < 0.000001 {
-			atomic.AddInt64(&h.ticksThrottled, 1)
-
-			// Still update B-Book engine (needs all prices for accurate execution)
-			if h.bbookEngine != nil {
-				h.bbookEngine.UpdatePrice(tick.Symbol, tick.Bid, tick.Ask)
+		if exists && lastPrice > 0 {
+			priceChange := (tick.Bid - lastPrice) / lastPrice
+			if priceChange < 0 {
+				priceChange = -priceChange
 			}
 
-			// Still store tick (for complete chart history)
-			if h.tickStore != nil {
-				h.tickStore.StoreTick(tick.Symbol, tick.Bid, tick.Ask, tick.Spread, tick.LP, time.Now())
+			// Skip broadcast if change < 0.0001% (tick already stored above)
+			if priceChange < 0.000001 {
+				atomic.AddInt64(&h.ticksThrottled, 1)
+				return
 			}
-			return
 		}
 	}
+	// MT5 mode: Skip throttling check entirely - broadcast ALL ticks
 
 	// Update last broadcast price
 	h.throttleMu.Lock()
 	h.lastBroadcast[tick.Symbol] = tick.Bid
 	h.throttleMu.Unlock()
-
-	// Notify B-Book engine of new price (for order execution)
-	if h.bbookEngine != nil {
-		h.bbookEngine.UpdatePrice(tick.Symbol, tick.Bid, tick.Ask)
-	}
-
-	// Persist tick for chart history
-	if h.tickStore != nil {
-		h.tickStore.StoreTick(tick.Symbol, tick.Bid, tick.Ask, tick.Spread, tick.LP, time.Now())
-	}
 
 	data, err := json.Marshal(tick)
 	if err != nil {

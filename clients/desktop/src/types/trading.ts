@@ -45,6 +45,25 @@ export type MarketWatchItem = {
   direction?: 'up' | 'down' | 'neutral';
 };
 
+// Symbol Specification - detailed trading specs
+export interface SymbolSpecification {
+  symbol: string;
+  description: string;
+  contractSize: number;
+  pipValue: number;
+  pipPosition: number; // Decimal places (2=0.01, 5=0.00001)
+  minLot: number;
+  maxLot: number;
+  lotStep: number;
+  marginRate: number; // Margin requirement (e.g. 0.01 = 1%)
+  swapLong: number;
+  swapShort: number;
+  commission: number;
+  currency: string;
+  baseCurrency: string;
+  quoteCurrency: string;
+}
+
 // Alert Types
 export type AlertType = 'PRICE' | 'POSITION' | 'ACCOUNT' | 'SYSTEM' | 'NEWS';
 export type AlertPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
