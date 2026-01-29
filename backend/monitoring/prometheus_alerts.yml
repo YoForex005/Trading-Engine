@@ -1,0 +1,263 @@
+groups:
+  - name: trading_engine_alerts
+    interval: 30s
+    rules:
+      # Order Execution Alerts
+      - alert: HighOrderLatency
+        expr: histogram_quantile(0.95, rate(trading_order_execution_latency_milliseconds_bucket[5m])) > 500
+        for: 2m
+        labels:
+          severity: warning
+          component: order_execution
+        annotations:
+          summary: "High order execution latency detected"
+          description: "P95 order execution latency is {{ $value }}ms (threshold: 500ms) for {{ $labels.order_type }} orders"
+
+      - alert: CriticalOrderLatency
+        expr: histogram_quantile(0.95, rate(trading_order_execution_latency_milliseconds_bucket[5m])) > 2000
+        for: 1m
+        labels:
+          severity: critical
+          component: order_execution
+        annotations:
+          summary: "CRITICAL: Very high order execution latency"
+          description: "P95 order execution latency is {{ $value }}ms (threshold: 2000ms) for {{ $labels.order_type }} orders"
+
+      - alert: HighOrderErrorRate
+        expr: rate(trading_order_errors_total[5m]) / rate(trading_orders_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: order_execution
+        annotations:
+          summary: "High order error rate"
+          description: "Order error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+
+      - alert: OrderExecutionSLOViolation
+        expr: |
+          (
+            rate(trading_slo_order_execution_within_target_total[10m])
+            /
+            rate(trading_slo_order_execution_success_total[10m])
+          ) < 0.95
+        for: 10m
+        labels:
+          severity: critical
+          component: slo
+        annotations:
+          summary: "Order execution SLO violated"
+          description: "Only {{ $value | humanizePercentage }} of orders executed within 100ms target (SLO: 95%)"
+
+      # LP Connectivity Alerts
+      - alert: LPDisconnected
+        expr: trading_lp_connected == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: lp_connectivity
+        annotations:
+          summary: "LP connection lost"
+          description: "{{ $labels.lp_name }} ({{ $labels.connection_type }}) is disconnected"
+
+      - alert: HighLPLatency
+        expr: histogram_quantile(0.95, rate(trading_lp_latency_milliseconds_bucket[5m])) > 1000
+        for: 2m
+        labels:
+          severity: warning
+          component: lp_connectivity
+        annotations:
+          summary: "High LP latency"
+          description: "P95 latency for {{ $labels.lp_name }} is {{ $value }}ms (threshold: 1000ms)"
+
+      - alert: LowLPQuoteRate
+        expr: rate(trading_lp_quotes_received_total[5m]) < 10
+        for: 3m
+        labels:
+          severity: warning
+          component: lp_connectivity
+        annotations:
+          summary: "Low LP quote rate"
+          description: "Quote rate from {{ $labels.lp_name }} for {{ $labels.symbol }} is {{ $value }}/s (expected: >10/s)"
+
+      # System Resource Alerts
+      - alert: HighMemoryUsage
+        expr: trading_memory_usage_bytes / (1024 * 1024 * 1024) > 4
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanize }}GB (threshold: 4GB)"
+
+      - alert: CriticalMemoryUsage
+        expr: trading_memory_usage_bytes / (1024 * 1024 * 1024) > 6
+        for: 2m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "CRITICAL: Very high memory usage"
+          description: "Memory usage is {{ $value | humanize }}GB (threshold: 6GB)"
+
+      - alert: HighGoroutineCount
+        expr: trading_goroutines_count > 10000
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High goroutine count"
+          description: "Goroutine count is {{ $value }} (threshold: 10000)"
+
+      - alert: CriticalGoroutineCount
+        expr: trading_goroutines_count > 50000
+        for: 2m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "CRITICAL: Very high goroutine count"
+          description: "Goroutine count is {{ $value }} (threshold: 50000) - possible goroutine leak"
+
+      # API Performance Alerts
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(trading_api_request_duration_milliseconds_bucket[5m])) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API request latency"
+          description: "P95 API latency for {{ $labels.endpoint }} is {{ $value }}ms (threshold: 1000ms)"
+
+      - alert: HighAPIErrorRate
+        expr: |
+          sum(rate(trading_api_requests_total{status=~"5.."}[5m])) by (endpoint)
+          /
+          sum(rate(trading_api_requests_total[5m])) by (endpoint)
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API error rate"
+          description: "API error rate for {{ $labels.endpoint }} is {{ $value | humanizePercentage }} (threshold: 5%)"
+
+      # Database Performance Alerts
+      - alert: SlowDatabaseQueries
+        expr: histogram_quantile(0.95, rate(trading_db_query_duration_milliseconds_bucket[5m])) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Slow database queries"
+          description: "P95 database query latency for {{ $labels.operation }} on {{ $labels.table }} is {{ $value }}ms (threshold: 100ms)"
+
+      - alert: HighDatabaseConnectionUsage
+        expr: trading_db_connections_active > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "High database connection usage"
+          description: "Active database connections: {{ $value }} (threshold: 80)"
+
+      # WebSocket Alerts
+      - alert: NoWebSocketConnections
+        expr: trading_websocket_connections == 0
+        for: 5m
+        labels:
+          severity: info
+          component: websocket
+        annotations:
+          summary: "No active WebSocket connections"
+          description: "No clients connected via WebSocket for 5 minutes"
+
+      - alert: HighWebSocketConnections
+        expr: trading_websocket_connections > 10000
+        for: 5m
+        labels:
+          severity: warning
+          component: websocket
+        annotations:
+          summary: "High WebSocket connection count"
+          description: "WebSocket connections: {{ $value }} (threshold: 10000)"
+
+      # Position and Risk Alerts
+      - alert: HighExposure
+        expr: abs(sum by (symbol) (trading_active_positions)) > 100
+        for: 2m
+        labels:
+          severity: warning
+          component: risk
+        annotations:
+          summary: "High net position exposure"
+          description: "Net position for {{ $labels.symbol }} is {{ $value }} lots (threshold: ±100 lots)"
+
+      - alert: LargeUnrealizedLoss
+        expr: sum by (account_id) (trading_position_pnl_usd) < -10000
+        for: 1m
+        labels:
+          severity: critical
+          component: risk
+        annotations:
+          summary: "Large unrealized loss detected"
+          description: "Account {{ $labels.account_id }} has unrealized loss of {{ $value }}USD (threshold: -10000USD)"
+
+      # Account Alerts
+      - alert: LowAccountBalance
+        expr: trading_account_balance_usd < 1000
+        for: 1m
+        labels:
+          severity: warning
+          component: account
+        annotations:
+          summary: "Low account balance"
+          description: "Account {{ $labels.account_id }} balance is {{ $value }}USD (threshold: 1000USD)"
+
+      - alert: HighMarginUsage
+        expr: |
+          (trading_account_margin_used_usd / trading_account_equity_usd) > 0.8
+        for: 2m
+        labels:
+          severity: warning
+          component: risk
+        annotations:
+          summary: "High margin usage"
+          description: "Account {{ $labels.account_id }} margin usage is {{ $value | humanizePercentage }} (threshold: 80%)"
+
+      - alert: MarginCallThreshold
+        expr: |
+          (trading_account_margin_used_usd / trading_account_equity_usd) > 0.95
+        for: 30s
+        labels:
+          severity: critical
+          component: risk
+        annotations:
+          summary: "CRITICAL: Margin call threshold"
+          description: "Account {{ $labels.account_id }} margin usage is {{ $value | humanizePercentage }} - approaching margin call"
+
+      # Trading Volume Alerts
+      - alert: UnusualTradingVolume
+        expr: rate(trading_volume_lots_total[5m]) > 1000
+        for: 5m
+        labels:
+          severity: info
+          component: trading
+        annotations:
+          summary: "Unusual trading volume"
+          description: "Trading volume for {{ $labels.symbol }} is {{ $value }} lots/s (typically < 1000 lots/s)"
+
+      - alert: NoTradingActivity
+        expr: rate(trading_volume_lots_total[30m]) == 0
+        for: 30m
+        labels:
+          severity: info
+          component: trading
+        annotations:
+          summary: "No trading activity"
+          description: "No trades executed in the last 30 minutes"

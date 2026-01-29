@@ -1,0 +1,66 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Go build artifacts
+cmd/*/main
+cmd/tests/test_*
+
+# Backup files
+backup/*
+*.bak
+*.backup
+*~
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+
+# Secrets and sensitive data
+*.key
+*.pem
+*.p12
+secrets/
+.env
+.env.local
+
+# FIX store files (session data)
+fixstore/
+*.msgs
+*.seqnums
+
+# Configuration with credentials (use .example instead)
+config/*credentials*
+config/*secret*
+
+# Test outputs
+test-results/
+coverage.out
+*.prof
+
+# Dependencies
+vendor/
+
+# Build output
+dist/
+build/
+bin/

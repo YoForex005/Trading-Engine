@@ -1,0 +1,1084 @@
+openapi: 3.0.0
+info:
+  title: RTX Trading Engine API
+  version: 3.0.0
+  description: |
+    RESTful API for the RTX Trading Engine supporting both B-Book (internal execution)
+    and A-Book (LP passthrough) trading modes. Provides account management, order execution,
+    position management, and real-time market data access.
+
+    ## Authentication
+    All protected endpoints require a JWT Bearer token obtained from the `/login` endpoint.
+
+    ## Execution Modes
+    - **B-Book**: Internal execution using broker's internal balance and engine
+    - **A-Book**: Orders routed to external liquidity providers
+
+  contact:
+    name: RTX Trading Support
+    email: support@rtxtrading.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:7999
+    description: Development server
+  - url: https://api.rtxtrading.com
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: Login and session management
+  - name: Account
+    description: Account information and management
+  - name: Orders
+    description: Order placement and management
+  - name: Positions
+    description: Position management and modification
+  - name: Market Data
+    description: Real-time and historical market data
+  - name: Admin
+    description: Administrative endpoints (requires admin role)
+  - name: Risk
+    description: Risk calculation utilities
+
+security:
+  - BearerAuth: []
+
+paths:
+  /login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and receive JWT token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  example: "demo-user"
+                password:
+                  type: string
+                  format: password
+                  example: "password"
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: JWT authentication token
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized - Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/account/summary:
+    get:
+      tags:
+        - Account
+      summary: Get account summary
+      description: Returns account balance, equity, margin, and open positions count
+      responses:
+        '200':
+          description: Account summary retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountSummary'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/account/create:
+    post:
+      tags:
+        - Account
+      summary: Create new account
+      description: Create a new trading account (demo or live)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - userId
+                - username
+                - password
+              properties:
+                userId:
+                  type: string
+                  example: "user123"
+                username:
+                  type: string
+                  example: "trader001"
+                password:
+                  type: string
+                  format: password
+                  example: "securePassword123"
+                isDemo:
+                  type: boolean
+                  default: true
+                  example: true
+      responses:
+        '200':
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+
+  /api/symbols:
+    get:
+      tags:
+        - Market Data
+      summary: List all symbols
+      description: Returns all available trading symbols with specifications
+      responses:
+        '200':
+          description: Symbols retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SymbolSpec'
+
+  /api/orders/market:
+    post:
+      tags:
+        - Orders
+      summary: Place market order
+      description: Execute a market order at current market price
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - symbol
+                - side
+                - volume
+              properties:
+                accountId:
+                  type: integer
+                  format: int64
+                  example: 1
+                symbol:
+                  type: string
+                  example: "EURUSD"
+                side:
+                  type: string
+                  enum: [BUY, SELL]
+                  example: "BUY"
+                volume:
+                  type: number
+                  format: double
+                  description: Lot size
+                  example: 0.1
+                sl:
+                  type: number
+                  format: double
+                  description: Stop Loss price (optional)
+                  example: 1.0850
+                tp:
+                  type: number
+                  format: double
+                  description: Take Profit price (optional)
+                  example: 1.0950
+      responses:
+        '200':
+          description: Order executed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Position'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/orders:
+    get:
+      tags:
+        - Orders
+      summary: Get orders
+      description: Retrieve orders for authenticated account
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, FILLED, CANCELLED]
+      responses:
+        '200':
+          description: Orders retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+
+  /api/positions:
+    get:
+      tags:
+        - Positions
+      summary: Get open positions
+      description: Returns all open positions for the authenticated account
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Positions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Position'
+
+  /api/positions/close:
+    post:
+      tags:
+        - Positions
+      summary: Close position
+      description: Close an open position (fully or partially)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - positionId
+              properties:
+                positionId:
+                  type: integer
+                  format: int64
+                  example: 1234
+                volume:
+                  type: number
+                  format: double
+                  description: Volume to close (if empty, closes full position)
+                  example: 0.5
+      responses:
+        '200':
+          description: Position closed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trade'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/positions/close-bulk:
+    post:
+      tags:
+        - Positions
+      summary: Close multiple positions
+      description: Close multiple positions in a single request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - positionIds
+              properties:
+                accountId:
+                  type: integer
+                  format: int64
+                positionIds:
+                  type: array
+                  items:
+                    type: integer
+                    format: int64
+                  example: [1234, 1235, 1236]
+      responses:
+        '200':
+          description: Positions closed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  closed:
+                    type: integer
+                  failed:
+                    type: integer
+                  details:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        positionId:
+                          type: integer
+                          format: int64
+                        success:
+                          type: boolean
+                        error:
+                          type: string
+
+  /api/positions/modify:
+    post:
+      tags:
+        - Positions
+      summary: Modify position SL/TP
+      description: Update Stop Loss and Take Profit for an open position
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - positionId
+              properties:
+                positionId:
+                  type: integer
+                  format: int64
+                  example: 1234
+                sl:
+                  type: number
+                  format: double
+                  example: 1.0850
+                tp:
+                  type: number
+                  format: double
+                  example: 1.0950
+      responses:
+        '200':
+          description: Position modified successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Position'
+
+  /api/trades:
+    get:
+      tags:
+        - Positions
+      summary: Get trade history
+      description: Returns executed trades for the authenticated account
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            example: 50
+      responses:
+        '200':
+          description: Trades retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Trade'
+
+  /api/ledger:
+    get:
+      tags:
+        - Account
+      summary: Get ledger entries
+      description: Returns transaction history (deposits, withdrawals, P&L, etc.)
+      parameters:
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Ledger entries retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LedgerEntry'
+
+  /ticks:
+    get:
+      tags:
+        - Market Data
+      summary: Get tick history
+      description: Returns historical tick data for a symbol
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "EURUSD"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 500
+            maximum: 10000
+      responses:
+        '200':
+          description: Tick data retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tick'
+
+  /ohlc:
+    get:
+      tags:
+        - Market Data
+      summary: Get OHLC data
+      description: Returns OHLC (candlestick) data for charting
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "EURUSD"
+        - name: timeframe
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [1m, 5m, 15m, 1h, 4h, 1d]
+            example: "1h"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 500
+      responses:
+        '200':
+          description: OHLC data retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OHLC'
+
+  /risk/calculate-lot:
+    get:
+      tags:
+        - Risk
+      summary: Calculate lot size from risk
+      description: Calculate appropriate lot size based on risk percentage and stop loss
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: riskPercent
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+            example: 2.0
+        - name: slPips
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+            example: 50
+      responses:
+        '200':
+          description: Lot size calculated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LotCalculation'
+
+  /admin/accounts:
+    get:
+      tags:
+        - Admin
+      summary: List all accounts
+      description: Returns all trading accounts (admin only)
+      responses:
+        '200':
+          description: Accounts retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Account'
+
+  /admin/deposit:
+    post:
+      tags:
+        - Admin
+      summary: Deposit funds
+      description: Add funds to an account (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - amount
+                - method
+              properties:
+                accountId:
+                  type: integer
+                  format: int64
+                amount:
+                  type: number
+                  format: double
+                  example: 1000.00
+                method:
+                  type: string
+                  enum: [BANK_TRANSFER, CREDIT_CARD, CRYPTO, WIRE]
+                  example: "BANK_TRANSFER"
+                reference:
+                  type: string
+                  example: "TXN123456"
+      responses:
+        '200':
+          description: Deposit successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  newBalance:
+                    type: number
+                    format: double
+                  transactionId:
+                    type: integer
+                    format: int64
+
+  /admin/execution-mode:
+    get:
+      tags:
+        - Admin
+      summary: Get execution mode
+      description: Returns current execution mode (A-Book or B-Book)
+      responses:
+        '200':
+          description: Execution mode retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                    enum: [ABOOK, BBOOK]
+                  description:
+                    type: object
+                  priceFeed:
+                    type: string
+    post:
+      tags:
+        - Admin
+      summary: Set execution mode
+      description: Change execution mode between A-Book and B-Book
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - mode
+              properties:
+                mode:
+                  type: string
+                  enum: [ABOOK, BBOOK]
+                  example: "BBOOK"
+      responses:
+        '200':
+          description: Execution mode updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  oldMode:
+                    type: string
+                  newMode:
+                    type: string
+                  message:
+                    type: string
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /login endpoint
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        role:
+          type: string
+          enum: [ADMIN, USER]
+        accountId:
+          type: integer
+          format: int64
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        accountNumber:
+          type: string
+          example: "RTX-000001"
+        userId:
+          type: string
+        username:
+          type: string
+        balance:
+          type: number
+          format: double
+        equity:
+          type: number
+          format: double
+        margin:
+          type: number
+          format: double
+        freeMargin:
+          type: number
+          format: double
+        marginLevel:
+          type: number
+          format: double
+          description: Margin level percentage
+        leverage:
+          type: number
+          format: double
+        marginMode:
+          type: string
+          enum: [HEDGING, NETTING]
+        currency:
+          type: string
+          default: "USD"
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+        isDemo:
+          type: boolean
+        createdAt:
+          type: integer
+          format: int64
+          description: Unix timestamp
+
+    AccountSummary:
+      type: object
+      properties:
+        accountId:
+          type: integer
+          format: int64
+        accountNumber:
+          type: string
+        currency:
+          type: string
+        balance:
+          type: number
+          format: double
+        equity:
+          type: number
+          format: double
+        margin:
+          type: number
+          format: double
+        freeMargin:
+          type: number
+          format: double
+        marginLevel:
+          type: number
+          format: double
+        unrealizedPnL:
+          type: number
+          format: double
+        leverage:
+          type: number
+          format: double
+        marginMode:
+          type: string
+        openPositions:
+          type: integer
+
+    Position:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        accountId:
+          type: integer
+          format: int64
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [BUY, SELL]
+        volume:
+          type: number
+          format: double
+        openPrice:
+          type: number
+          format: double
+        currentPrice:
+          type: number
+          format: double
+        openTime:
+          type: string
+          format: date-time
+        sl:
+          type: number
+          format: double
+        tp:
+          type: number
+          format: double
+        swap:
+          type: number
+          format: double
+        commission:
+          type: number
+          format: double
+        unrealizedPnL:
+          type: number
+          format: double
+        status:
+          type: string
+          enum: [OPEN, CLOSED]
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        accountId:
+          type: integer
+          format: int64
+        symbol:
+          type: string
+        type:
+          type: string
+          enum: [MARKET, LIMIT, STOP, STOP_LIMIT]
+        side:
+          type: string
+          enum: [BUY, SELL]
+        volume:
+          type: number
+          format: double
+        price:
+          type: number
+          format: double
+        triggerPrice:
+          type: number
+          format: double
+        sl:
+          type: number
+          format: double
+        tp:
+          type: number
+          format: double
+        status:
+          type: string
+          enum: [PENDING, FILLED, CANCELLED, REJECTED]
+        filledPrice:
+          type: number
+          format: double
+        filledAt:
+          type: string
+          format: date-time
+        positionId:
+          type: integer
+          format: int64
+        rejectReason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Trade:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        orderId:
+          type: integer
+          format: int64
+        positionId:
+          type: integer
+          format: int64
+        accountId:
+          type: integer
+          format: int64
+        symbol:
+          type: string
+        side:
+          type: string
+        volume:
+          type: number
+          format: double
+        price:
+          type: number
+          format: double
+        realizedPnL:
+          type: number
+          format: double
+        commission:
+          type: number
+          format: double
+        executedAt:
+          type: string
+          format: date-time
+
+    SymbolSpec:
+      type: object
+      properties:
+        symbol:
+          type: string
+          example: "EURUSD"
+        contractSize:
+          type: number
+          format: double
+          example: 100000
+        pipSize:
+          type: number
+          format: double
+          example: 0.0001
+        pipValue:
+          type: number
+          format: double
+          example: 10
+        minVolume:
+          type: number
+          format: double
+          example: 0.01
+        maxVolume:
+          type: number
+          format: double
+          example: 100
+        volumeStep:
+          type: number
+          format: double
+          example: 0.01
+        marginPercent:
+          type: number
+          format: double
+          example: 1
+        commissionPerLot:
+          type: number
+          format: double
+          example: 5.0
+        disabled:
+          type: boolean
+
+    Tick:
+      type: object
+      properties:
+        symbol:
+          type: string
+        bid:
+          type: number
+          format: double
+        ask:
+          type: number
+          format: double
+        spread:
+          type: number
+          format: double
+        timestamp:
+          type: integer
+          format: int64
+        lp:
+          type: string
+          description: Liquidity provider
+
+    OHLC:
+      type: object
+      properties:
+        timestamp:
+          type: integer
+          format: int64
+        open:
+          type: number
+          format: double
+        high:
+          type: number
+          format: double
+        low:
+          type: number
+          format: double
+        close:
+          type: number
+          format: double
+        volume:
+          type: integer
+          format: int64
+
+    LedgerEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        accountId:
+          type: integer
+          format: int64
+        type:
+          type: string
+          enum: [DEPOSIT, WITHDRAWAL, REALIZED_PNL, COMMISSION, SWAP, BONUS, ADJUSTMENT]
+        amount:
+          type: number
+          format: double
+        balance:
+          type: number
+          format: double
+          description: Balance after transaction
+        reference:
+          type: string
+        comment:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+
+    LotCalculation:
+      type: object
+      properties:
+        symbol:
+          type: string
+        riskPercent:
+          type: number
+          format: double
+        slPips:
+          type: number
+          format: double
+        recommendedLots:
+          type: number
+          format: double
+        riskAmount:
+          type: number
+          format: double
+        accountBalance:
+          type: number
+          format: double
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: integer
+
+  responses:
+    UnauthorizedError:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Unauthorized"
+            message: "Valid JWT token required"
+            code: 401
+
+    BadRequestError:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Bad Request"
+            message: "Invalid parameters"
+            code: 400
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Not Found"
+            message: "Resource not found"
+            code: 404

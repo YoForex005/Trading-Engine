@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+package rtx.trading;
+
+option go_package = "github.com/epic1st/rtx/backend/proto/trading";
+
+// The Core Trading Service
+service TradingService {
+  // Place a new order (Limit, Market, Stop)
+  rpc PlaceOrder (PlaceOrderRequest) returns (PlaceOrderResponse);
+  
+  // Modify an existing order (SL/TP or Price)
+  rpc ModifyOrder (ModifyOrderRequest) returns (ModifyOrderResponse);
+  
+  // Cancel a pending order
+  rpc CancelOrder (CancelOrderRequest) returns (CancelOrderResponse);
+  
+  // Get history of orders for an account
+  rpc GetOrderHistory (GetOrderHistoryRequest) returns (GetOrderHistoryResponse);
+  
+  // Stream real-time events (Fills, Price Updates)
+  rpc StreamEvents (StreamEventsRequest) returns (stream EventUpdate);
+}
+
+message PlaceOrderRequest {
+  string account_id = 1;
+  string symbol = 2;
+  OrderSide side = 3;
+  OrderType type = 4;
+  double volume = 5;
+  double price = 6; // Required for Limit/Stop
+  double sl = 7;
+  double tp = 8;
+}
+
+message PlaceOrderResponse {
+  string order_id = 1;
+  OrderStatus status = 2;
+  string message = 3;
+}
+
+message ModifyOrderRequest {
+  string order_id = 1;
+  double new_price = 2;
+  double new_sl = 3;
+  double new_tp = 4;
+}
+
+message ModifyOrderResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message CancelOrderRequest {
+  string order_id = 1;
+}
+
+message CancelOrderResponse {
+  bool success = 1;
+}
+
+message GetOrderHistoryRequest {
+  string account_id = 1;
+  int64 from_timestamp = 2;
+  int64 to_timestamp = 3;
+}
+
+message GetOrderHistoryResponse {
+  repeated OrderInfo orders = 1;
+}
+
+message StreamEventsRequest {
+  string account_id = 1;
+  repeated string symbols = 2; // Subscribe to market data for these
+}
+
+message EventUpdate {
+  oneof event {
+    OrderUpdate order = 1;
+    MarketDataUpdate market = 2;
+    AccountUpdate account = 3;
+  }
+}
+
+// Data Structures
+
+enum OrderSide {
+  BUY = 0;
+  SELL = 1;
+}
+
+enum OrderType {
+  MARKET = 0;
+  LIMIT = 1;
+  STOP = 2;
+}
+
+enum OrderStatus {
+  PENDING = 0;
+  ACCEPTED = 1;
+  REJECTED = 2;
+  FILLED = 3;
+  CANCELED = 4;
+}
+
+message OrderInfo {
+  string order_id = 1;
+  string symbol = 2;
+  OrderSide side = 3;
+  double volume = 4;
+  double open_price = 5;
+  string status = 6;
+  int64 open_time = 7;
+}
+
+message OrderUpdate {
+  string order_id = 1;
+  string status = 2;
+  double executed_price = 3;
+  double remaining_volume = 4;
+}
+
+message MarketDataUpdate {
+  string symbol = 1;
+  double bid = 2;
+  double ask = 3;
+  int64 timestamp = 4;
+}
+
+message AccountUpdate {
+  double balance = 1;
+  double equity = 2;
+  double margin = 3;
+  double free_margin = 4;
+}

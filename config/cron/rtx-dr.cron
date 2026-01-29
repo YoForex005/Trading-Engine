@@ -1,0 +1,91 @@
+# RTX Trading Engine - Disaster Recovery Cron Jobs
+# Install: sudo crontab -u rtx -e
+# Then paste these entries
+
+# Set environment variables
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+RTX_HOME=/opt/rtx
+RTX_BACKUP_BUCKET=rtx-backups
+RTX_SNS_TOPIC=arn:aws:sns:us-east-1:123456789:rtx-alerts
+RTX_DB_HOST=localhost
+RTX_DB_NAME=rtx
+RTX_DB_USER=postgres
+
+# ============================================
+# BACKUP JOBS
+# ============================================
+
+# Full Database Backup - Daily at 02:00 UTC
+0 2 * * * $RTX_HOME/scripts/dr/backup-full.sh >> /var/log/rtx/cron-backup-full.log 2>&1
+
+# Incremental Backup (WAL sync) - Every 6 hours
+0 */6 * * * $RTX_HOME/scripts/dr/backup-incremental.sh >> /var/log/rtx/cron-backup-incremental.log 2>&1
+
+# Configuration Backup - Every 12 hours
+0 */12 * * * aws s3 sync /opt/rtx/config s3://rtx-backups/config/$(date +\%Y\%m\%d)/ --delete >> /var/log/rtx/cron-config-backup.log 2>&1
+
+# Tick Data Backup - Hourly
+0 * * * * aws s3 sync /opt/rtx/backend/data/ticks s3://rtx-ticks/ --exclude "*" --include "*.json" >> /var/log/rtx/cron-tick-backup.log 2>&1
+
+# ============================================
+# VERIFICATION JOBS
+# ============================================
+
+# Verify Latest Backup - Daily at 03:00 UTC (after full backup)
+0 3 * * * $RTX_HOME/scripts/dr/verify-backup.sh >> /var/log/rtx/cron-verify-backup.log 2>&1
+
+# Test Restore to Staging - Weekly on Sunday at 04:00 UTC
+0 4 * * 0 $RTX_HOME/scripts/dr/test-restore.sh >> /var/log/rtx/cron-test-restore.log 2>&1
+
+# ============================================
+# MONITORING JOBS
+# ============================================
+
+# Health Check - Every minute
+* * * * * $RTX_HOME/scripts/dr/health-check.sh >> /var/log/rtx/cron-health-check.log 2>&1
+
+# Disk Space Monitor - Every 10 minutes
+*/10 * * * * df -h / | tail -1 | awk '{if(int($5) > 85) print "ALERT: Disk usage at " $5}' | xargs -I {} aws sns publish --topic-arn $RTX_SNS_TOPIC --subject "RTX Disk Space Alert" --message "{}" 2>&1
+
+# Database Replication Lag Check - Every 5 minutes
+*/5 * * * * psql -h $RTX_DB_HOST -U $RTX_DB_USER -d $RTX_DB_NAME -t -c "SELECT EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()));" | awk '{if($1 > 60) print "ALERT: Replication lag at " $1 "s"}' | xargs -I {} aws sns publish --topic-arn $RTX_SNS_TOPIC --subject "RTX Replication Lag Alert" --message "{}" 2>&1
+
+# Backup Compliance Check - Daily at 08:00 UTC
+0 8 * * * psql -h $RTX_DB_HOST -U $RTX_DB_USER -d $RTX_DB_NAME -t -c "SELECT alert_backup_compliance();" | xargs -I {} aws sns publish --topic-arn $RTX_SNS_TOPIC --subject "RTX Backup Compliance Report" --message "{}" 2>&1
+
+# ============================================
+# CLEANUP JOBS
+# ============================================
+
+# Delete old local backups (keep 7 days) - Daily at 01:00 UTC
+0 1 * * * find /var/backups/rtx -name "*.dump" -mtime +7 -delete && find /var/backups/rtx -name "*.sha256" -mtime +7 -delete >> /var/log/rtx/cron-cleanup.log 2>&1
+
+# Delete old WAL archives (keep 7 days) - Daily at 01:30 UTC
+30 1 * * * find /var/lib/postgresql/14/archive -name "*.gz" -mtime +7 -delete >> /var/log/rtx/cron-wal-cleanup.log 2>&1
+
+# Clean up old health check records in database - Weekly on Monday at 02:00 UTC
+0 2 * * 1 psql -h $RTX_DB_HOST -U $RTX_DB_USER -d $RTX_DB_NAME -c "SELECT cleanup_old_health_checks();" >> /var/log/rtx/cron-db-cleanup.log 2>&1
+
+# Rotate logs older than 30 days - Daily at 00:00 UTC
+0 0 * * * find /var/log/rtx -name "*.log" -mtime +30 -delete >> /var/log/rtx/cron-log-rotation.log 2>&1
+
+# ============================================
+# REPORTING JOBS
+# ============================================
+
+# Weekly DR Report - Every Monday at 09:00 UTC
+0 9 * * 1 $RTX_HOME/scripts/dr/generate-weekly-report.sh | mail -s "RTX DR Weekly Report" ops@rtx-trading.com
+
+# Monthly DR Metrics - First day of month at 10:00 UTC
+0 10 1 * * psql -h $RTX_DB_HOST -U $RTX_DB_USER -d $RTX_DB_NAME -c "SELECT * FROM dr_metrics_summary;" -H > /tmp/dr-monthly-report.html && mail -s "RTX DR Monthly Metrics" -a "Content-Type: text/html" ops@rtx-trading.com < /tmp/dr-monthly-report.html
+
+# ============================================
+# CHAOS ENGINEERING (optional - enable for testing)
+# ============================================
+
+# Random instance termination - Disabled by default
+# 0 */6 * * * $RTX_HOME/scripts/chaos/kill-random-instance.sh >> /var/log/rtx/cron-chaos.log 2>&1
+
+# Inject network latency - Disabled by default
+# 0 9 * * 1 $RTX_HOME/scripts/chaos/inject-latency.sh >> /var/log/rtx/cron-chaos.log 2>&1

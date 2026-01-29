@@ -1,0 +1,71 @@
+# Tick Data Retention, Compression and Rotation Configuration
+# Configure automatic cleanup, compression and archival of tick data files
+
+# Compression settings
+compression:
+  # Enable or disable automatic compression scheduler
+  enabled: true
+
+  # Compression schedule in Go duration format
+  # Examples: "168h" (1 week), "720h" (30 days)
+  schedule: "168h"
+
+  # Maximum age of files before compression (in seconds)
+  # 604800 = 7 days (7 * 24 * 3600)
+  max_age_seconds: 604800
+
+  # Maximum concurrent compression operations
+  # Prevents resource exhaustion on large datasets
+  max_concurrency: 4
+
+retention:
+  # Number of days before archiving tick data files
+  archive_threshold_days: 30
+
+  # Number of days before permanently deleting archived files
+  deletion_threshold_days: 90
+
+  # Backup older than this many days before deletion
+  backup_before_delete: true
+
+paths:
+  # Source directory containing active tick data
+  ticks_directory: "./data/ticks"
+
+  # Destination for archived files
+  archive_directory: "./data/archive"
+
+  # Logging directory
+  logs_directory: "./logs"
+
+  # Log file name
+  log_file: "rotation.log"
+
+operations:
+  # Enable archival of old files
+  enable_archival: true
+
+  # Enable deletion of expired files
+  enable_deletion: true
+
+  # Compress files before archival (gzip)
+  compress_archives: true
+
+  # Create backup before deletion
+  create_backup: true
+
+  # Dry run mode (show what would be done without actually doing it)
+  dry_run: false
+
+logging:
+  # Log level: DEBUG, INFO, WARN, ERROR
+  level: "INFO"
+
+  # Keep this many rotation.log files
+  max_log_files: 10
+
+  # Rotate log when it reaches this size (in MB)
+  max_log_size_mb: 50
+
+  # Include verbose timestamps
+  verbose_timestamps: true

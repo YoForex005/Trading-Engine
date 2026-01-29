@@ -1,0 +1,38 @@
+# ============================================
+# Multi-stage Dockerfile for Background Workers
+# ============================================
+
+FROM golang:1.24.0-alpine AS builder
+
+RUN apk add --no-cache git gcc musl-dev
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Build worker
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -a -installsuffix cgo \
+    -o worker \
+    ./cmd/worker
+
+FROM alpine:3.19
+
+RUN apk --no-cache add ca-certificates tzdata
+
+RUN addgroup -g 1000 trading && \
+    adduser -D -u 1000 -G trading trading
+
+WORKDIR /app
+
+COPY --from=builder /build/worker .
+
+RUN chown -R trading:trading /app
+
+USER trading
+
+CMD ["./worker"]

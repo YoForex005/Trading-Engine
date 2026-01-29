@@ -1,0 +1,815 @@
+{
+  "info": {
+    "name": "RTX Trading Engine API",
+    "description": "Complete API collection for RTX Trading Engine v3.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "3.0.0"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:7999",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('jwt_token', response.token);",
+                  "    pm.environment.set('jwt_token', response.token);",
+                  "    console.log('Token saved:', response.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"password\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/login",
+              "host": ["{{base_url}}"],
+              "path": ["login"]
+            },
+            "description": "Authenticate as admin and receive JWT token"
+          },
+          "response": []
+        },
+        {
+          "name": "Login (Trader)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('jwt_token', response.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"demo-user\",\n  \"password\": \"password\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/login",
+              "host": ["{{base_url}}"],
+              "path": ["login"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "B-Book Orders",
+      "item": [
+        {
+          "name": "Place Market Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountId\": 1,\n  \"symbol\": \"EURUSD\",\n  \"side\": \"BUY\",\n  \"volume\": 0.1,\n  \"sl\": 1.0850,\n  \"tp\": 1.1050\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/orders/market",
+              "host": ["{{base_url}}"],
+              "path": ["api", "orders", "market"]
+            },
+            "description": "Execute market order using B-Book (internal execution)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/orders?accountId=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "orders"],
+              "query": [
+                {
+                  "key": "accountId",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "A-Book Orders",
+      "item": [
+        {
+          "name": "Place Market Order (LP)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountId\": \"demo_001\",\n  \"symbol\": \"EURUSD\",\n  \"side\": \"BUY\",\n  \"volume\": 0.1,\n  \"type\": \"MARKET\",\n  \"sl\": 1.0850,\n  \"tp\": 1.1050\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order",
+              "host": ["{{base_url}}"],
+              "path": ["order"]
+            },
+            "description": "Route order to liquidity provider (OANDA/YoFX)"
+          },
+          "response": []
+        },
+        {
+          "name": "Place Limit Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"symbol\": \"GBPUSD\",\n  \"side\": \"BUY\",\n  \"volume\": 0.5,\n  \"price\": 1.2650,\n  \"sl\": 1.2600,\n  \"tp\": 1.2750\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order/limit",
+              "host": ["{{base_url}}"],
+              "path": ["order", "limit"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Place Stop Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"symbol\": \"BTCUSD\",\n  \"side\": \"SELL\",\n  \"volume\": 0.01,\n  \"triggerPrice\": 95000\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order/stop",
+              "host": ["{{base_url}}"],
+              "path": ["order", "stop"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Pending Orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/orders/pending",
+              "host": ["{{base_url}}"],
+              "path": ["orders", "pending"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": \"ORD-12345\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/order/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["order", "cancel"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Positions",
+      "item": [
+        {
+          "name": "Get Positions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/positions?accountId=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "positions"],
+              "query": [
+                {
+                  "key": "accountId",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Get all open positions"
+          },
+          "response": []
+        },
+        {
+          "name": "Close Position",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": 12345\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/positions/close",
+              "host": ["{{base_url}}"],
+              "path": ["api", "positions", "close"]
+            },
+            "description": "Close position completely"
+          },
+          "response": []
+        },
+        {
+          "name": "Partial Close Position",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": 12345,\n  \"volume\": 0.05\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/positions/close",
+              "host": ["{{base_url}}"],
+              "path": ["api", "positions", "close"]
+            },
+            "description": "Partially close a position"
+          },
+          "response": []
+        },
+        {
+          "name": "Modify SL/TP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"positionId\": 12345,\n  \"sl\": 1.0900,\n  \"tp\": 1.1100\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/positions/modify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "positions", "modify"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Set Trailing Stop",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tradeId\": \"12345\",\n  \"symbol\": \"EURUSD\",\n  \"side\": \"BUY\",\n  \"type\": \"FIXED\",\n  \"distance\": 50\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/position/trailing-stop",
+              "host": ["{{base_url}}"],
+              "path": ["position", "trailing-stop"]
+            },
+            "description": "Set trailing stop (FIXED, STEP, or ATR)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Account",
+      "item": [
+        {
+          "name": "Get Account Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/account/summary?accountId=1",
+              "host": ["{{base_url}}"],
+              "path": ["api", "account", "summary"],
+              "query": [
+                {
+                  "key": "accountId",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Get balance, equity, margin, P/L"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"trader001\",\n  \"fullName\": \"John Doe\",\n  \"password\": \"securePassword123\",\n  \"isDemo\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/account/create",
+              "host": ["{{base_url}}"],
+              "path": ["api", "account", "create"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Market Data",
+      "item": [
+        {
+          "name": "Get Ticks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ticks?symbol=EURUSD&limit=100",
+              "host": ["{{base_url}}"],
+              "path": ["ticks"],
+              "query": [
+                {
+                  "key": "symbol",
+                  "value": "EURUSD"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Get tick history for symbol"
+          },
+          "response": []
+        },
+        {
+          "name": "Get OHLC",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ohlc?symbol=BTCUSD&timeframe=1h&limit=100",
+              "host": ["{{base_url}}"],
+              "path": ["ohlc"],
+              "query": [
+                {
+                  "key": "symbol",
+                  "value": "BTCUSD"
+                },
+                {
+                  "key": "timeframe",
+                  "value": "1h",
+                  "description": "1m, 5m, 15m, 1h, 4h, 1d"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Get candlestick data"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Risk Management",
+      "item": [
+        {
+          "name": "Calculate Lot Size",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/risk/calculate-lot?symbol=EURUSD&riskPercent=2.0&slPips=50",
+              "host": ["{{base_url}}"],
+              "path": ["risk", "calculate-lot"],
+              "query": [
+                {
+                  "key": "symbol",
+                  "value": "EURUSD"
+                },
+                {
+                  "key": "riskPercent",
+                  "value": "2.0",
+                  "description": "Risk percentage (e.g., 2.0 for 2%)"
+                },
+                {
+                  "key": "slPips",
+                  "value": "50",
+                  "description": "Stop loss in pips"
+                }
+              ]
+            },
+            "description": "Calculate position size from risk"
+          },
+          "response": []
+        },
+        {
+          "name": "Margin Preview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/risk/margin-preview?symbol=EURUSD&volume=0.5&side=BUY",
+              "host": ["{{base_url}}"],
+              "path": ["risk", "margin-preview"],
+              "query": [
+                {
+                  "key": "symbol",
+                  "value": "EURUSD"
+                },
+                {
+                  "key": "volume",
+                  "value": "0.5"
+                },
+                {
+                  "key": "side",
+                  "value": "BUY"
+                }
+              ]
+            },
+            "description": "Preview margin requirements"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin - Accounts",
+      "item": [
+        {
+          "name": "List Accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/accounts",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "accounts"]
+            },
+            "description": "Get all trading accounts"
+          },
+          "response": []
+        },
+        {
+          "name": "Deposit Funds",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountId\": 1,\n  \"amount\": 1000.00,\n  \"method\": \"BANK_TRANSFER\",\n  \"reference\": \"TXN-123456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/deposit",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "deposit"]
+            },
+            "description": "Add funds to account"
+          },
+          "response": []
+        },
+        {
+          "name": "Withdraw Funds",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountId\": 1,\n  \"amount\": 500.00,\n  \"method\": \"BANK_TRANSFER\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/withdraw",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "withdraw"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin - LP Management",
+      "item": [
+        {
+          "name": "List LPs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/lps",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "lps"]
+            },
+            "description": "Get all liquidity providers"
+          },
+          "response": []
+        },
+        {
+          "name": "LP Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/lp-status",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "lp-status"]
+            },
+            "description": "Get LP connection status"
+          },
+          "response": []
+        },
+        {
+          "name": "Add LP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"binance\",\n  \"name\": \"Binance\",\n  \"type\": \"WEBSOCKET\",\n  \"enabled\": true,\n  \"priority\": 2,\n  \"symbols\": [\"BTCUSD\", \"ETHUSD\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/lps",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "lps"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle LP",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/lps/oanda/toggle",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "lps", "oanda", "toggle"]
+            },
+            "description": "Enable/disable LP"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin - FIX Sessions",
+      "item": [
+        {
+          "name": "FIX Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/fix/status",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "fix", "status"]
+            },
+            "description": "Get FIX session status"
+          },
+          "response": []
+        },
+        {
+          "name": "Connect FIX Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sessionId\": \"YOFX1\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/fix/connect",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "fix", "connect"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Disconnect FIX Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sessionId\": \"YOFX1\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/fix/disconnect",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "fix", "disconnect"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin - Configuration",
+      "item": [
+        {
+          "name": "Get Config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/config",
+              "host": ["{{base_url}}"],
+              "path": ["api", "config"]
+            },
+            "description": "Get broker configuration"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Config",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"brokerName\": \"RTX Trading\",\n  \"executionMode\": \"BBOOK\",\n  \"defaultLeverage\": 100,\n  \"marginMode\": \"HEDGING\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/config",
+              "host": ["{{base_url}}"],
+              "path": ["api", "config"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check if API is running"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

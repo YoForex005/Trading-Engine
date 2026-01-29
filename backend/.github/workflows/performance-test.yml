@@ -1,0 +1,231 @@
+name: Performance Testing
+
+on:
+  schedule:
+    # Run weekly on Sunday at 3 AM UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Test duration in minutes'
+        required: false
+        default: '10'
+      vus:
+        description: 'Number of virtual users'
+        required: false
+        default: '100'
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  load-test:
+    name: Load Testing
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Run load test
+        run: |
+          k6 run --vus ${{ github.event.inputs.vus || '100' }} \
+                 --duration ${{ github.event.inputs.duration || '10' }}m \
+                 --out json=load-test-results.json \
+                 tests/performance/load-test.js
+        env:
+          API_URL: https://staging.trading-engine.example.com
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: load-test-results.json
+
+  stress-test:
+    name: Stress Testing
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Run stress test
+        run: |
+          k6 run --stage 2m:100 \
+                 --stage 5m:100 \
+                 --stage 2m:200 \
+                 --stage 5m:200 \
+                 --stage 2m:300 \
+                 --stage 5m:300 \
+                 --stage 10m:0 \
+                 --out json=stress-test-results.json \
+                 tests/performance/stress-test.js
+        env:
+          API_URL: https://staging.trading-engine.example.com
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-test-results
+          path: stress-test-results.json
+
+  benchmark:
+    name: Go Benchmarks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run benchmarks
+        run: |
+          go test -bench=. -benchmem -benchtime=10s ./... | tee benchmark-results.txt
+
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'go'
+          output-file-path: benchmark-results.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '150%'
+          comment-on-alert: true
+          fail-on-alert: true
+
+  database-performance:
+    name: Database Performance
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: trading_perf
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/trading_perf?sslmode=disable
+        run: |
+          go run ./cmd/migrate up
+
+      - name: Seed test data
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/trading_perf?sslmode=disable
+        run: |
+          go run ./tests/performance/seed.go
+
+      - name: Run query benchmarks
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/trading_perf?sslmode=disable
+        run: |
+          go test -bench=BenchmarkDB -benchtime=30s ./tests/performance/...
+
+  memory-profiling:
+    name: Memory Profiling
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run memory profiling
+        run: |
+          go test -memprofile=mem.out -memprofilerate=1 ./...
+          go tool pprof -text mem.out > memory-profile.txt
+
+      - name: Upload memory profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-profile
+          path: memory-profile.txt
+
+  performance-report:
+    name: Generate Performance Report
+    runs-on: ubuntu-latest
+    needs: [load-test, stress-test, benchmark, database-performance]
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Generate performance report
+        run: |
+          cat > performance-report.md << EOF
+          # Performance Testing Report - $(date)
+
+          ## Test Summary
+          - Load Test: ${{ needs.load-test.result }}
+          - Stress Test: ${{ needs.stress-test.result }}
+          - Benchmarks: ${{ needs.benchmark.result }}
+          - Database Performance: ${{ needs.database-performance.result }}
+
+          ## Configuration
+          - Virtual Users: ${{ github.event.inputs.vus || '100' }}
+          - Duration: ${{ github.event.inputs.duration || '10' }} minutes
+          - Go Version: ${{ env.GO_VERSION }}
+
+          ## Results
+          See attached artifacts for detailed results.
+          EOF
+
+      - name: Upload performance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-report-${{ github.run_number }}
+          path: performance-report.md
+
+      - name: Notify team
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Weekly performance testing completed'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}

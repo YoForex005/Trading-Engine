@@ -1,0 +1,27 @@
+{
+  "name": "trading-engine-e2e-tests",
+  "version": "1.0.0",
+  "description": "E2E tests for RTX Trading Engine",
+  "scripts": {
+    "test": "playwright test",
+    "test:trading": "playwright test trading_workflow_test.js",
+    "test:admin": "playwright test admin_workflow_test.js",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:report": "playwright show-report"
+  },
+  "keywords": [
+    "trading",
+    "e2e",
+    "testing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "playwright": "^1.40.0"
+  },
+  "dependencies": {
+    "ws": "^8.14.0"
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "tasks": {
+    "task-1768730716475-li3esh": {
+      "taskId": "task-1768730716475-li3esh",
+      "type": "feature",
+      "description": "Create core CRM interfaces, provider abstraction, and configuration management in /backend/crm/. Define CRMProvider interface with methods for contacts, deals, activities. Implement config.go with encrypted credential storage and provider management.",
+      "priority": "critical",
+      "status": "pending",
+      "progress": 0,
+      "assignedTo": [],
+      "tags": [
+        "crm",
+        "interfaces",
+        "architecture"
+      ],
+      "createdAt": "2026-01-18T10:05:16.475Z",
+      "startedAt": null,
+      "completedAt": null
+    },
+    "task-1768730716587-dxvwuq": {
+      "taskId": "task-1768730716587-dxvwuq",
+      "type": "feature",
+      "description": "Implement HubSpot API v3 integration in hubspot.go with contact sync, deal tracking, activity logging, rate limiting (100 req/10s), retry logic with exponential backoff, and lead scoring based on trading behavior.",
+      "priority": "high",
+      "status": "pending",
+      "progress": 0,
+      "assignedTo": [],
+      "tags": [
+        "crm",
+        "hubspot",
+        "api-integration"
+      ],
+      "createdAt": "2026-01-18T10:05:16.587Z",
+      "startedAt": null,
+      "completedAt": null
+    },
+    "task-1768730716673-nhc0x6": {
+      "taskId": "task-1768730716673-nhc0x6",
+      "type": "feature",
+      "description": "Implement Salesforce REST API integration in salesforce.go with OAuth2 authentication, contact/account sync, opportunity tracking, activity logging, rate limiting per Salesforce limits, and custom field mapping.",
+      "priority": "high",
+      "status": "pending",
+      "progress": 0,
+      "assignedTo": [],
+      "tags": [
+        "crm",
+        "salesforce",
+        "oauth"
+      ],
+      "createdAt": "2026-01-18T10:05:16.673Z",
+      "startedAt": null,
+      "completedAt": null
+    },
+    "task-1768730716756-28efvr": {
+      "taskId": "task-1768730716756-28efvr",
+      "type": "feature",
+      "description": "Implement Zoho CRM integration in zoho.go with API v2 support, contact sync, deal management, activity tracking, rate limiting, and webhook support for real-time updates.",
+      "priority": "high",
+      "status": "pending",
+      "progress": 0,
+      "assignedTo": [],
+      "tags": [
+        "crm",
+        "zoho",
+        "webhooks"
+      ],
+      "createdAt": "2026-01-18T10:05:16.756Z",
+      "startedAt": null,
+      "completedAt": null
+    },
+    "task-1768730716836-0wzurn": {
+      "taskId": "task-1768730716836-0wzurn",
+      "type": "feature",
+      "description": "Build webhook handler in webhook.go for receiving CRM events, validating webhook signatures, processing contact updates, deal changes, activity notifications, and triggering bidirectional sync.",
+      "priority": "high",
+      "status": "pending",
+      "progress": 0,
+      "assignedTo": [],
+      "tags": [
+        "crm",
+        "webhooks",
+        "events"
+      ],
+      "createdAt": "2026-01-18T10:05:16.836Z",
+      "startedAt": null,
+      "completedAt": null
+    },
+    "task-1768730716917-1yg2dk": {
+      "taskId": "task-1768730716917-1yg2dk",
+      "type": "feature",
+      "description": "Create bidirectional sync engine in sync.go with conflict resolution, delta sync, retry logic with exponential backoff, sync status tracking, error logging, and scheduled sync jobs for contacts, deals, and activities.",
+      "priority": "critical",
+      "status": "pending",
+      "progress": 0,
+      "assignedTo": [],
+      "tags": [
+        "crm",
+        "sync",
+        "reliability"
+      ],
+      "createdAt": "2026-01-18T10:05:16.917Z",
+      "startedAt": null,
+      "completedAt": null
+    },
+    "task-1768730717026-cv5uvp": {
+      "taskId": "task-1768730717026-cv5uvp",
+      "type": "feature",
+      "description": "Add CRM endpoints to admin API handlers: GET/POST /admin/crm/providers, POST /admin/crm/sync, GET /admin/crm/logs, POST /admin/crm/webhook, with proper authentication, permissions, and audit logging.",
+      "priority": "high",
+      "status": "pending",
+      "progress": 0,
+      "assignedTo": [],
+      "tags": [
+        "admin",
+        "api",
+        "crm"
+      ],
+      "createdAt": "2026-01-18T10:05:17.026Z",
+      "startedAt": null,
+      "completedAt": null
+    },
+    "task-1768730717134-l8dbng": {
+      "taskId": "task-1768730717134-l8dbng",
+      "type": "feature",
+      "description": "Create database migration 002_crm_integration.go with tables: crm_providers (id, type, config_encrypted, status), crm_sync_logs (id, provider_id, entity_type, sync_status, error), crm_webhooks (id, provider_id, event_type, payload, processed_at).",
+      "priority": "critical",
+      "status": "pending",
+      "progress": 0,
+      "assignedTo": [],
+      "tags": [
+        "database",
+        "migration",
+        "crm"
+      ],
+      "createdAt": "2026-01-18T10:05:17.134Z",
+      "startedAt": null,
+      "completedAt": null
+    },
+    "task-1768730717253-yx0nv0": {
+      "taskId": "task-1768730717253-yx0nv0",
+      "type": "feature",
+      "description": "Write comprehensive CRM integration documentation in /backend/docs/CRM_INTEGRATION.md covering setup guides for each provider, API endpoints, webhook configuration, sync behavior, error handling, rate limits, and troubleshooting.",
+      "priority": "high",
+      "status": "pending",
+      "progress": 0,
+      "assignedTo": [],
+      "tags": [
+        "documentation",
+        "crm"
+      ],
+      "createdAt": "2026-01-18T10:05:17.253Z",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  "version": "3.0.0"
+}

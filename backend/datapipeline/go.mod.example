@@ -1,0 +1,11 @@
+# Example go.mod additions for the data pipeline
+
+# Add these dependencies to your existing go.mod:
+
+require (
+    github.com/redis/go-redis/v9 v9.5.1
+    github.com/gorilla/websocket v1.5.1
+)
+
+# Redis client for pub/sub and storage
+# WebSocket for real-time client connections

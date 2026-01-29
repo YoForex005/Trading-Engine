@@ -1,0 +1,309 @@
+================================================================================
+              QUOTE STREAMING LOAD TEST - MONITORING OVERVIEW
+================================================================================
+
+WHAT HAPPENS DURING THE TEST
+=============================
+
+Timeline:
+                        2-MINUTE TEST DURATION
+    |----5-5-5-5-5-5-5-5-5-5-5-5-5-5-5-5-5-5-5-5-5-5-5-5----|
+    0     10     20    30     40    50     60     70     80     90    100   110   120
+    secs                                                           secs  secs  secs
+
+    │ Server Start │ Metrics Collection (24 samples) │ Analysis │ Report │
+    │   10 secs    │   5-second intervals (120 secs) │  Auto    │ Display│
+
+Each "5" represents a measurement sample (24 total over 2 minutes)
+
+METRICS COLLECTED AT EACH SAMPLE
+==================================
+
+Per Process (server.exe/go.exe):
+  ┌─────────────────────────────────┐
+  │ CPU Usage                       │  How hard the process is working
+  │ Working Memory                  │  RAM currently in use
+  │ Private Memory                  │  Memory exclusive to process
+  │ Thread Count                    │  Number of active threads
+  └─────────────────────────────────┘
+
+Per System (Windows):
+  ┌─────────────────────────────────┐
+  │ CPU Utilization (%)             │  % of total CPU used
+  │ Memory in Use (MB)              │  Total RAM currently used
+  │ Memory Utilization (%)          │  % of total available RAM
+  │ Available Memory (MB)           │  Free RAM still available
+  └─────────────────────────────────┘
+
+SAMPLE OUTPUT FORMAT
+====================
+
+Console Output (Real-time):
+
+[1] 2026-01-19 14:30:15.123 | Process: CPU=12% Mem=125MB | System: CPU=45% Mem=8450MB (52%) | Threads=24
+[2] 2026-01-19 14:30:20.456 | Process: CPU=15% Mem=128MB | System: CPU=47% Mem=8460MB (52%) | Threads=24
+[3] 2026-01-19 14:30:25.789 | Process: CPU=18% Mem=132MB | System: CPU=49% Mem=8470MB (52%) | Threads=25
+[4] 2026-01-19 14:30:31.012 | Process: CPU=22% Mem=135MB | System: CPU=50% Mem=8475MB (52%) | Threads=25
+
+     ↑ increases indicate           ↑ if memory keeps growing,
+     load on server                 could indicate memory leak
+
+
+DATA COLLECTED EXAMPLE
+======================
+
+A 2-minute test with 5-second samples produces:
+  - 24 data points
+  - 192+ fields total
+  - Shows resource trend from startup to stable state
+  - Reveals memory leak patterns
+  - Identifies CPU usage peaks
+
+Example CSV Row:
+  Timestamp,ElapsedSeconds,ProcessCPU_Percent,ProcessMemory_MB,ProcessPrivateMem_MB,SystemCPU_Percent,SystemMemory_MB,SystemMemory_Percent,ThreadCount
+  2026-01-19 14:30:15.123,5,12.50,125.3,98.7,45,8450,52.1,24
+
+
+RESOURCE USAGE DURING TEST
+===========================
+
+TYPICAL PATTERN:
+
+CPU Usage Pattern:
+  │                          ╭─ Stabilizes
+  │    ╱─ Ramps up           │
+  │   ╱                       │
+  │  ╱╭────────────────────────╯
+  ┼─╱──────────────────────────────
+  └─────────────────────────────── time
+
+
+Memory Usage Pattern (No Leak):
+  │          ╭─ Plateaus (stable)
+  │         ╱│
+  │        ╱ │
+  │       ╱  ╲
+  │      ╱    └──────────────────
+  ┼─────────────────────────────────
+  └─────────────────────────────── time
+
+
+Memory Usage Pattern (With Leak):
+  │                           ╱─ Still growing
+  │                          ╱
+  │                         ╱
+  │        ╭────────────────╱
+  │       ╱                 ╱
+  │      ╱                 ╱
+  ┼─────────────────────────────────
+  └─────────────────────────────── time
+
+
+CRITICAL METRICS ANALYSIS
+==========================
+
+Peak CPU Usage
+  ┌───────────────────────────────────────┐
+  │ What:  Highest CPU at any moment      │
+  │ Good:  < 50%                          │
+  │ Warn:  50-80%                         │
+  │ Bad:   > 90%                          │
+  │ Why:   Indicates peak processing load │
+  └───────────────────────────────────────┘
+
+Average CPU Usage
+  ┌───────────────────────────────────────┐
+  │ What:  Mean CPU throughout test       │
+  │ Good:  10-30%                         │
+  │ Warn:  30-60%                         │
+  │ Bad:   > 60%                          │
+  │ Why:   Indicates baseline requirements│
+  └───────────────────────────────────────┘
+
+Peak Memory Usage
+  ┌───────────────────────────────────────┐
+  │ What:  Most RAM at any moment         │
+  │ Good:  < 500MB                        │
+  │ Warn:  500-1500MB                     │
+  │ Bad:   > 2000MB                       │
+  │ Why:   Indicates memory upper bound   │
+  └───────────────────────────────────────┘
+
+Memory Growth Rate
+  ┌───────────────────────────────────────┐
+  │ What:  Memory increase per minute     │
+  │ Good:  < 10 MB/min                    │
+  │ Warn:  10-50 MB/min                   │
+  │ Bad:   > 50 MB/min                    │
+  │ Why:   Indicates possible memory leak │
+  └───────────────────────────────────────┘
+
+Thread Count
+  ┌───────────────────────────────────────┐
+  │ What:  Number of active threads       │
+  │ Good:  Stable (doesn't increase)      │
+  │ Warn:  Increasing steadily            │
+  │ Bad:   Rapidly increasing             │
+  │ Why:   Goroutine/thread leaks         │
+  └───────────────────────────────────────┘
+
+
+MEMORY LEAK DETECTION
+====================
+
+How it Works:
+  1. Collect memory at start (baseline)
+  2. Collect memory at every sample
+  3. Collect memory at end
+  4. Calculate growth = End - Start
+  5. Calculate rate = Growth / Duration
+
+Examples:
+
+Good Memory Pattern:
+  Start:     100 MB ├─
+  5 secs:    125 MB │
+  10 secs:   145 MB ├─ Growth stabilizes
+  15 secs:   150 MB │
+  20 secs:   152 MB │
+  ...        152 MB │  No leak detected
+  End:       152 MB └─
+
+  Growth: 52 MB over 120 secs = 26 MB/min (ACCEPTABLE)
+
+Leak Detection Pattern:
+  Start:     100 MB ├─
+  5 secs:    125 MB │
+  10 secs:   150 MB ├─ Keeps growing
+  15 secs:   175 MB │
+  20 secs:   200 MB │  Doesn't plateau
+  ...        225 MB │
+  End:       250 MB └─
+
+  Growth: 150 MB over 120 secs = 75 MB/min (PROBABLE LEAK)
+
+
+RESOURCE THRESHOLDS VISUAL
+==========================
+
+CPU Usage Ranges:
+  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●● 0%
+  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●● 20%  GOOD
+  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●● 50%  GOOD
+  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●● 80%  WARNING
+  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●● 90%  CRITICAL
+  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●● 100% MAX
+
+Memory Usage Ranges:
+  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●● 0 MB
+  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●● 500 MB   GOOD
+  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●● 1000 MB  GOOD
+  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●● 1500 MB  WARNING
+  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●● 2000 MB  CRITICAL
+
+
+EXPECTED vs ACTUAL COMPARISON
+==============================
+
+Healthy System Results:
+
+Component          │ Expected  │ Actual    │ Status
+─────────────────────────────────────────────────
+Peak CPU Usage     │ < 50%     │ 38%       │ ✓ GOOD
+Avg CPU Usage      │ 10-30%    │ 22%       │ ✓ GOOD
+Peak Memory        │ < 500MB   │ 285MB     │ ✓ GOOD
+Avg Memory         │ 100-300MB │ 180MB     │ ✓ GOOD
+Memory Growth      │ < 50MB    │ 28MB      │ ✓ GOOD
+Growth Rate        │ < 10MB/m  │ 14MB/m    │ ✓ ACCEPTABLE
+Thread Stability   │ ±5        │ 24-26     │ ✓ STABLE
+System CPU         │ < 60%     │ 42%       │ ✓ GOOD
+System Memory      │ < 80%     │ 52%       │ ✓ GOOD
+
+
+FINAL REPORT OUTPUT
+===================
+
+After test completes, you'll see:
+
+====== MONITORING RESULTS =======
+
+Process (go.exe/server.exe) Metrics:
+  Peak CPU Usage:              38%          ← Check < 80%
+  Average CPU Usage:           22%          ← Check < 50%
+  Peak Memory Usage:           285 MB       ← Check < 1500 MB
+  Average Memory Usage:        180 MB       ← Check < 500 MB
+  Memory Growth (Total):       28 MB        ← Check < 50 MB
+  Memory Growth Rate:          14 MB/minute ← Check < 10 MB/min
+
+System Metrics:
+  Peak System CPU:             42%
+  Peak System Memory:          8450 MB
+  Average System Memory:       8400 MB
+  Average Memory Utilization:  52%
+
+Monitoring Details:
+  Total Samples Collected:     24
+  Monitoring Duration:         2.0 minutes
+  Sample Interval:             5 seconds
+
+Stability Assessment:
+  ✓ All metrics within acceptable ranges
+  ✓ No memory leaks detected
+  ✓ CPU usage stable
+  ✓ System responsive
+
+RECOMMENDATION:
+  System is stable - test can continue
+
+====================================
+
+
+WHAT EACH FILE PROVIDES
+=======================
+
+START_HERE.txt
+  ↓
+  Entry point with quick start (this file)
+
+QUICK_START.bat
+  ↓
+  Interactive menu for easy test execution
+
+monitor_resources.ps1
+  ↓
+  Collects 24 samples of: CPU, Memory, Threads
+  ↓
+  Generates: monitoring_results.csv
+  ↓
+  Produces: Console report + Recommendations
+
+LOAD_TEST_GUIDE.txt
+  ↓
+  Explains all metrics in detail
+  ↓
+  Troubleshooting solutions
+  ↓
+  CSV analysis techniques
+
+TEST_REPORT_TEMPLATE.txt
+  ↓
+  Document your findings
+  ↓
+  Track improvements
+  ↓
+  Retest comparison
+
+monitoring_results.csv (Generated)
+  ↓
+  Raw data: 24 samples × 9 metrics
+  ↓
+  Import into Excel
+  ↓
+  Create charts and analyze trends
+
+
+================================================================================
+Ready to run? → Double-click QUICK_START.bat
+Want details? → Read START_HERE.txt or README_MONITORING.txt
+Need help?    → Check LOAD_TEST_GUIDE.txt
+================================================================================

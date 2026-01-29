@@ -1,0 +1,26 @@
+apiVersion: v2
+name: trading-engine
+description: A Helm chart for Trading Engine platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - trading
+  - fintech
+  - forex
+  - crypto
+home: https://github.com/epic1st/trading-engine
+sources:
+  - https://github.com/epic1st/trading-engine
+maintainers:
+  - name: Epic1st
+    email: admin@trading-engine.com
+dependencies:
+  - name: postgresql
+    version: 13.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: redis
+    version: 18.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled

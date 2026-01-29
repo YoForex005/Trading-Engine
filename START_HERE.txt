@@ -1,0 +1,406 @@
+================================================================================
+                          QUOTE STREAMING LOAD TEST
+                              START HERE GUIDE
+================================================================================
+
+Welcome! This package provides comprehensive resource monitoring for testing
+your Trading Engine quote streaming backend.
+
+WHAT YOU CAN DO
+===============
+
+Monitor PC resource usage during quote streaming:
+  ✓ Track CPU usage (process and system)
+  ✓ Track memory usage and detect leaks
+  ✓ Monitor thread count and stability
+  ✓ Test system under realistic load
+  ✓ Generate detailed reports with CSV data
+  ✓ Identify performance bottlenecks
+
+QUICK START (60 SECONDS)
+=======================
+
+1. Double-click QUICK_START.bat
+   (A menu will appear)
+
+2. Press "1" and Enter
+   (Test starts automatically)
+
+3. Wait 2 minutes
+   (Resource monitoring runs)
+
+4. Review the results
+   (Console shows detailed metrics)
+
+5. Check monitoring_results.csv
+   (Detailed data for further analysis)
+
+THAT'S IT! You now have:
+  - Real-time resource metrics
+  - CPU and memory analysis
+  - Memory leak detection results
+  - System stability assessment
+  - CSV file for Excel analysis
+
+AVAILABLE TOOLS
+===============
+
+QUICK START MENU (Easiest)
+  File: QUICK_START.bat
+  What: Interactive menu to run tests
+  How:  Double-click the file
+  For:  Anyone who prefers menus
+
+RESOURCE MONITORING (Main Tool)
+  File: monitor_resources.ps1
+  What: Starts server and monitors resources for 2 minutes
+  How:  powershell -ExecutionPolicy Bypass -File monitor_resources.ps1
+  Data: monitoring_results.csv
+  For:  Primary performance testing
+
+LOAD TEST (Optional)
+  File: load_test_quotes.ps1
+  What: Simulates quote streaming with HTTP requests
+  How:  powershell -ExecutionPolicy Bypass -File load_test_quotes.ps1
+  For:  Combined with monitoring for realistic load
+
+FULL ORCHESTRATION (Advanced)
+  File: run_load_test.ps1
+  What: Runs monitoring and load test together
+  How:  powershell -ExecutionPolicy Bypass -File run_load_test.ps1
+  For:  Advanced users who want full automation
+
+DOCUMENTATION FILES
+===================
+
+START_HERE.txt (This File)
+  → Overview and quick start
+  → Read this first!
+
+README_MONITORING.txt
+  → Complete setup guide
+  → Requirements checklist
+  → Troubleshooting section
+
+LOAD_TEST_GUIDE.txt
+  → Comprehensive testing guide
+  → Metrics explanation (what each number means)
+  → How to analyze results
+  → Solutions for common issues
+
+TEST_REPORT_TEMPLATE.txt
+  → Template for documenting results
+  → Track improvements over time
+  → Organize your findings
+  → Print-friendly format
+
+TEST RESULTS FILES
+==================
+
+monitoring_results.csv
+  → Generated after each test run
+  → Contains all metrics with timestamps
+  → Open in Excel for analysis
+  → 24 data points per sample (every 5 seconds)
+
+WHAT GETS MONITORED
+===================
+
+PROCESS METRICS (go.exe/server.exe)
+  - CPU Usage (%)              How much processor the server uses
+  - Memory Usage (MB)          RAM consumed by server
+  - Private Memory (MB)        Memory exclusively for server
+  - Thread Count               Number of active threads
+
+SYSTEM METRICS
+  - System CPU (%)             Total computer CPU usage
+  - System Memory (MB)         Total computer memory in use
+  - Memory Utilization (%)     Percentage of available RAM used
+  - Available Memory (MB)      Free RAM still available
+
+STABILITY CHECKS
+  - Memory Leaks               Does memory keep growing?
+  - CPU Spikes                 Are there sudden CPU peaks?
+  - Thread Stability           Do threads keep increasing?
+  - System Responsiveness      Does system slow down?
+
+KEY METRICS EXPLAINED
+=====================
+
+Peak CPU Usage (%)
+  What: Maximum CPU at any point during test
+  Good: < 50% (ideal), < 80% (acceptable)
+  Bad:  > 90% (critical)
+
+Average CPU Usage (%)
+  What: Mean CPU usage throughout test
+  Good: 10-30% (typical streaming)
+  Bad:  > 60% (continuously high)
+
+Peak Memory (MB)
+  What: Maximum RAM used at any point
+  Good: < 500MB (ideal), < 1500MB (acceptable)
+  Bad:  > 2000MB (critical)
+
+Average Memory (MB)
+  What: Mean RAM usage throughout test
+  Good: 100-300MB (typical)
+  Bad:  > 1000MB (excessive)
+
+Memory Growth (MB)
+  What: How much memory increased from start to end
+  Good: < 50MB (minimal growth)
+  Bad:  > 100MB (possible leak)
+
+Memory Growth Rate (MB/minute)
+  What: How fast memory is increasing per minute
+  Good: < 10 MB/min (acceptable)
+  Bad:  > 50 MB/min (probable leak)
+
+SYSTEM REQUIREMENTS
+===================
+
+Hardware:
+  - Windows 7 or newer
+  - 2GB+ RAM available
+  - Dual-core processor
+  - 100MB free disk space
+
+Software:
+  - PowerShell 3.0+ (included in Windows)
+  - Backend server.exe (must exist)
+  - Go runtime (to rebuild if needed)
+
+Network:
+  - Port 8080 available (for server)
+  - localhost connectivity
+
+WORKFLOW
+========
+
+STEP 1: PREPARE
+  [ ] Close unnecessary applications
+  [ ] Ensure backend/cmd/server/server.exe exists
+  [ ] Check port 8080 is available
+  [ ] Have 15 minutes available
+
+STEP 2: RUN TEST
+  [ ] Double-click QUICK_START.bat
+  [ ] Select Option 1 (Full Test)
+  [ ] Press any key to start
+  [ ] Wait 2+ minutes for test to complete
+
+STEP 3: REVIEW RESULTS
+  [ ] Check console output for summary
+  [ ] Look for any CRITICAL alerts
+  [ ] Note the key metrics (peak CPU, peak memory)
+
+STEP 4: ANALYZE CSV
+  [ ] Open monitoring_results.csv in Excel
+  [ ] Create line charts for CPU and memory trends
+  [ ] Check for memory growth patterns
+  [ ] Identify any anomalies
+
+STEP 5: DOCUMENT
+  [ ] Fill out TEST_REPORT_TEMPLATE.txt
+  [ ] Save results with date/time
+  [ ] Document any issues found
+  [ ] Plan optimization if needed
+
+STEP 6: OPTIMIZE (IF NEEDED)
+  [ ] Address memory leaks or high CPU
+  [ ] Review backend code
+  [ ] Rebuild and retest
+  [ ] Compare before/after metrics
+
+EXPECTED RESULTS
+================
+
+For a healthy system:
+  ✓ Peak CPU:              20-50%
+  ✓ Average CPU:           5-15%
+  ✓ Peak Memory:           100-300MB
+  ✓ Memory Growth:         < 20MB over 2 minutes
+  ✓ Memory Plateau:        Yes (stabilizes after ~30 seconds)
+  ✓ Thread Count:          Stable (not constantly increasing)
+  ✓ System Responsiveness: Normal (no freezes)
+  ✓ No CRITICAL alerts
+
+If you see these, there may be issues:
+  ✗ Peak CPU > 80%
+  ✗ Peak Memory > 1500MB
+  ✗ Memory growth > 50MB/minute
+  ✗ Threads continuously increasing
+  ✗ CRITICAL alerts in report
+  ✗ System becomes unresponsive
+
+COMMON ISSUES & QUICK FIXES
+=============================
+
+Issue: "Cannot reach server at localhost:8080"
+Fix:   - Check server.exe exists at backend\cmd\server\
+       - Verify port 8080 is not in use
+       - Check Windows Firewall isn't blocking
+
+Issue: "High memory usage detected"
+Fix:   - This might be normal for streaming
+       - Check if memory stabilizes (plateaus)
+       - If memory keeps growing, investigate for leak
+
+Issue: "High CPU usage"
+Fix:   - Normal under load
+       - If sustained > 80%, code may need optimization
+       - Try lower request rates in load test
+
+Issue: "Script won't run"
+Fix:   - Run: powershell -ExecutionPolicy Bypass
+       - Verify all files in same directory
+       - Check server.exe exists
+
+NEXT STEPS
+==========
+
+1. RUN YOUR FIRST TEST NOW
+   - Double-click QUICK_START.bat
+   - Choose Option 1
+   - Let it run (2 minutes)
+
+2. REVIEW THE RESULTS
+   - Check console for summary
+   - Open monitoring_results.csv
+   - Read the recommendations
+
+3. IF ISSUES FOUND
+   - Review LOAD_TEST_GUIDE.txt for details
+   - Check backend code for optimization
+   - Identify root cause
+   - Make improvements
+
+4. RETEST TO VERIFY
+   - Run test again
+   - Compare before/after
+   - Document improvements
+
+5. DOCUMENT YOUR FINDINGS
+   - Use TEST_REPORT_TEMPLATE.txt
+   - Save results with timestamp
+   - Track progress over time
+
+GETTING HELP
+============
+
+For detailed information:
+  1. README_MONITORING.txt        → Setup and requirements
+  2. LOAD_TEST_GUIDE.txt          → Complete testing guide
+  3. TEST_REPORT_TEMPLATE.txt     → Documentation format
+  4. Console output               → Real-time metrics
+  5. monitoring_results.csv       → Detailed data
+
+Common Questions: See LOAD_TEST_GUIDE.txt section "COMMON ISSUES"
+
+For Code Issues: Check backend/cmd/server/ directory
+
+FILE LOCATIONS
+==============
+
+These files should be in:
+  D:\Tading engine\Trading-Engine\
+
+Scripts:
+  - QUICK_START.bat
+  - monitor_resources.ps1
+  - load_test_quotes.ps1
+  - run_load_test.ps1
+
+Documentation:
+  - START_HERE.txt              ← You are here
+  - README_MONITORING.txt
+  - LOAD_TEST_GUIDE.txt
+  - TEST_REPORT_TEMPLATE.txt
+
+Server:
+  - backend\cmd\server\server.exe
+
+Results:
+  - monitoring_results.csv      (generated after test)
+
+TIPS FOR SUCCESS
+================
+
+1. Close other applications before testing
+   → Reduces noise in measurements
+   → More accurate results
+
+2. Run test multiple times
+   → Get consistent baseline
+   → Identify patterns
+   → Compare before/after optimization
+
+3. Take notes during test
+   → Note any unusual behavior
+   → Document system state
+   → Record any errors seen
+
+4. Analyze CSV in Excel
+   → Create charts
+   → Visual trends easier to spot
+   → Compare multiple runs side-by-side
+
+5. Test different load levels
+   → Start with 10 req/sec
+   → Increase to 20, 50, 100
+   → Find breaking points
+
+6. Keep historical data
+   → Save CSV files with dates
+   → Track improvements over time
+   → Identify regressions
+
+IMPORTANT NOTES
+===============
+
+- Test runs for 2 minutes
+  - Provides stable baseline measurements
+  - Enough time to detect memory leaks
+  - Not too long for quick iteration
+
+- Monitoring happens automatically
+  - No manual steps needed
+  - Server starts and stops automatically
+  - Results generated automatically
+
+- No special permissions required
+  - Runs as regular user
+  - No admin rights needed
+  - Safe to run multiple times
+
+- Results are local
+  - Data stored in CSV file
+  - No data sent anywhere
+  - Results stay on your computer
+
+READY TO START?
+================
+
+Now that you understand what this tool does, let's run your first test:
+
+1. Double-click QUICK_START.bat
+2. Select option 1
+3. Watch the metrics stream in real-time
+4. Wait for the test to complete
+5. Review the results
+
+You'll have complete visibility into:
+  - CPU usage
+  - Memory consumption
+  - Memory leak detection
+  - System stability
+  - Performance trends
+
+Good luck! 🚀
+
+================================================================================
+Questions? See: README_MONITORING.txt or LOAD_TEST_GUIDE.txt
+Want to document results? Use: TEST_REPORT_TEMPLATE.txt
+Need detailed metrics? Check: monitoring_results.csv (after test runs)
+================================================================================

@@ -1,0 +1,275 @@
+name: Database Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      migration_type:
+        description: 'Migration type'
+        required: true
+        type: choice
+        options:
+          - up
+          - down
+          - status
+      version:
+        description: 'Target version (leave empty for latest)'
+        required: false
+
+env:
+  GO_VERSION: '1.24.0'
+
+jobs:
+  validate-migration:
+    name: Validate Migration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Validate migration files
+        run: |
+          chmod +x scripts/deploy/validate-migrations.sh
+          ./scripts/deploy/validate-migrations.sh
+
+      - name: Test migrations on local database
+        run: |
+          docker-compose -f docker-compose.test.yml up -d postgres
+          sleep 5
+
+          export DATABASE_URL="postgres://rtx_test:test_password@localhost:5432/rtx_test?sslmode=disable"
+          go run cmd/migrate/main.go up
+          go run cmd/migrate/main.go down
+
+          docker-compose -f docker-compose.test.yml down
+
+  backup-database:
+    name: Backup Database
+    runs-on: ubuntu-latest
+    needs: validate-migration
+    if: github.event.inputs.migration_type != 'status'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubectl for environment
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            development)
+              echo "${{ secrets.KUBE_CONFIG_DEV }}" | base64 -d > kubeconfig
+              export NAMESPACE=rtx-dev
+              ;;
+            staging)
+              echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+              export NAMESPACE=rtx-staging
+              ;;
+            production)
+              echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > kubeconfig
+              export NAMESPACE=rtx-prod
+              ;;
+          esac
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
+          echo "NAMESPACE=$NAMESPACE" >> $GITHUB_ENV
+
+      - name: Create database backup
+        run: |
+          POD=$(kubectl get pod -n ${{ env.NAMESPACE }} -l app=postgres -o jsonpath='{.items[0].metadata.name}')
+          BACKUP_FILE="backup-$(date +%Y%m%d-%H%M%S).sql"
+
+          kubectl exec -n ${{ env.NAMESPACE }} $POD -- \
+            pg_dump -U rtx_user rtx_db > $BACKUP_FILE
+
+          echo "BACKUP_FILE=$BACKUP_FILE" >> $GITHUB_ENV
+
+      - name: Upload backup to artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-backup-${{ github.event.inputs.environment }}
+          path: ${{ env.BACKUP_FILE }}
+          retention-days: 30
+
+      - name: Upload backup to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          aws s3 cp ${{ env.BACKUP_FILE }} \
+            s3://rtx-database-backups/${{ github.event.inputs.environment }}/${{ env.BACKUP_FILE }}
+
+  run-migration:
+    name: Run Migration
+    runs-on: ubuntu-latest
+    needs: backup-database
+    environment:
+      name: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubectl
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            development)
+              echo "${{ secrets.KUBE_CONFIG_DEV }}" | base64 -d > kubeconfig
+              export NAMESPACE=rtx-dev
+              export DB_SECRET="${{ secrets.DEV_DATABASE_URL }}"
+              ;;
+            staging)
+              echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+              export NAMESPACE=rtx-staging
+              export DB_SECRET="${{ secrets.STAGING_DATABASE_URL }}"
+              ;;
+            production)
+              echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > kubeconfig
+              export NAMESPACE=rtx-prod
+              export DB_SECRET="${{ secrets.PROD_DATABASE_URL }}"
+              ;;
+          esac
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
+          echo "NAMESPACE=$NAMESPACE" >> $GITHUB_ENV
+          echo "DATABASE_URL=$DB_SECRET" >> $GITHUB_ENV
+
+      - name: Check current migration status
+        run: |
+          go run cmd/migrate/main.go status
+          echo "Current migration status checked"
+
+      - name: Run migration
+        id: migration
+        run: |
+          case "${{ github.event.inputs.migration_type }}" in
+            up)
+              if [ -n "${{ github.event.inputs.version }}" ]; then
+                go run cmd/migrate/main.go up ${{ github.event.inputs.version }}
+              else
+                go run cmd/migrate/main.go up
+              fi
+              ;;
+            down)
+              if [ -n "${{ github.event.inputs.version }}" ]; then
+                go run cmd/migrate/main.go down ${{ github.event.inputs.version }}
+              else
+                go run cmd/migrate/main.go down 1
+              fi
+              ;;
+            status)
+              go run cmd/migrate/main.go status
+              ;;
+          esac
+
+      - name: Verify migration
+        if: github.event.inputs.migration_type != 'status'
+        run: |
+          go run cmd/migrate/main.go status
+          echo "Migration verification completed"
+
+      - name: Run post-migration tests
+        if: github.event.inputs.migration_type == 'up'
+        run: |
+          chmod +x scripts/deploy/post-migration-tests.sh
+          ./scripts/deploy/post-migration-tests.sh
+
+  rollback-on-failure:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: run-migration
+    if: failure() && github.event.inputs.migration_type == 'up'
+    steps:
+      - name: Download backup
+        uses: actions/download-artifact@v4
+        with:
+          name: database-backup-${{ github.event.inputs.environment }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Restore database from backup
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            development)
+              echo "${{ secrets.KUBE_CONFIG_DEV }}" | base64 -d > kubeconfig
+              export NAMESPACE=rtx-dev
+              ;;
+            staging)
+              echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+              export NAMESPACE=rtx-staging
+              ;;
+            production)
+              echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > kubeconfig
+              export NAMESPACE=rtx-prod
+              ;;
+          esac
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
+
+          BACKUP_FILE=$(ls backup-*.sql | head -1)
+          POD=$(kubectl get pod -n $NAMESPACE -l app=postgres -o jsonpath='{.items[0].metadata.name}')
+
+          cat $BACKUP_FILE | kubectl exec -i -n $NAMESPACE $POD -- \
+            psql -U rtx_user rtx_db
+
+      - name: Notify rollback
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "⚠️ Database migration failed and was rolled back",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Database Migration Rollback*\n*Environment:* ${{ github.event.inputs.environment }}\n*Workflow:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                }
+              ]
+            }
+
+  notify-completion:
+    name: Notify Completion
+    runs-on: ubuntu-latest
+    needs: run-migration
+    if: always()
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "${{ needs.run-migration.result == 'success' && '✅' || '❌' }} Database migration ${{ needs.run-migration.result }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Database Migration ${{ needs.run-migration.result }}*\n*Environment:* ${{ github.event.inputs.environment }}\n*Type:* ${{ github.event.inputs.migration_type }}\n*Triggered by:* ${{ github.actor }}\n*Workflow:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                }
+              ]
+            }

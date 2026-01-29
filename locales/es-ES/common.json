@@ -1,0 +1,100 @@
+{
+  "app": {
+    "name": "Motor de Trading",
+    "description": "Plataforma de Trading Avanzada",
+    "version": "Versión {{version}}"
+  },
+  "navigation": {
+    "home": "Inicio",
+    "dashboard": "Panel",
+    "trading": "Trading",
+    "portfolio": "Cartera",
+    "reports": "Informes",
+    "settings": "Configuración",
+    "logout": "Cerrar Sesión"
+  },
+  "actions": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "create": "Crear",
+    "update": "Actualizar",
+    "confirm": "Confirmar",
+    "close": "Cerrar",
+    "submit": "Enviar",
+    "reset": "Restablecer",
+    "search": "Buscar",
+    "filter": "Filtrar",
+    "export": "Exportar",
+    "import": "Importar",
+    "download": "Descargar",
+    "upload": "Subir",
+    "refresh": "Actualizar",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "previous": "Anterior",
+    "finish": "Finalizar"
+  },
+  "status": {
+    "loading": "Cargando...",
+    "saving": "Guardando...",
+    "processing": "Procesando...",
+    "success": "Éxito",
+    "error": "Error",
+    "warning": "Advertencia",
+    "info": "Información",
+    "pending": "Pendiente",
+    "completed": "Completado",
+    "failed": "Fallido",
+    "active": "Activo",
+    "inactive": "Inactivo"
+  },
+  "time": {
+    "today": "Hoy",
+    "yesterday": "Ayer",
+    "tomorrow": "Mañana",
+    "thisWeek": "Esta Semana",
+    "lastWeek": "Semana Pasada",
+    "thisMonth": "Este Mes",
+    "lastMonth": "Mes Pasado",
+    "thisYear": "Este Año",
+    "custom": "Rango Personalizado"
+  },
+  "validation": {
+    "required": "Este campo es obligatorio",
+    "email": "Por favor ingrese un correo electrónico válido",
+    "min": "El valor mínimo es {{min}}",
+    "max": "El valor máximo es {{max}}",
+    "minLength": "La longitud mínima es {{min}} caracteres",
+    "maxLength": "La longitud máxima es {{max}} caracteres",
+    "pattern": "Por favor coincida con el formato solicitado",
+    "number": "Por favor ingrese un número válido",
+    "integer": "Por favor ingrese un número entero",
+    "positive": "El valor debe ser positivo",
+    "negative": "El valor debe ser negativo",
+    "url": "Por favor ingrese una URL válida",
+    "phone": "Por favor ingrese un número de teléfono válido"
+  },
+  "confirmation": {
+    "deleteTitle": "Confirmar Eliminación",
+    "deleteMessage": "¿Está seguro de que desea eliminar este elemento? Esta acción no se puede deshacer.",
+    "unsavedChanges": "Tiene cambios sin guardar. ¿Está seguro de que desea salir?",
+    "confirmAction": "¿Está seguro de que desea continuar?"
+  },
+  "pagination": {
+    "showing": "Mostrando {{from}} a {{to}} de {{total}} resultados",
+    "rowsPerPage": "Filas por página:",
+    "page": "Página {{page}} de {{total}}"
+  },
+  "accessibility": {
+    "menu": "Menú",
+    "close": "Cerrar",
+    "open": "Abrir",
+    "expand": "Expandir",
+    "collapse": "Contraer",
+    "toggleTheme": "Cambiar tema",
+    "toggleLanguage": "Cambiar idioma",
+    "skipToContent": "Saltar al contenido principal"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-01-19T10:39:48.695Z",
+  "projectRoot": "D:\\Tading engine\\Trading-Engine",
+  "structure": {
+    "hasPackageJson": false,
+    "hasTsConfig": false,
+    "hasClaudeConfig": true,
+    "hasClaudeFlow": true
+  },
+  "scannedAt": 1768819188696
+}

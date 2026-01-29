@@ -1,0 +1,31 @@
+{
+  "initialized": true,
+  "topology": "hierarchical-mesh",
+  "workers": [
+    "test-worker-1768812180072-jp3j",
+    "test-worker-1768812180072-3shj",
+    "test-worker-1768812180072-btum"
+  ],
+  "consensus": {
+    "pending": [],
+    "history": []
+  },
+  "sharedMemory": {
+    "broadcasts": [
+      {
+        "messageId": "msg-1768812180386-xf14tz",
+        "message": "Test broadcast - verification in progress",
+        "priority": "normal",
+        "fromId": "system",
+        "timestamp": "2026-01-19T08:43:00.386Z"
+      }
+    ]
+  },
+  "createdAt": "2026-01-19T08:36:25.030Z",
+  "updatedAt": "2026-01-19T08:43:00.386Z",
+  "queen": {
+    "agentId": "queen-1768811785030",
+    "electedAt": "2026-01-19T08:36:25.030Z",
+    "term": 1
+  }
+}

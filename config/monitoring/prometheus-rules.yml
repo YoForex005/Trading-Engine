@@ -1,0 +1,322 @@
+# RTX Trading Engine - Prometheus Alerting Rules
+# Load with: prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/var/lib/prometheus
+
+groups:
+  # ============================================
+  # DATABASE ALERTS
+  # ============================================
+  - name: rtx_database
+    interval: 10s
+    rules:
+      - alert: DatabaseDown
+        expr: up{job="postgresql"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "PostgreSQL instance {{ $labels.instance }} has been down for {{ $value }} seconds"
+
+      - alert: ReplicationLagHigh
+        expr: pg_replication_lag_seconds > 60
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database replication lag is high"
+          description: "Replication lag on {{ $labels.instance }} is {{ $value }}s (threshold: 60s)"
+
+      - alert: ReplicationLagCritical
+        expr: pg_replication_lag_seconds > 300
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Database replication lag is critical"
+          description: "Replication lag on {{ $labels.instance }} is {{ $value }}s - data loss risk"
+
+      - alert: DatabaseConnectionsHigh
+        expr: pg_stat_activity_count > 400
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "High number of database connections"
+          description: "{{ $labels.instance }} has {{ $value }} connections (max: 500)"
+
+      - alert: DatabaseSlowQueries
+        expr: rate(pg_stat_statements_mean_exec_time[5m]) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Slow database queries detected"
+          description: "Average query time is {{ $value }}ms on {{ $labels.instance }}"
+
+  # ============================================
+  # APPLICATION ALERTS
+  # ============================================
+  - name: rtx_application
+    interval: 10s
+    rules:
+      - alert: APIDown
+        expr: up{job="rtx-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "RTX API is down"
+          description: "API instance {{ $labels.instance }} is unreachable"
+
+      - alert: APIHighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "High API error rate"
+          description: "{{ $labels.instance }} has {{ $value }} 5xx errors/sec (threshold: 0.05)"
+
+      - alert: APIHighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 10m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "API latency is high"
+          description: "95th percentile latency is {{ $value }}s on {{ $labels.instance }} (threshold: 2s)"
+
+      - alert: WebSocketConnectionsDrop
+        expr: rate(websocket_connections_total[5m]) < -100
+        for: 2m
+        labels:
+          severity: warning
+          component: websocket
+        annotations:
+          summary: "WebSocket connections dropping rapidly"
+          description: "{{ $labels.instance }} losing {{ $value }} connections/sec"
+
+      - alert: OrderExecutionFailures
+        expr: rate(trading_orders_failed_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: trading
+        annotations:
+          summary: "High order execution failure rate"
+          description: "{{ $value }} order failures/sec on {{ $labels.instance }}"
+
+  # ============================================
+  # INFRASTRUCTURE ALERTS
+  # ============================================
+  - name: rtx_infrastructure
+    interval: 30s
+    rules:
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}% on {{ $labels.instance }}"
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value }}% on {{ $labels.instance }}"
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 15
+        for: 10m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Disk space is low"
+          description: "Only {{ $value }}% disk space available on {{ $labels.instance }}"
+
+      - alert: DiskSpaceCritical
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+          component: infrastructure
+        annotations:
+          summary: "Disk space critical"
+          description: "CRITICAL: Only {{ $value }}% disk space on {{ $labels.instance }}"
+
+      - alert: HighDiskIO
+        expr: rate(node_disk_io_time_seconds_total[5m]) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High disk I/O"
+          description: "Disk I/O utilization is {{ $value }} on {{ $labels.instance }}"
+
+  # ============================================
+  # BACKUP & DR ALERTS
+  # ============================================
+  - name: rtx_backup_dr
+    interval: 60s
+    rules:
+      - alert: BackupFailed
+        expr: increase(rtx_backup_failures_total[1h]) > 0
+        labels:
+          severity: critical
+          component: backup
+        annotations:
+          summary: "Backup job failed"
+          description: "{{ $labels.backup_type }} backup failed on {{ $labels.instance }}"
+
+      - alert: BackupOverdue
+        expr: time() - rtx_last_backup_timestamp_seconds > 86400
+        for: 1h
+        labels:
+          severity: critical
+          component: backup
+        annotations:
+          summary: "Full backup is overdue"
+          description: "Last successful backup was {{ $value }}s ago (threshold: 86400s / 24h)"
+
+      - alert: BackupDurationHigh
+        expr: rtx_backup_duration_seconds > 3600
+        labels:
+          severity: warning
+          component: backup
+        annotations:
+          summary: "Backup taking too long"
+          description: "{{ $labels.backup_type }} backup took {{ $value }}s (threshold: 3600s)"
+
+      - alert: RestoreTestFailed
+        expr: increase(rtx_restore_test_failures_total[7d]) > 0
+        labels:
+          severity: warning
+          component: dr
+        annotations:
+          summary: "Restore test failed"
+          description: "Weekly restore test failed - investigate immediately"
+
+  # ============================================
+  # REDIS CACHE ALERTS
+  # ============================================
+  - name: rtx_redis
+    interval: 30s
+    rules:
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "Redis is down"
+          description: "Redis instance {{ $labels.instance }} is unreachable"
+
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Redis memory usage high"
+          description: "Redis using {{ $value }}% of max memory on {{ $labels.instance }}"
+
+      - alert: RedisReplicationBroken
+        expr: redis_connected_slaves < 1
+        for: 5m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "Redis replication broken"
+          description: "Redis master {{ $labels.instance }} has no connected slaves"
+
+  # ============================================
+  # BUSINESS METRICS ALERTS
+  # ============================================
+  - name: rtx_business
+    interval: 60s
+    rules:
+      - alert: NoOrdersExecuted
+        expr: rate(trading_orders_executed_total[15m]) == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "No orders executed recently"
+          description: "No orders executed in last 15 minutes - investigate market data feeds"
+
+      - alert: HighSlippage
+        expr: avg_over_time(trading_order_slippage_pips[5m]) > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "High order slippage detected"
+          description: "Average slippage is {{ $value }} pips (threshold: 5)"
+
+      - alert: UnusualTradingVolume
+        expr: rate(trading_volume_usd[5m]) > 2 * avg_over_time(trading_volume_usd[1h])
+        for: 5m
+        labels:
+          severity: info
+          component: trading
+        annotations:
+          summary: "Unusual trading volume spike"
+          description: "Trading volume is {{ $value }}x normal - monitor for abuse"
+
+  # ============================================
+  # SECURITY ALERTS
+  # ============================================
+  - name: rtx_security
+    interval: 60s
+    rules:
+      - alert: HighFailedLoginRate
+        expr: rate(auth_failed_login_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "High rate of failed login attempts"
+          description: "{{ $value }} failed logins/sec - possible brute force attack"
+
+      - alert: UnauthorizedAPIAccess
+        expr: increase(http_requests_total{status="401"}[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "High rate of unauthorized API access"
+          description: "{{ $value }} 401 responses in 5 minutes"
+
+      - alert: SuspiciousIPActivity
+        expr: increase(suspicious_ip_requests_total[5m]) > 50
+        for: 5m
+        labels:
+          severity: critical
+          component: security
+        annotations:
+          summary: "Suspicious IP activity detected"
+          description: "{{ $value }} requests from blacklisted IPs"

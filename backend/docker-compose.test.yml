@@ -1,0 +1,31 @@
+version: '3.8'
+
+# Test environment services
+# Used by automated test scripts
+
+services:
+  redis-test:
+    image: redis:7-alpine
+    container_name: rtx-redis-test
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - test-network
+
+  # Mock FIX server for testing
+  mock-fix-server:
+    image: alpine:latest
+    container_name: rtx-mock-fix
+    command: sleep infinity
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

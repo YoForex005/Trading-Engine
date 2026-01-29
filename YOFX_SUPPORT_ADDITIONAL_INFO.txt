@@ -1,0 +1,53 @@
+ADDITIONAL REFERENCE FOR YOFX SUPPORT
+=====================================
+
+EXACT FIX MESSAGE BEING SENT:
+-----------------------------
+8=FIX.4.4|9=160|35=V|49=YOFX2|56=YOFX|34=509216|52=20260119-12:00:49.226|262=MD_USDJPY_1768824049226606500|263=1|264=0|265=0|267=2|269=0|269=1|146=1|55=USDJPY|167=FXSPOT|460=4|10=120|
+
+BREAKDOWN OF TAGS:
+------------------
+35=V    - MarketDataRequest
+49=YOFX2 - SenderCompID (our account)
+56=YOFX  - TargetCompID (your server)
+262=MD_USDJPY_xxx - MDReqID (unique request ID)
+263=1   - SubscriptionRequestType (1=Snapshot+Updates)
+264=0   - MarketDepth (0=Full book)
+265=0   - MDUpdateType (0=Full refresh)
+267=2   - NoMDEntryTypes (2 types requested)
+269=0   - MDEntryType (0=Bid)
+269=1   - MDEntryType (1=Offer)
+146=1   - NoRelatedSym (1 symbol)
+55=USDJPY - Symbol
+167=FXSPOT - SecurityType (forex spot)
+460=4   - Product (4=CURRENCY)
+
+CONNECTION STATUS:
+------------------
+✅ Logon successful (35=A accepted)
+✅ Heartbeats exchanging normally (35=0 every 30 seconds)
+✅ Connection stable (no disconnects)
+✅ All 9 symbols accept subscription (no reject messages)
+
+ISSUE:
+------
+❌ NO MarketDataSnapshot messages received (35=W)
+❌ NO MarketDataReject messages received (35=Y)
+⚠️  Server completely silent after accepting MarketDataRequest
+
+QUESTIONS FOR SUPPORT:
+----------------------
+1. Does YOFX2 account have market data feed entitlements enabled?
+2. Is there a specific tag order or additional tags required for your server?
+3. Should we use a different SubscriptionRequestType (263) value?
+4. Do we need to send SecurityListRequest (35=x) first before MarketDataRequest?
+5. Can you provide a working example MarketDataRequest for YOFX2 account?
+6. Is the market data feed active/operational on your end?
+
+URGENCY:
+--------
+Our trading engine is ready but blocked on this. Currently using historical fallback data.
+Need real-time market data to go live.
+
+Account: YOFX2
+Contact: Arijit Nayak

@@ -1,0 +1,150 @@
+name: Deploy to Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Docker image tag to deploy'
+        required: true
+        default: 'dev-latest'
+
+env:
+  GO_VERSION: '1.24.0'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/rtx-backend
+
+jobs:
+  deploy:
+    name: Deploy to Staging Environment
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.rtx-trading.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'latest'
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify image exists
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace rtx-staging --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create Docker registry secret
+        run: |
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=${{ env.REGISTRY }} \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }} \
+            --namespace=rtx-staging \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Backup current deployment
+        run: |
+          kubectl get deployment rtx-backend -n rtx-staging -o yaml > deployment-backup.yaml || true
+
+      - name: Deploy ConfigMap
+        run: |
+          kubectl apply -f k8s/configmap.yaml -n rtx-staging
+
+      - name: Deploy Secrets
+        run: |
+          kubectl create secret generic rtx-secrets \
+            --from-literal=database-url="${{ secrets.STAGING_DATABASE_URL }}" \
+            --from-literal=redis-url="${{ secrets.STAGING_REDIS_URL }}" \
+            --from-literal=jwt-secret="${{ secrets.STAGING_JWT_SECRET }}" \
+            --from-literal=sentry-dsn="${{ secrets.STAGING_SENTRY_DSN }}" \
+            --namespace=rtx-staging \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Run database migrations
+        run: |
+          chmod +x scripts/deploy/run-migrations.sh
+          ./scripts/deploy/run-migrations.sh staging
+
+      - name: Deploy PostgreSQL StatefulSet
+        run: |
+          kubectl apply -f k8s/statefulset.yaml -n rtx-staging
+
+      - name: Deploy backend
+        run: |
+          kubectl set image deployment/rtx-backend \
+            rtx-backend=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }} \
+            -n rtx-staging || \
+          kubectl apply -f k8s/deployment.yaml -n rtx-staging
+
+          kubectl rollout status deployment/rtx-backend -n rtx-staging --timeout=10m
+
+      - name: Deploy services
+        run: |
+          kubectl apply -f k8s/service.yaml -n rtx-staging
+          kubectl apply -f k8s/ingress.yaml -n rtx-staging
+
+      - name: Deploy HPA
+        run: |
+          kubectl apply -f k8s/hpa.yaml -n rtx-staging
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n rtx-staging
+          kubectl get services -n rtx-staging
+          kubectl get ingress -n rtx-staging
+
+      - name: Run smoke tests
+        id: smoke-tests
+        run: |
+          chmod +x scripts/deploy/smoke-test.sh
+          ./scripts/deploy/smoke-test.sh https://staging.rtx-trading.com
+
+      - name: Run integration tests
+        id: integration-tests
+        run: |
+          chmod +x scripts/deploy/integration-test.sh
+          ./scripts/deploy/integration-test.sh staging
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          if [ -f deployment-backup.yaml ]; then
+            kubectl apply -f deployment-backup.yaml
+            kubectl rollout status deployment/rtx-backend -n rtx-staging --timeout=5m
+          fi
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "${{ job.status == 'success' && '✅' || '❌' }} Staging deployment ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Staging Deployment ${{ job.status }}*\n*Image Tag:* ${{ github.event.inputs.tag }}\n*Triggered by:* ${{ github.actor }}\n*Smoke Tests:* ${{ steps.smoke-tests.outcome }}\n*Integration Tests:* ${{ steps.integration-tests.outcome }}"
+                  }
+                }
+              ]
+            }

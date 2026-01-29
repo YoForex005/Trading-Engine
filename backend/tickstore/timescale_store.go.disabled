@@ -1,0 +1,451 @@
+package tickstore
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// TimescaleTickStore provides persistent tick storage using TimescaleDB
+// This replaces file-based storage with a high-performance database backend
+type TimescaleTickStore struct {
+	mu sync.RWMutex
+
+	pool       *pgxpool.Pool
+	brokerID   string
+	batchSize  int
+	flushInterval time.Duration
+
+	// Async batch writer
+	batchQueue chan Tick
+	writeBatch []Tick
+	batchMu    sync.Mutex
+
+	// In-memory cache for recent queries (ring buffer)
+	rings      map[string]*TickRingBuffer
+	maxTicks   int
+
+	// OHLC cache
+	ohlcCache  *OHLCCache
+
+	// Stats
+	ticksReceived   int64
+	ticksWritten    int64
+	ticksDropped    int64
+
+	// Control
+	stopChan   chan struct{}
+	wg         sync.WaitGroup
+}
+
+// TimescaleConfig holds database configuration
+type TimescaleConfig struct {
+	Host            string
+	Port            int
+	Database        string
+	User            string
+	Password        string
+	MaxConnections  int
+	MinConnections  int
+	BrokerID        string
+	BatchSize       int
+	FlushInterval   time.Duration
+	MaxTicksPerSymbol int
+}
+
+// NewTimescaleTickStore creates a new TimescaleDB-backed tick store
+func NewTimescaleTickStore(cfg TimescaleConfig) (*TimescaleTickStore, error) {
+	// Build connection string
+	connString := fmt.Sprintf(
+		"postgres://%s:%s@%s:%d/%s?pool_max_conns=%d&pool_min_conns=%d",
+		cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Database,
+		cfg.MaxConnections, cfg.MinConnections,
+	)
+
+	// Create connection pool
+	poolConfig, err := pgxpool.ParseConfig(connString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pool: %w", err)
+	}
+
+	// Verify connection
+	if err := pool.Ping(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	ts := &TimescaleTickStore{
+		pool:          pool,
+		brokerID:      cfg.BrokerID,
+		batchSize:     cfg.BatchSize,
+		flushInterval: cfg.FlushInterval,
+		maxTicks:      cfg.MaxTicksPerSymbol,
+		batchQueue:    make(chan Tick, 10000),
+		writeBatch:    make([]Tick, 0, cfg.BatchSize),
+		rings:         make(map[string]*TickRingBuffer),
+		ohlcCache:     NewOHLCCache([]Timeframe{TF_M1, TF_M5, TF_M15, TF_H1, TF_H4, TF_D1}),
+		stopChan:      make(chan struct{}),
+	}
+
+	// Start async batch writer
+	ts.wg.Add(1)
+	go ts.asyncBatchWriter()
+
+	// Start periodic flush
+	ts.wg.Add(1)
+	go ts.periodicFlush()
+
+	// Start stats logger
+	ts.wg.Add(1)
+	go ts.logStats()
+
+	log.Printf("[TimescaleTickStore] Initialized with batch size %d, flush interval %v",
+		cfg.BatchSize, cfg.FlushInterval)
+	return ts, nil
+}
+
+// StoreTick stores a tick (implements TickStorageService interface)
+func (ts *TimescaleTickStore) StoreTick(symbol string, bid, ask, spread float64, lp string, timestamp time.Time) {
+	atomic.AddInt64(&ts.ticksReceived, 1)
+
+	tick := Tick{
+		BrokerID:  ts.brokerID,
+		Symbol:    symbol,
+		Bid:       bid,
+		Ask:       ask,
+		Spread:    spread,
+		Timestamp: timestamp,
+		LP:        lp,
+	}
+
+	// Store in ring buffer (for fast recent queries)
+	ts.mu.Lock()
+	ring, ok := ts.rings[symbol]
+	if !ok {
+		ring = NewTickRingBuffer(ts.maxTicks)
+		ts.rings[symbol] = ring
+	}
+	ts.mu.Unlock()
+	ring.Push(tick)
+
+	// Update OHLC cache
+	ts.ohlcCache.UpdateFromTick(symbol, bid, ask, timestamp)
+
+	// Queue for database persistence (non-blocking)
+	select {
+	case ts.batchQueue <- tick:
+		// Queued successfully
+	default:
+		// Queue full - drop tick to prevent blocking
+		atomic.AddInt64(&ts.ticksDropped, 1)
+	}
+}
+
+// asyncBatchWriter batches ticks and writes to TimescaleDB using COPY
+func (ts *TimescaleTickStore) asyncBatchWriter() {
+	defer ts.wg.Done()
+
+	for {
+		select {
+		case <-ts.stopChan:
+			ts.flushBatch() // Final flush
+			return
+		case tick := <-ts.batchQueue:
+			ts.batchMu.Lock()
+			ts.writeBatch = append(ts.writeBatch, tick)
+			shouldFlush := len(ts.writeBatch) >= ts.batchSize
+			ts.batchMu.Unlock()
+
+			if shouldFlush {
+				ts.flushBatch()
+			}
+		}
+	}
+}
+
+// periodicFlush flushes remaining ticks at regular intervals
+func (ts *TimescaleTickStore) periodicFlush() {
+	defer ts.wg.Done()
+	ticker := time.NewTicker(ts.flushInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ts.stopChan:
+			return
+		case <-ticker.C:
+			ts.flushBatch()
+		}
+	}
+}
+
+// flushBatch writes accumulated ticks to TimescaleDB using COPY
+func (ts *TimescaleTickStore) flushBatch() {
+	ts.batchMu.Lock()
+	if len(ts.writeBatch) == 0 {
+		ts.batchMu.Unlock()
+		return
+	}
+
+	// Take ownership of batch
+	batch := ts.writeBatch
+	ts.writeBatch = make([]Tick, 0, ts.batchSize)
+	ts.batchMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Use COPY for maximum performance
+	_, err := ts.pool.CopyFrom(
+		ctx,
+		pgx.Identifier{"tick_history"},
+		[]string{"timestamp", "broker_id", "symbol", "bid", "ask", "spread", "lp"},
+		pgx.CopyFromSlice(len(batch), func(i int) ([]interface{}, error) {
+			return []interface{}{
+				batch[i].Timestamp,
+				batch[i].BrokerID,
+				batch[i].Symbol,
+				batch[i].Bid,
+				batch[i].Ask,
+				batch[i].Spread,
+				batch[i].LP,
+			}, nil
+		}),
+	)
+
+	if err != nil {
+		log.Printf("[TimescaleTickStore] COPY failed: %v (dropped %d ticks)", err, len(batch))
+		atomic.AddInt64(&ts.ticksDropped, int64(len(batch)))
+	} else {
+		atomic.AddInt64(&ts.ticksWritten, int64(len(batch)))
+		log.Printf("[TimescaleTickStore] Flushed %d ticks to database", len(batch))
+	}
+}
+
+// GetHistory retrieves historical ticks for a symbol (from ring buffer, then database)
+func (ts *TimescaleTickStore) GetHistory(symbol string, limit int) []Tick {
+	// Try ring buffer first (fast, recent data)
+	ts.mu.RLock()
+	ring, ok := ts.rings[symbol]
+	ts.mu.RUnlock()
+
+	if ok {
+		ticks := ring.GetRecent(limit)
+		if len(ticks) >= limit {
+			return ticks
+		}
+		// Need more data - fall through to database query
+	}
+
+	// Query database for historical data
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	query := `
+		SELECT timestamp, broker_id, symbol, bid, ask, spread, lp
+		FROM tick_history
+		WHERE symbol = $1
+		ORDER BY timestamp DESC
+		LIMIT $2
+	`
+
+	rows, err := ts.pool.Query(ctx, query, symbol, limit)
+	if err != nil {
+		log.Printf("[TimescaleTickStore] Query failed: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var ticks []Tick
+	for rows.Next() {
+		var tick Tick
+		if err := rows.Scan(&tick.Timestamp, &tick.BrokerID, &tick.Symbol, &tick.Bid, &tick.Ask, &tick.Spread, &tick.LP); err != nil {
+			log.Printf("[TimescaleTickStore] Scan failed: %v", err)
+			continue
+		}
+		ticks = append(ticks, tick)
+	}
+
+	// Reverse to chronological order
+	for i, j := 0, len(ticks)-1; i < j; i, j = i+1, j-1 {
+		ticks[i], ticks[j] = ticks[j], ticks[i]
+	}
+
+	return ticks
+}
+
+// GetHistoryRange retrieves ticks for a date range (for backtesting)
+func (ts *TimescaleTickStore) GetHistoryRange(symbol string, startTime, endTime time.Time, limit int) ([]Tick, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	query := `
+		SELECT timestamp, broker_id, symbol, bid, ask, spread, lp
+		FROM tick_history
+		WHERE symbol = $1
+		  AND timestamp BETWEEN $2 AND $3
+		ORDER BY timestamp
+	`
+
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := ts.pool.Query(ctx, query, symbol, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var ticks []Tick
+	for rows.Next() {
+		var tick Tick
+		if err := rows.Scan(&tick.Timestamp, &tick.BrokerID, &tick.Symbol, &tick.Bid, &tick.Ask, &tick.Spread, &tick.LP); err != nil {
+			return nil, fmt.Errorf("scan failed: %w", err)
+		}
+		ticks = append(ticks, tick)
+	}
+
+	return ticks, nil
+}
+
+// GetOHLC returns OHLC bars (from cache)
+func (ts *TimescaleTickStore) GetOHLC(symbol string, timeframeSecs int64, limit int) []OHLC {
+	var tf Timeframe
+	switch timeframeSecs {
+	case 60:
+		tf = TF_M1
+	case 300:
+		tf = TF_M5
+	case 900:
+		tf = TF_M15
+	case 3600:
+		tf = TF_H1
+	case 14400:
+		tf = TF_H4
+	case 86400:
+		tf = TF_D1
+	default:
+		tf = TF_M1
+	}
+	return ts.ohlcCache.GetBars(symbol, tf, limit)
+}
+
+// GetSymbols returns all symbols with stored ticks
+func (ts *TimescaleTickStore) GetSymbols() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	query := `SELECT DISTINCT symbol FROM tick_history ORDER BY symbol`
+	rows, err := ts.pool.Query(ctx, query)
+	if err != nil {
+		log.Printf("[TimescaleTickStore] GetSymbols failed: %v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var symbols []string
+	for rows.Next() {
+		var symbol string
+		if err := rows.Scan(&symbol); err != nil {
+			continue
+		}
+		symbols = append(symbols, symbol)
+	}
+
+	return symbols
+}
+
+// GetTickCount returns tick count for a symbol (from ring buffer)
+func (ts *TimescaleTickStore) GetTickCount(symbol string) int {
+	ts.mu.RLock()
+	ring, ok := ts.rings[symbol]
+	ts.mu.RUnlock()
+
+	if !ok {
+		return 0
+	}
+	return ring.Count()
+}
+
+// GetStats returns storage statistics
+func (ts *TimescaleTickStore) GetStats() map[string]interface{} {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Query database stats
+	query := `
+		SELECT
+			COUNT(*) as total_ticks,
+			COUNT(DISTINCT symbol) as total_symbols,
+			MIN(timestamp) as oldest_tick,
+			MAX(timestamp) as newest_tick,
+			pg_size_pretty(pg_total_relation_size('tick_history')) as storage_size
+		FROM tick_history
+	`
+
+	var totalTicks, totalSymbols int64
+	var oldestTick, newestTick time.Time
+	var storageSize string
+
+	err := ts.pool.QueryRow(ctx, query).Scan(&totalTicks, &totalSymbols, &oldestTick, &newestTick, &storageSize)
+	if err != nil {
+		log.Printf("[TimescaleTickStore] Stats query failed: %v", err)
+	}
+
+	return map[string]interface{}{
+		"total_ticks":     totalTicks,
+		"total_symbols":   totalSymbols,
+		"oldest_tick":     oldestTick,
+		"newest_tick":     newestTick,
+		"storage_size":    storageSize,
+		"ticks_received":  atomic.LoadInt64(&ts.ticksReceived),
+		"ticks_written":   atomic.LoadInt64(&ts.ticksWritten),
+		"ticks_dropped":   atomic.LoadInt64(&ts.ticksDropped),
+	}
+}
+
+// logStats logs performance metrics
+func (ts *TimescaleTickStore) logStats() {
+	defer ts.wg.Done()
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ts.stopChan:
+			return
+		case <-ticker.C:
+			received := atomic.LoadInt64(&ts.ticksReceived)
+			written := atomic.LoadInt64(&ts.ticksWritten)
+			dropped := atomic.LoadInt64(&ts.ticksDropped)
+
+			log.Printf("[TimescaleTickStore] Stats: received=%d, written=%d, dropped=%d, pool_conns=%d",
+				received, written, dropped, ts.pool.Stat().TotalConns())
+		}
+	}
+}
+
+// Stop gracefully stops the store and flushes remaining data
+func (ts *TimescaleTickStore) Stop() {
+	log.Println("[TimescaleTickStore] Stopping...")
+	close(ts.stopChan)
+	ts.wg.Wait()
+	ts.pool.Close()
+	log.Println("[TimescaleTickStore] Stopped")
+}
+
+// GetOHLCCache returns the OHLC cache
+func (ts *TimescaleTickStore) GetOHLCCache() *OHLCCache {
+	return ts.ohlcCache
+}

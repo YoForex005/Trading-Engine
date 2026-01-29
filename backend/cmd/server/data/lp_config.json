@@ -1,0 +1,24 @@
+{
+  "lps": [
+    {
+      "id": "oanda",
+      "name": "OANDA",
+      "type": "OANDA",
+      "enabled": true,
+      "priority": 1,
+      "settings": {},
+      "symbols": []
+    },
+    {
+      "id": "binance",
+      "name": "Binance",
+      "type": "BINANCE",
+      "enabled": true,
+      "priority": 2,
+      "settings": {},
+      "symbols": []
+    }
+  ],
+  "primaryLp": "oanda",
+  "lastModified": 1768817939
+}

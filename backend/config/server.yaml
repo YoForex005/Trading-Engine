@@ -1,0 +1,274 @@
+# RTX Trading Engine - Server Configuration
+
+server:
+  # Server listening address
+  host: 0.0.0.0
+  port: 7999
+
+  # Request timeouts
+  read_timeout: 15s
+  write_timeout: 30s
+  idle_timeout: 60s
+
+  # Maximum request size (100 MB)
+  max_request_size: 104857600
+
+  # CORS settings
+  cors:
+    allowed_origins:
+      - "*"
+    allowed_methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    allowed_headers:
+      - Content-Type
+      - Authorization
+      - X-API-Key
+      - X-Request-ID
+    exposed_headers:
+      - X-RateLimit-Limit
+      - X-RateLimit-Remaining
+      - X-RateLimit-Reset
+      - Retry-After
+    allow_credentials: true
+    max_age: 3600
+
+# Rate Limiting Configuration
+rate_limiting:
+  # Global rate limiting (per IP)
+  enabled: true
+
+  # Requests per second per IP
+  requests_per_second: 10
+
+  # Requests per minute per IP
+  requests_per_minute: 500
+
+  # Burst size (max concurrent requests)
+  burst_size: 20
+
+  # Cleanup interval for inactive clients
+  cleanup_interval: 5m
+
+  # Timeout for client rate limiters (remove after inactivity)
+  client_timeout: 10m
+
+  # Endpoints to exclude from rate limiting
+  exclusions:
+    - /health
+    - /docs
+    - /swagger.yaml
+    - /api/config
+
+  # Per-endpoint rate limits (overrides global)
+  endpoints:
+    # High volume endpoints get higher limits
+    /ws:
+      requests_per_second: 50
+      burst_size: 100
+
+    /ticks:
+      requests_per_second: 30
+      burst_size: 60
+
+    /api/history/ticks/bulk:
+      requests_per_second: 5
+      burst_size: 10
+
+    # Order endpoints get moderate limits
+    /api/orders/market:
+      requests_per_second: 5
+      burst_size: 10
+
+    /order:
+      requests_per_second: 5
+      burst_size: 10
+
+    # Login gets stricter limits to prevent brute force
+    /login:
+      requests_per_second: 2
+      burst_size: 3
+
+    # Admin endpoints get strict limits
+    /admin/accounts:
+      requests_per_second: 1
+      burst_size: 2
+
+    /admin/deposit:
+      requests_per_second: 1
+      burst_size: 2
+
+    /admin/withdraw:
+      requests_per_second: 1
+      burst_size: 2
+
+# Key-based rate limiting (for API keys, user IDs)
+key_based_rate_limiting:
+  enabled: true
+
+  # Requests per second per key
+  requests_per_second: 20
+
+  # Requests per minute per key
+  requests_per_minute: 1000
+
+  # Burst size for key-based limiting
+  burst_size: 50
+
+  # Cleanup interval
+  cleanup_interval: 5m
+
+  # Timeout for key rate limiters
+  client_timeout: 15m
+
+  # Tier-based limits (optional)
+  tiers:
+    free:
+      requests_per_second: 5
+      burst_size: 10
+
+    pro:
+      requests_per_second: 50
+      burst_size: 100
+
+    enterprise:
+      requests_per_second: 500
+      burst_size: 1000
+
+# Logging Configuration
+logging:
+  # Log level (debug, info, warn, error)
+  level: info
+
+  # Log format (json, text)
+  format: json
+
+  # Log output (stdout, stderr, file)
+  output: stdout
+
+  # Log file configuration
+  file:
+    path: logs/server.log
+    max_size_mb: 100
+    max_backups: 10
+    max_age_days: 30
+    compress: true
+
+  # Rate limiting logs
+  rate_limit_logging:
+    enabled: true
+    log_exceeded: true
+    log_level: warn
+
+# Monitoring and Metrics
+monitoring:
+  # Prometheus metrics
+  prometheus:
+    enabled: true
+    port: 9090
+    path: /metrics
+
+  # Health check configuration
+  health:
+    enabled: true
+    path: /health
+    check_interval: 30s
+
+    # Health checks to perform
+    checks:
+      - database
+      - redis
+      - websocket
+      - fix_gateway
+
+# API Gateway Settings
+api_gateway:
+  # Request ID tracking
+  request_id:
+    enabled: true
+    header_name: X-Request-ID
+
+  # Request/Response logging
+  request_logging:
+    enabled: true
+    log_body: false
+    log_headers: true
+    exclude_paths:
+      - /health
+      - /metrics
+      - /ws
+
+  # Circuit breaker for external services
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 60s
+
+# Security Configuration
+security:
+  # HTTPS/TLS
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+
+  # HSTS (HTTP Strict-Transport-Security)
+  hsts:
+    enabled: false
+    max_age: 31536000
+    include_subdomains: true
+
+  # Security headers
+  headers:
+    x_content_type_options: "nosniff"
+    x_frame_options: "DENY"
+    x_xss_protection: "1; mode=block"
+    strict_transport_security: "max-age=31536000; includeSubDomains"
+
+# WebSocket Configuration
+websocket:
+  # Read buffer size (bytes)
+  read_buffer_size: 1024
+
+  # Write buffer size (bytes)
+  write_buffer_size: 1024
+
+  # Max message size (bytes)
+  max_message_size: 65536
+
+  # Connection limits
+  max_connections: 10000
+  max_connections_per_ip: 100
+
+  # Timeouts
+  read_deadline: 60s
+  write_deadline: 60s
+  ping_interval: 30s
+  pong_wait: 60s
+
+# Database Connection Pool
+database:
+  pool:
+    max_idle_conns: 10
+    max_open_conns: 50
+    conn_max_lifetime: 1h
+    conn_max_idle_time: 10m
+
+# Cache Configuration
+cache:
+  # In-memory cache settings
+  ttl: 5m
+  max_entries: 10000
+
+  # Redis cache (if enabled)
+  redis:
+    enabled: false
+    host: localhost
+    port: 6379
+    db: 0
+    password: ""
+    pool_size: 10

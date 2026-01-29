@@ -1,0 +1,1452 @@
+openapi: 3.0.0
+info:
+  title: RTX Trading Engine API
+  version: 3.0.0
+  description: |
+    Complete API for the RTX Trading Engine - a hybrid B-Book/A-Book trading platform.
+
+    **Features:**
+    - B-Book (Internal) and A-Book (LP Passthrough) execution modes
+    - Real-time market data via WebSocket
+    - Multi-LP aggregation (OANDA, Binance, YoFX via FIX)
+    - Complete position and order management
+    - Admin controls for LP routing and account management
+    - JWT authentication
+    - Hedging and netting margin modes
+
+    **Authentication:**
+    Most endpoints require JWT authentication. Include the token in the Authorization header:
+    ```
+    Authorization: Bearer <your-jwt-token>
+    ```
+
+  contact:
+    name: RTX Trading Support
+    email: support@rtxtrading.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:7999
+    description: Local development server
+  - url: https://api.rtxtrading.com
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization
+  - name: B-Book Orders
+    description: Internal B-Book order execution
+  - name: A-Book Orders
+    description: LP passthrough order execution
+  - name: Positions
+    description: Position management (open, close, modify)
+  - name: Account
+    description: Account balance, equity, margin information
+  - name: Market Data
+    description: Real-time prices, ticks, OHLC data
+  - name: Admin - Accounts
+    description: Admin endpoints for account management
+  - name: Admin - LP Management
+    description: Liquidity provider configuration and routing
+  - name: Admin - FIX Sessions
+    description: FIX protocol session management
+  - name: Admin - Configuration
+    description: Broker-wide configuration
+
+paths:
+  /login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and receive JWT token. Supports both admin and trader accounts.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  description: Username or account ID
+                  example: "admin"
+                password:
+                  type: string
+                  format: password
+                  example: "password"
+            examples:
+              admin:
+                summary: Admin login
+                value:
+                  username: "admin"
+                  password: "password"
+              trader:
+                summary: Trader login
+                value:
+                  username: "demo-user"
+                  password: "password"
+      responses:
+        '200':
+          description: Successful authentication
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: JWT authentication token
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  user:
+                    $ref: '#/components/schemas/User'
+              examples:
+                success:
+                  summary: Successful login
+                  value:
+                    token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjAiLCJ1c2VybmFtZSI6ImFkbWluIiwicm9sZSI6IkFETUlOIiwiZXhwIjoxNzQwMDAwMDAwfQ.signature"
+                    user:
+                      id: "0"
+                      username: "admin"
+                      role: "ADMIN"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check
+      description: Check if the API server is running
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "OK"
+
+  /api/account/summary:
+    get:
+      tags:
+        - Account
+      summary: Get account summary
+      description: Returns balance, equity, margin, and P/L information for the authenticated account
+      operationId: getAccountSummary
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+            format: int64
+            default: 1
+          description: Account ID (optional, defaults to 1)
+      responses:
+        '200':
+          description: Account summary retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountSummary'
+              example:
+                accountId: 1
+                balance: 5000.00
+                equity: 5125.50
+                margin: 250.00
+                freeMargin: 4875.50
+                marginLevel: 2050.20
+                unrealizedPL: 125.50
+                realizedPL: 0.00
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/account/create:
+    post:
+      tags:
+        - Account
+      summary: Create new account
+      description: Create a new trading account (admin only)
+      operationId: createAccount
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - fullName
+                - password
+              properties:
+                username:
+                  type: string
+                  example: "trader001"
+                fullName:
+                  type: string
+                  example: "John Doe"
+                password:
+                  type: string
+                  format: password
+                  example: "securePassword123"
+                isDemo:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/orders/market:
+    post:
+      tags:
+        - B-Book Orders
+      summary: Place market order (B-Book)
+      description: Execute a market order using internal B-Book execution
+      operationId: placeMarketOrder
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarketOrderRequest'
+            examples:
+              buyOrder:
+                summary: Buy market order
+                value:
+                  accountId: 1
+                  symbol: "EURUSD"
+                  side: "BUY"
+                  volume: 0.1
+                  sl: 1.0850
+                  tp: 1.1050
+              sellOrder:
+                summary: Sell market order
+                value:
+                  accountId: 1
+                  symbol: "BTCUSD"
+                  side: "SELL"
+                  volume: 0.01
+      responses:
+        '200':
+          description: Order executed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  position:
+                    $ref: '#/components/schemas/Position'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /order:
+    post:
+      tags:
+        - A-Book Orders
+      summary: Place order (A-Book)
+      description: Route order to liquidity provider (OANDA/YoFX via FIX)
+      operationId: placeOrder
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - symbol
+                - side
+                - volume
+              properties:
+                accountId:
+                  type: string
+                  default: "demo_001"
+                  example: "demo_001"
+                symbol:
+                  type: string
+                  example: "EURUSD"
+                side:
+                  type: string
+                  enum: [BUY, SELL]
+                  example: "BUY"
+                volume:
+                  type: number
+                  format: double
+                  example: 0.1
+                type:
+                  type: string
+                  enum: [MARKET, LIMIT, STOP, STOP_LIMIT]
+                  default: "MARKET"
+                  example: "MARKET"
+                price:
+                  type: number
+                  format: double
+                  description: Required for LIMIT and STOP_LIMIT orders
+                  example: 1.0950
+                sl:
+                  type: number
+                  format: double
+                  description: Stop loss price
+                  example: 1.0850
+                tp:
+                  type: number
+                  format: double
+                  description: Take profit price
+                  example: 1.1050
+      responses:
+        '200':
+          description: Order sent to LP successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  order:
+                    $ref: '#/components/schemas/Order'
+                  message:
+                    type: string
+                    example: "Order sent to LP"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /order/limit:
+    post:
+      tags:
+        - A-Book Orders
+      summary: Place limit order
+      operationId: placeLimitOrder
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - symbol
+                - side
+                - volume
+                - price
+              properties:
+                symbol:
+                  type: string
+                  example: "GBPUSD"
+                side:
+                  type: string
+                  enum: [BUY, SELL]
+                volume:
+                  type: number
+                  format: double
+                  example: 0.5
+                price:
+                  type: number
+                  format: double
+                  example: 1.2650
+                sl:
+                  type: number
+                  format: double
+                tp:
+                  type: number
+                  format: double
+      responses:
+        '200':
+          description: Limit order placed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+
+  /order/stop:
+    post:
+      tags:
+        - A-Book Orders
+      summary: Place stop order
+      operationId: placeStopOrder
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - symbol
+                - side
+                - volume
+                - triggerPrice
+              properties:
+                symbol:
+                  type: string
+                side:
+                  type: string
+                  enum: [BUY, SELL]
+                volume:
+                  type: number
+                  format: double
+                triggerPrice:
+                  type: number
+                  format: double
+                sl:
+                  type: number
+                  format: double
+                tp:
+                  type: number
+                  format: double
+      responses:
+        '200':
+          description: Stop order placed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+
+  /orders/pending:
+    get:
+      tags:
+        - A-Book Orders
+      summary: Get pending orders
+      operationId: getPendingOrders
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of pending orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+
+  /order/cancel:
+    post:
+      tags:
+        - A-Book Orders
+      summary: Cancel pending order
+      operationId: cancelOrder
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - orderId
+              properties:
+                orderId:
+                  type: string
+                  example: "ORD-12345"
+      responses:
+        '200':
+          description: Order cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  orderId:
+                    type: string
+
+  /api/positions:
+    get:
+      tags:
+        - Positions
+      summary: Get open positions
+      operationId: getPositions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Filter by account ID
+      responses:
+        '200':
+          description: List of open positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Position'
+
+  /api/positions/close:
+    post:
+      tags:
+        - Positions
+      summary: Close position
+      operationId: closePosition
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - positionId
+              properties:
+                positionId:
+                  type: integer
+                  format: int64
+                  example: 12345
+                volume:
+                  type: number
+                  format: double
+                  description: Optional partial close volume
+                  example: 0.05
+      responses:
+        '200':
+          description: Position closed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  position:
+                    $ref: '#/components/schemas/Position'
+
+  /api/positions/modify:
+    post:
+      tags:
+        - Positions
+      summary: Modify position SL/TP
+      operationId: modifyPosition
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - positionId
+              properties:
+                positionId:
+                  type: integer
+                  format: int64
+                sl:
+                  type: number
+                  format: double
+                  description: New stop loss (0 to remove)
+                tp:
+                  type: number
+                  format: double
+                  description: New take profit (0 to remove)
+      responses:
+        '200':
+          description: Position modified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /position/trailing-stop:
+    post:
+      tags:
+        - Positions
+      summary: Set trailing stop
+      operationId: setTrailingStop
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - tradeId
+                - symbol
+                - side
+                - type
+                - distance
+              properties:
+                tradeId:
+                  type: string
+                symbol:
+                  type: string
+                side:
+                  type: string
+                  enum: [BUY, SELL]
+                type:
+                  type: string
+                  enum: [FIXED, STEP, ATR]
+                  description: |
+                    - FIXED: Stop loss moves by fixed distance
+                    - STEP: Stop loss moves in steps
+                    - ATR: ATR-based trailing stop
+                distance:
+                  type: number
+                  format: double
+                  description: Distance in pips/points
+                stepSize:
+                  type: number
+                  format: double
+                  description: Required for STEP type
+      responses:
+        '200':
+          description: Trailing stop set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  tradeId:
+                    type: string
+                  type:
+                    type: string
+                  distance:
+                    type: number
+
+  /ticks:
+    get:
+      tags:
+        - Market Data
+      summary: Get tick history
+      operationId: getTicks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "EURUSD"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 500
+            maximum: 10000
+          example: 1000
+      responses:
+        '200':
+          description: Tick data retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tick'
+
+  /ohlc:
+    get:
+      tags:
+        - Market Data
+      summary: Get OHLC (candlestick) data
+      operationId: getOHLC
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+          example: "BTCUSD"
+        - name: timeframe
+          in: query
+          schema:
+            type: string
+            enum: [1m, 5m, 15m, 1h, 4h, 1d]
+            default: "1h"
+          example: "1h"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 500
+          example: 100
+      responses:
+        '200':
+          description: OHLC data retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OHLC'
+
+  /risk/calculate-lot:
+    get:
+      tags:
+        - Risk Management
+      summary: Calculate lot size from risk
+      operationId: calculateLot
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: riskPercent
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+          description: Risk percentage (e.g., 2.0 for 2%)
+        - name: slPips
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+          description: Stop loss distance in pips
+      responses:
+        '200':
+          description: Lot size calculated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  symbol:
+                    type: string
+                  riskPercent:
+                    type: number
+                  slPips:
+                    type: number
+                  recommendedLot:
+                    type: number
+                  riskAmount:
+                    type: number
+
+  /risk/margin-preview:
+    get:
+      tags:
+        - Risk Management
+      summary: Preview margin requirements
+      operationId: previewMargin
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: volume
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+        - name: side
+          in: query
+          schema:
+            type: string
+            enum: [BUY, SELL]
+      responses:
+        '200':
+          description: Margin preview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requiredMargin:
+                    type: number
+                  freeMarginAfter:
+                    type: number
+                  marginLevel:
+                    type: number
+
+  /admin/accounts:
+    get:
+      tags:
+        - Admin - Accounts
+      summary: List all accounts
+      operationId: adminGetAccounts
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Account'
+
+  /admin/deposit:
+    post:
+      tags:
+        - Admin - Accounts
+      summary: Deposit funds
+      operationId: adminDeposit
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - amount
+                - method
+              properties:
+                accountId:
+                  type: integer
+                  format: int64
+                amount:
+                  type: number
+                  format: double
+                  example: 1000.00
+                method:
+                  type: string
+                  enum: [BANK_TRANSFER, CRYPTO, CARD]
+                  example: "BANK_TRANSFER"
+                reference:
+                  type: string
+                  example: "TXN-123456"
+      responses:
+        '200':
+          description: Deposit successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  newBalance:
+                    type: number
+
+  /admin/withdraw:
+    post:
+      tags:
+        - Admin - Accounts
+      summary: Withdraw funds
+      operationId: adminWithdraw
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountId
+                - amount
+                - method
+              properties:
+                accountId:
+                  type: integer
+                  format: int64
+                amount:
+                  type: number
+                  format: double
+                method:
+                  type: string
+                  enum: [BANK_TRANSFER, CRYPTO]
+      responses:
+        '200':
+          description: Withdrawal successful
+
+  /admin/lps:
+    get:
+      tags:
+        - Admin - LP Management
+      summary: List liquidity providers
+      operationId: adminListLPs
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of LPs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LiquidityProvider'
+    post:
+      tags:
+        - Admin - LP Management
+      summary: Add liquidity provider
+      operationId: adminAddLP
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiquidityProvider'
+      responses:
+        '200':
+          description: LP added successfully
+
+  /admin/lps/{lpId}/toggle:
+    post:
+      tags:
+        - Admin - LP Management
+      summary: Enable/disable LP
+      operationId: adminToggleLP
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: lpId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: LP toggled
+
+  /admin/lp-status:
+    get:
+      tags:
+        - Admin - LP Management
+      summary: Get LP connection status
+      operationId: adminLPStatus
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: LP status information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lps:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        enabled:
+                          type: boolean
+                        connected:
+                          type: boolean
+                        lastQuoteTime:
+                          type: integer
+                          format: int64
+
+  /admin/fix/status:
+    get:
+      tags:
+        - Admin - FIX Sessions
+      summary: Get FIX session status
+      operationId: adminFIXStatus
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: FIX session status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: object
+                    additionalProperties:
+                      type: string
+
+  /admin/fix/connect:
+    post:
+      tags:
+        - Admin - FIX Sessions
+      summary: Connect FIX session
+      operationId: adminFIXConnect
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+                  example: "YOFX1"
+      responses:
+        '200':
+          description: Connection initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  sessionId:
+                    type: string
+                  message:
+                    type: string
+
+  /admin/fix/disconnect:
+    post:
+      tags:
+        - Admin - FIX Sessions
+      summary: Disconnect FIX session
+      operationId: adminFIXDisconnect
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+              properties:
+                sessionId:
+                  type: string
+      responses:
+        '200':
+          description: Disconnected
+
+  /api/config:
+    get:
+      tags:
+        - Admin - Configuration
+      summary: Get broker configuration
+      operationId: getConfig
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current broker configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerConfig'
+    post:
+      tags:
+        - Admin - Configuration
+      summary: Update broker configuration
+      operationId: updateConfig
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrokerConfig'
+      responses:
+        '200':
+          description: Configuration updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  config:
+                    $ref: '#/components/schemas/BrokerConfig'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "1"
+        username:
+          type: string
+          example: "trader001"
+        role:
+          type: string
+          enum: [ADMIN, TRADER]
+          example: "TRADER"
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        accountNumber:
+          type: string
+        username:
+          type: string
+        fullName:
+          type: string
+        balance:
+          type: number
+          format: double
+        equity:
+          type: number
+          format: double
+        isDemo:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    AccountSummary:
+      type: object
+      properties:
+        accountId:
+          type: integer
+          format: int64
+        balance:
+          type: number
+          format: double
+          description: Account balance
+        equity:
+          type: number
+          format: double
+          description: Balance + unrealized P/L
+        margin:
+          type: number
+          format: double
+          description: Used margin
+        freeMargin:
+          type: number
+          format: double
+          description: Available margin
+        marginLevel:
+          type: number
+          format: double
+          description: Equity / Margin * 100
+        unrealizedPL:
+          type: number
+          format: double
+          description: Floating profit/loss
+        realizedPL:
+          type: number
+          format: double
+          description: Closed position P/L
+
+    MarketOrderRequest:
+      type: object
+      required:
+        - symbol
+        - side
+        - volume
+      properties:
+        accountId:
+          type: integer
+          format: int64
+          default: 1
+        symbol:
+          type: string
+          example: "EURUSD"
+        side:
+          type: string
+          enum: [BUY, SELL]
+          example: "BUY"
+        volume:
+          type: number
+          format: double
+          example: 0.1
+          description: Lot size
+        sl:
+          type: number
+          format: double
+          description: Stop loss price (optional)
+        tp:
+          type: number
+          format: double
+          description: Take profit price (optional)
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+        accountId:
+          type: integer
+          format: int64
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [BUY, SELL]
+        type:
+          type: string
+          enum: [MARKET, LIMIT, STOP, STOP_LIMIT]
+        volume:
+          type: number
+          format: double
+        price:
+          type: number
+          format: double
+        triggerPrice:
+          type: number
+          format: double
+        sl:
+          type: number
+          format: double
+        tp:
+          type: number
+          format: double
+        status:
+          type: string
+          enum: [PENDING, FILLED, CANCELLED, REJECTED]
+        createdAt:
+          type: string
+          format: date-time
+        filledAt:
+          type: string
+          format: date-time
+
+    Position:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        accountId:
+          type: integer
+          format: int64
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [BUY, SELL]
+        volume:
+          type: number
+          format: double
+        entryPrice:
+          type: number
+          format: double
+        currentPrice:
+          type: number
+          format: double
+        sl:
+          type: number
+          format: double
+        tp:
+          type: number
+          format: double
+        unrealizedPL:
+          type: number
+          format: double
+        commission:
+          type: number
+          format: double
+        swap:
+          type: number
+          format: double
+        openTime:
+          type: string
+          format: date-time
+
+    Tick:
+      type: object
+      properties:
+        symbol:
+          type: string
+        bid:
+          type: number
+          format: double
+        ask:
+          type: number
+          format: double
+        spread:
+          type: number
+          format: double
+        timestamp:
+          type: integer
+          format: int64
+        lp:
+          type: string
+          description: Liquidity provider source
+
+    OHLC:
+      type: object
+      properties:
+        timestamp:
+          type: integer
+          format: int64
+        open:
+          type: number
+          format: double
+        high:
+          type: number
+          format: double
+        low:
+          type: number
+          format: double
+        close:
+          type: number
+          format: double
+        volume:
+          type: number
+          format: double
+
+    LiquidityProvider:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "oanda"
+        name:
+          type: string
+          example: "OANDA"
+        type:
+          type: string
+          enum: [REST, FIX, WEBSOCKET]
+        enabled:
+          type: boolean
+        priority:
+          type: integer
+        symbols:
+          type: array
+          items:
+            type: string
+
+    BrokerConfig:
+      type: object
+      properties:
+        brokerName:
+          type: string
+          example: "RTX Trading"
+        priceFeedLP:
+          type: string
+          example: "OANDA"
+        executionMode:
+          type: string
+          enum: [BBOOK, ABOOK]
+          example: "BBOOK"
+        defaultLeverage:
+          type: integer
+          example: 100
+        defaultBalance:
+          type: number
+          format: double
+          example: 5000.00
+        marginMode:
+          type: string
+          enum: [HEDGING, NETTING]
+          example: "HEDGING"
+        maxTicksPerSymbol:
+          type: integer
+          example: 50000
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        code:
+          type: string
+          description: Error code (optional)
+        details:
+          type: object
+          description: Additional error details
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Invalid request body"
+            code: "INVALID_REQUEST"
+
+    Unauthorized:
+      description: Unauthorized - invalid or missing authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Unauthorized"
+            code: "AUTH_REQUIRED"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Resource not found"
+            code: "NOT_FOUND"
+
+    InsufficientMargin:
+      description: Insufficient margin for operation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Insufficient margin"
+            code: "MARGIN_INSUFFICIENT"
+
+security:
+  - bearerAuth: []

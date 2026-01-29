@@ -1,0 +1,455 @@
+================================================================================
+            QUOTE STREAMING RESOURCE MONITORING - SETUP COMPLETE
+================================================================================
+
+Status: READY TO USE
+Location: D:\Tading engine\Trading-Engine\
+
+ALL FILES CREATED AND VERIFIED:
+  ✓ monitor_resources.ps1        (9.2 KB) - Main monitoring tool
+  ✓ load_test_quotes.ps1         (3.0 KB) - Load test simulator
+  ✓ run_load_test.ps1            (1.9 KB) - Orchestration script
+  ✓ QUICK_START.bat              (2.2 KB) - Interactive menu
+  ✓ START_HERE.txt               (11.0 KB) - Quick start guide
+  ✓ README_MONITORING.txt        (8.6 KB) - Setup & requirements
+  ✓ LOAD_TEST_GUIDE.txt          (11.2 KB) - Metrics & troubleshooting
+  ✓ TEST_REPORT_TEMPLATE.txt     (11.0 KB) - Result documentation
+  ✓ MONITORING_OVERVIEW.txt      (8.5 KB) - Visual diagrams & patterns
+  ✓ SETUP_COMPLETE.txt           (This file)
+
+TOTAL: 10 Files, 66.5 KB
+
+================================================================================
+START HERE - THREE OPTIONS
+================================================================================
+
+OPTION 1: INTERACTIVE MENU (EASIEST)
+  1. Double-click: QUICK_START.bat
+  2. Select option 1 (Full Test)
+  3. Wait 2 minutes
+  4. Review results in console
+  5. Results saved to: monitoring_results.csv
+
+OPTION 2: READ FIRST (RECOMMENDED)
+  1. Open: START_HERE.txt
+  2. Understand overview & quick start
+  3. Run QUICK_START.bat
+  4. Follow the prompts
+
+OPTION 3: COMMAND LINE (ADVANCED)
+  Run: powershell -ExecutionPolicy Bypass -File monitor_resources.ps1
+  Wait: 2 minutes
+  Results: monitoring_results.csv
+
+================================================================================
+WHAT YOU GET
+================================================================================
+
+REAL-TIME MONITORING
+  • CPU usage (process and system)
+  • Memory usage and growth rate
+  • Thread count tracking
+  • System stability assessment
+  • Automatic memory leak detection
+
+CONSOLE OUTPUT
+  • 24 samples (every 5 seconds for 2 minutes)
+  • Real-time metrics displayed
+  • Automatic analysis
+  • Recommendations provided
+
+CSV FILE
+  • monitoring_results.csv (generated after test)
+  • Import into Excel
+  • Create charts
+  • Analyze trends
+
+FINAL REPORT
+  • Peak CPU usage
+  • Peak memory usage
+  • Average resource usage
+  • Memory leak assessment
+  • System stability verdict
+  • Optimization recommendations
+
+================================================================================
+KEY METRICS EXPLAINED
+================================================================================
+
+Peak CPU Usage (%)
+  What:     Maximum CPU at any point
+  Good:     < 50%
+  Acceptable: < 80%
+  Bad:      > 90%
+
+Average CPU Usage (%)
+  What:     Mean CPU throughout test
+  Good:     10-30%
+  Bad:      > 60%
+
+Peak Memory (MB)
+  What:     Maximum RAM at any point
+  Good:     < 500 MB
+  Acceptable: < 1500 MB
+  Bad:      > 2000 MB
+
+Memory Growth Rate (MB/minute)
+  What:     How fast memory increases
+  Good:     < 10 MB/min
+  Warning:  10-50 MB/min
+  Bad:      > 50 MB/min (likely memory leak)
+
+Thread Count
+  What:     Number of active threads
+  Good:     Stable (not increasing)
+  Bad:      Continuously increasing (goroutine leak)
+
+================================================================================
+EXPECTED RESULTS FOR HEALTHY SYSTEM
+================================================================================
+
+✓ Peak CPU:              20-50%
+✓ Average CPU:           5-15%
+✓ Peak Memory:           100-300 MB
+✓ Average Memory:        50-150 MB
+✓ Memory Growth:         < 20 MB over 2 minutes
+✓ Memory Growth Rate:    < 10 MB/minute
+✓ Thread Count:          Stable
+✓ System Remains:        Responsive
+✓ No CRITICAL Alerts:    Should see "✓ All metrics within acceptable ranges"
+
+IF YOU SEE ISSUES:
+✗ Peak CPU > 80%        → Investigate code efficiency
+✗ Peak Memory > 1500MB  → Review memory allocation
+✗ Memory Growing > 10MB/min → Potential memory leak
+✗ Threads Increasing    → Possible goroutine leak
+✗ System Unresponsive   → Stop test, free resources
+
+================================================================================
+FILE ORGANIZATION & PURPOSE
+================================================================================
+
+ENTRY POINTS:
+  START_HERE.txt       → Read this first
+  QUICK_START.bat      → Run this to execute test
+
+DOCUMENTATION:
+  README_MONITORING.txt      → Complete setup & requirements
+  LOAD_TEST_GUIDE.txt        → Detailed metric explanations
+  MONITORING_OVERVIEW.txt    → Visual diagrams & patterns
+  TEST_REPORT_TEMPLATE.txt   → Document your findings
+
+SCRIPTS:
+  monitor_resources.ps1      → Main tool (monitors resources)
+  load_test_quotes.ps1       → Load simulator (optional)
+  run_load_test.ps1          → Orchestration (advanced)
+
+RESULTS:
+  monitoring_results.csv     → Generated after test runs
+
+================================================================================
+HOW TO RUN - STEP BY STEP
+================================================================================
+
+STEP 1: PREPARE
+  [ ] Close unnecessary applications
+  [ ] Ensure backend\cmd\server\server.exe exists
+  [ ] Check port 8080 is available
+  [ ] Have 5-10 minutes available
+
+STEP 2: RUN TEST
+  [ ] Double-click QUICK_START.bat
+  [ ] Select option 1 (Full Test)
+  [ ] Press any key to start
+  [ ] Wait 2 minutes+ for completion
+
+STEP 3: REVIEW CONSOLE OUTPUT
+  [ ] Read the summary displayed
+  [ ] Check for any CRITICAL alerts
+  [ ] Note the key metrics (peak CPU, peak memory)
+  [ ] Review the recommendation
+
+STEP 4: ANALYZE CSV FILE
+  [ ] Open monitoring_results.csv in Excel
+  [ ] Create line charts for CPU and memory
+  [ ] Look for trends and patterns
+  [ ] Check for memory growth over time
+
+STEP 5: DOCUMENT RESULTS (OPTIONAL)
+  [ ] Open TEST_REPORT_TEMPLATE.txt
+  [ ] Fill in your test details
+  [ ] Save with timestamp
+  [ ] Keep for future comparison
+
+STEP 6: OPTIMIZE IF NEEDED
+  [ ] If issues found, review LOAD_TEST_GUIDE.txt
+  [ ] Make code improvements
+  [ ] Retest and compare results
+  [ ] Document improvements
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+PROBLEM: "Cannot reach server at localhost:8080"
+SOLUTION:
+  - Verify server.exe exists: backend\cmd\server\server.exe
+  - Check port 8080 is not in use: netstat -ano | findstr 8080
+  - Ensure firewall isn't blocking port
+  - Try rebuilding: go build -o server.exe ./cmd/server
+
+PROBLEM: "High memory growth detected"
+SOLUTION:
+  - This might be normal for high tick volumes
+  - Check if memory stabilizes (plateaus)
+  - If memory keeps growing, likely memory leak
+  - Review LOAD_TEST_GUIDE.txt section "Common Issues"
+
+PROBLEM: "High CPU usage"
+SOLUTION:
+  - Normal under load, check if it stabilizes
+  - If peak > 80%, investigate code efficiency
+  - Try lower request rates in load test
+  - Profile hot code paths
+
+PROBLEM: "Script won't run"
+SOLUTION:
+  - Run PowerShell as Administrator
+  - Set execution policy: powershell -ExecutionPolicy Bypass
+  - Verify all files in same directory
+  - Check server.exe exists
+
+================================================================================
+ANALYZING THE CSV FILE
+================================================================================
+
+After test completes, you have monitoring_results.csv with:
+
+Columns:
+  1. Timestamp              When the sample was taken
+  2. ElapsedSeconds         Seconds since start
+  3. ProcessCPU_Percent     Process CPU usage
+  4. ProcessMemory_MB       Process working memory
+  5. ProcessPrivateMem_MB   Private memory
+  6. SystemCPU_Percent      System CPU usage
+  7. SystemMemory_MB        System memory in use
+  8. SystemMemory_Percent   System memory %
+  9. ThreadCount            Active threads
+
+Import into Excel:
+  1. Double-click monitoring_results.csv
+  2. It opens in Excel automatically
+  3. Create line charts:
+     - X-axis: ElapsedSeconds
+     - Y-axis: ProcessMemory_MB (for memory trend)
+     - Y-axis: ProcessCPU_Percent (for CPU trend)
+  4. Look for patterns:
+     - Memory should plateau (not continuously grow)
+     - CPU should stabilize
+     - Threads should stay constant
+
+Calculate Memory Leak Rate:
+  In Excel: =(Last_Memory - First_Memory) / (Total_Time_Minutes)
+  Example: (152 - 100) / 2 = 26 MB/minute
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+IMMEDIATE:
+  1. Read START_HERE.txt for overview
+  2. Run QUICK_START.bat to execute first test
+  3. Review console output for recommendations
+
+SHORT TERM:
+  1. Open monitoring_results.csv in Excel
+  2. Create charts to visualize trends
+  3. Document results using TEST_REPORT_TEMPLATE.txt
+
+IF ISSUES FOUND:
+  1. Review LOAD_TEST_GUIDE.txt troubleshooting section
+  2. Analyze CSV data for patterns
+  3. Identify root cause
+  4. Make code improvements
+  5. Retest to verify fixes
+
+ONGOING:
+  1. Run regular baseline tests
+  2. Track performance over time
+  3. Document all results
+  4. Compare before/after optimization
+  5. Maintain historical data
+
+================================================================================
+SYSTEM REQUIREMENTS VERIFICATION
+================================================================================
+
+Hardware Check:
+  Windows Version:        Windows 7+ (required)
+  RAM Available:          2GB+ (required)
+  Processor:              Dual-core or better
+  Disk Space:             100MB+ (required)
+
+Software Check:
+  PowerShell:             3.0+ (built-in, status: ✓)
+  .NET Framework:         4.5+ (required for PowerShell)
+  Go Runtime:             (for building backend if needed)
+  Backend Server:         backend\cmd\server\server.exe (must exist)
+
+Network Check:
+  Localhost Access:       Required
+  Port 8080:              Must be available
+  External Network:       Not required
+
+All systems ready for testing!
+
+================================================================================
+PERFORMANCE OPTIMIZATION CHECKLIST
+================================================================================
+
+Memory Issues Found:
+  [ ] Review goroutine creation/cleanup
+  [ ] Check connection pooling
+  [ ] Verify cache eviction policies
+  [ ] Look for message buffer accumulation
+  [ ] Check for held locks preventing cleanup
+  [ ] Review message queue implementations
+  [ ] Check WebSocket memory handling
+  [ ] Verify database query result handling
+
+CPU Issues Found:
+  [ ] Profile hot code paths
+  [ ] Optimize database queries
+  [ ] Review WebSocket handling
+  [ ] Check for unnecessary allocations
+  [ ] Look for busy loops
+  [ ] Verify request processing efficiency
+  [ ] Check concurrent operation overhead
+
+System Stability Issues:
+  [ ] Reduce concurrent request rate
+  [ ] Lower monitoring duration
+  [ ] Increase system RAM
+  [ ] Close other applications
+  [ ] Review system logs for errors
+
+================================================================================
+KEEPING RECORDS
+================================================================================
+
+Best Practices:
+  1. Save each test result with timestamp
+  2. Document test conditions (date, time, load level)
+  3. Note any issues observed
+  4. Track improvements over time
+  5. Keep baseline for comparison
+
+File Naming Convention:
+  monitoring_results_2026-01-19_14-30.csv
+  monitoring_results_2026-01-19_15-45.csv
+  monitoring_results_2026-01-20_09-00.csv
+
+Documentation:
+  Use TEST_REPORT_TEMPLATE.txt for each test
+  Save as: Test_Report_2026-01-19.txt
+  Include all findings and recommendations
+
+Comparison:
+  Compare before/after optimization
+  Track memory, CPU, and stability improvements
+  Document successful solutions
+
+================================================================================
+SUPPORT & DOCUMENTATION
+================================================================================
+
+Quick Questions?
+  See: LOAD_TEST_GUIDE.txt "Common Issues & Solutions"
+
+Need Setup Help?
+  See: README_MONITORING.txt "Installation"
+
+Want to Understand Metrics?
+  See: LOAD_TEST_GUIDE.txt "Key Metrics Tracked"
+
+Need Visual Examples?
+  See: MONITORING_OVERVIEW.txt "Resource Analysis"
+
+Looking for Report Format?
+  See: TEST_REPORT_TEMPLATE.txt
+
+Server Code Issues?
+  See: backend\cmd\server\main.go
+
+API Endpoints?
+  See: backend\api\server.go
+
+WebSocket Handler?
+  See: backend\internal\api\websocket\
+
+Database Config?
+  See: backend\config\
+
+Tick Store?
+  See: backend\tickstore\
+
+================================================================================
+FINAL CHECKLIST
+================================================================================
+
+Before Running Test:
+  [ ] All files created and verified
+  [ ] Backend server exists
+  [ ] Port 8080 available
+  [ ] Enough disk space
+  [ ] PowerShell working
+  [ ] 2+ GB RAM available
+
+First Test Run:
+  [ ] Double-click QUICK_START.bat
+  [ ] Select option 1
+  [ ] Press any key
+  [ ] Wait 2 minutes
+  [ ] Review console output
+
+After First Test:
+  [ ] Check monitoring_results.csv exists
+  [ ] Review metrics
+  [ ] Note any issues
+  [ ] Read LOAD_TEST_GUIDE.txt if questions
+
+Optimization:
+  [ ] Identify performance issues
+  [ ] Plan improvements
+  [ ] Implement fixes
+  [ ] Retest and compare
+  [ ] Document results
+
+Ongoing:
+  [ ] Run regular tests
+  [ ] Keep historical data
+  [ ] Track improvements
+  [ ] Maintain baseline
+  [ ] Plan next optimizations
+
+================================================================================
+YOU ARE READY!
+================================================================================
+
+Everything is set up and ready to use.
+
+NEXT ACTION:
+  Double-click QUICK_START.bat and run your first test!
+
+Expected Duration: 2-3 minutes
+Expected Output: Console summary + monitoring_results.csv
+
+Questions? Check: START_HERE.txt or LOAD_TEST_GUIDE.txt
+
+Good luck!
+
+================================================================================
+Setup Date: 2026-01-19
+Version: 1.0 Complete
+Status: READY FOR PRODUCTION USE
+================================================================================

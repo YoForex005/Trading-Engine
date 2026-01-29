@@ -1,0 +1,158 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: rtx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rtx_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-rtx_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rtx_password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rtx_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rtx-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: rtx-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-rtx_redis}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - rtx-network
+
+  # RTX Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        BUILD_TIME: ${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+    container_name: rtx-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Server
+      PORT: ${PORT:-8080}
+      METRICS_PORT: ${METRICS_PORT:-9090}
+      GIN_MODE: ${GIN_MODE:-debug}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rtx_user}:${POSTGRES_PASSWORD:-rtx_password}@postgres:5432/${POSTGRES_DB:-rtx_dev}?sslmode=disable
+      DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS:-25}
+      DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-5}
+      DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME:-5m}
+
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD:-rtx_redis}@redis:6379/0
+      REDIS_MAX_RETRIES: ${REDIS_MAX_RETRIES:-3}
+      REDIS_POOL_SIZE: ${REDIS_POOL_SIZE:-10}
+
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      JWT_EXPIRY: ${JWT_EXPIRY:-24h}
+
+      # Security
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080}
+      RATE_LIMIT: ${RATE_LIMIT:-100}
+
+      # Monitoring
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-development}
+
+      # Feature Flags
+      ENABLE_METRICS: ${ENABLE_METRICS:-true}
+      ENABLE_PROFILING: ${ENABLE_PROFILING:-true}
+    ports:
+      - "${PORT:-8080}:8080"
+      - "${METRICS_PORT:-9090}:9090"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - rtx-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rtx-backend.rule=Host(`api.localhost`)"
+      - "traefik.http.services.rtx-backend.loadbalancer.server.port=8080"
+
+  # Prometheus (Monitoring)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: rtx-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - rtx-network
+
+  # Grafana (Visualization)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: rtx-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - rtx-network
+    depends_on:
+      - prometheus
+
+networks:
+  rtx-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

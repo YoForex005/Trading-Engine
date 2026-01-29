@@ -1,0 +1,2 @@
+backend/data/ticks.json filter=lfs diff=lfs merge=lfs -text
+backend/data/ticks/**/*.json filter=lfs diff=lfs merge=lfs -text

@@ -1,0 +1,118 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rtx-backend-hpa
+  namespace: rtx-prod
+  labels:
+    app: rtx-backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rtx-backend
+
+  minReplicas: 3
+  maxReplicas: 20
+
+  metrics:
+    # CPU-based scaling
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Memory-based scaling
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+    # Custom metrics (requires metrics server)
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: "1000"
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+      selectPolicy: Max
+
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+        - type: Pods
+          value: 1
+          periodSeconds: 180
+      selectPolicy: Min
+
+---
+# Vertical Pod Autoscaler (VPA)
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: rtx-backend-vpa
+  namespace: rtx-prod
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rtx-backend
+
+  updatePolicy:
+    updateMode: "Auto"
+
+  resourcePolicy:
+    containerPolicies:
+      - containerName: rtx-backend
+        minAllowed:
+          cpu: 250m
+          memory: 256Mi
+        maxAllowed:
+          cpu: 4000m
+          memory: 4Gi
+        controlledResources:
+          - cpu
+          - memory
+
+---
+# Pod Disruption Budget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: rtx-backend-pdb
+  namespace: rtx-prod
+  labels:
+    app: rtx-backend
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: rtx-backend
+
+---
+# Priority Class
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: rtx-high-priority
+value: 1000000
+globalDefault: false
+description: "High priority class for RTX Trading Engine critical pods"

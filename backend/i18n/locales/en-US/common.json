@@ -1,0 +1,34 @@
+{
+  "app": {
+    "name": "RTX Trading Platform",
+    "welcome": "Welcome to RTX Trading",
+    "login": "Login",
+    "logout": "Logout",
+    "register": "Register"
+  },
+  "trading": {
+    "buy": "Buy",
+    "sell": "Sell",
+    "market_order": "Market Order",
+    "limit_order": "Limit Order",
+    "stop_order": "Stop Order",
+    "order_placed": "Order placed successfully",
+    "order_failed": "Failed to place order",
+    "position_opened": "Position opened",
+    "position_closed": "Position closed"
+  },
+  "account": {
+    "balance": "Balance",
+    "equity": "Equity",
+    "margin": "Margin",
+    "free_margin": "Free Margin",
+    "margin_level": "Margin Level"
+  },
+  "errors": {
+    "generic": "An error occurred",
+    "network": "Network error",
+    "unauthorized": "Unauthorized",
+    "invalid_input": "Invalid input",
+    "server_error": "Server error"
+  }
+}
