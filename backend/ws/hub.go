@@ -78,6 +78,8 @@ type MarketTick struct {
 	Timestamp   int64   `json:"timestamp"`
 	LP          string  `json:"lp"`          // Liquidity Provider source
 	DailyChange float64 `json:"dailyChange"` // Daily percentage change
+	High24h     float64 `json:"high24h"`     // 24-hour high
+	Low24h      float64 `json:"low24h"`      // 24-hour low
 }
 
 func NewHub() *Hub {

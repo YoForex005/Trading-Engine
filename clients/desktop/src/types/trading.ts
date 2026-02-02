@@ -39,8 +39,8 @@ export type MarketWatchItem = {
   change: number;
   changePercent: number;
   volume: number;
-  high24h: number;
-  low24h: number;
+  high24h?: number;
+  low24h?: number;
   timestamp: number;
   direction?: 'up' | 'down' | 'neutral';
 };

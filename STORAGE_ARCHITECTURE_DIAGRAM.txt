@@ -1,0 +1,529 @@
+================================================================================
+                    TRADING ENGINE STORAGE ARCHITECTURE
+================================================================================
+
+1. OVERALL DATA FLOW
+================================================================================
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│                         BROWSER APPLICATION                                 │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │  REACT COMPONENTS (UI Layer)                                           │ │
+│  │  ├─ App.tsx                                                            │ │
+│  │  ├─ ChartTabs, TradingChart, MarketWatchPanel, BottomDock            │ │
+│  │  └─ OrderPanelDialog, OptionsDialog                                  │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                              ↑        ↓                                      │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │  STATE MANAGEMENT LAYER                                                │ │
+│  │                                                                        │ │
+│  │  ┌─ ZUSTAND STORES (Reactive + Persisted)                            │ │
+│  │  │  ├─ useAppStore                 [Key: trading-app-storage]        │ │
+│  │  │  │  ├─ isAuthenticated, accountId, authToken                      │ │
+│  │  │  │  ├─ selectedSymbol, chartType, timeframe, orderVolume          │ │
+│  │  │  │  ├─ positions, orders, trades, account                         │ │
+│  │  │  │  └─ wsConnected, loading states                                │ │
+│  │  │  │                                                                │ │
+│  │  │  └─ useMarketDataStore            [Key: MarketDataStore]         │ │
+│  │  │     ├─ symbolData (OHLCV, ticks, stats)                          │ │
+│  │  │     └─ subscribedSymbols (Set)                                    │ │
+│  │  │                                                                    │ │
+│  │  └─ SINGLETON SERVICES (Programmatic Persistence)                    │ │
+│  │     ├─ windowManager                 [Key: windowManagerState]       │ │
+│  │     │  └─ layoutMode, charts array                                   │ │
+│  │     ├─ indicatorManager              [Key: chart-indicators-{SYM}]   │ │
+│  │     │  └─ indicators configs per symbol                              │ │
+│  │     └─ drawingManager                [Key: drawings-{SYMBOL}]        │ │
+│  │        └─ drawing objects per symbol                                 │ │
+│  │                                                                        │ │
+│  │  ┌─ REACT CONTEXT (Event Bus)                                         │ │
+│  │  │  └─ CommandBusContext (custom events)                             │ │
+│  │  │     ├─ openChart, openOrderDialog                                 │ │
+│  │  │     ├─ openDepthOfMarket, openSymbolsDialog                       │ │
+│  │  │     └─ openPopupPrices                                            │ │
+│  │  └─                                                                   │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                              ↓        ↑                                      │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │  BROWSER STORAGE LAYER                                                 │ │
+│  │                                                                        │ │
+│  │  localStorage (Synchronous, ~5-15 KB typical)                        │ │
+│  │                                                                        │ │
+│  │  [TRADING STATE KEYS]                                                │ │
+│  │  • trading-app-storage          {selectedSymbol, chartType, ...}     │ │
+│  │  • MarketDataStore              {symbolData, subscribedSymbols}      │ │
+│  │                                                                        │ │
+│  │  [LAYOUT & UI KEYS]                                                  │ │
+│  │  • windowManagerState           {layoutMode, charts[]}               │ │
+│  │  • dockHeight                   "250" (number as string)             │ │
+│  │                                                                        │ │
+│  │  [CHART CONFIGURATION KEYS]                                          │ │
+│  │  • chart-indicators-EURUSD      [{id, name, type, params, ...}]     │ │
+│  │  • chart-indicators-GBPUSD      [{...}]                              │ │
+│  │  • chart-indicators-{ANY}       Array of IndicatorConfig             │ │
+│  │                                                                        │ │
+│  │  • drawings-EURUSD              [{id, type, points, style, ...}]    │ │
+│  │  • drawings-GBPUSD              [{...}]                              │ │
+│  │  • drawings-{ANY}               Array of Drawing objects             │ │
+│  │                                                                        │ │
+│  │  [MARKET WATCH CONFIGURATION]                                        │ │
+│  │  • rtx5_hidden_symbols          ["SYMBOL1", "SYMBOL2"]              │ │
+│  │  • rtx5_symbol_sets             {name: [symbols]}                    │ │
+│  │  • rtx5_marketwatch_cols        ["symbol", "bid", "ask", ...]       │ │
+│  │  • rtx5_marketwatch_options     {useSystemColors, showGrid, ...}    │ │
+│  │  • rtx5_marketwatch_lp_filter   "false" (boolean as string)          │ │
+│  │  • rtx5_subscribed_symbols      ["SYMBOL1", "SYMBOL2", ...]         │ │
+│  │                                                                        │ │
+│  │  [AUTHENTICATION]                                                     │ │
+│  │  • rtx_token                    "jwt-token-string"                   │ │
+│  │                                                                        │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                              ↓                                               │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │  BACKEND SERVICES                                                      │ │
+│  │  • REST API: http://localhost:7999                                     │ │
+│  │  • WebSocket: ws://localhost:7999/ws                                   │ │
+│  │  • Real-time market data, orders, positions, account info              │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+2. ZUSTAND STORE PERSISTENCE (Detailed)
+================================================================================
+
+┌─ useAppStore ────────────────────────────────────────────────────────────┐
+│                                                                            │
+│  Configuration:                                                           │
+│  - Storage Key: "trading-app-storage"                                     │
+│  - Middleware: persist() + devtools()                                     │
+│  - Persist Mode: partial (only selected fields)                           │
+│                                                                            │
+│  All Fields:                                                              │
+│  ├─ isAuthenticated: boolean        (PERSISTED)                          │
+│  ├─ accountId: string | null        (PERSISTED)                          │
+│  ├─ authToken: string | null        (PERSISTED)                          │
+│  ├─ ticks: Record<string, Tick>     (NOT persisted)                      │
+│  ├─ selectedSymbol: string          (PERSISTED)                          │
+│  ├─ positions: Position[]           (NOT persisted)                      │
+│  ├─ orders: Order[]                 (NOT persisted)                      │
+│  ├─ trades: Trade[]                 (NOT persisted)                      │
+│  ├─ account: Account | null         (NOT persisted)                      │
+│  ├─ isChartMaximized: boolean       (NOT persisted)                      │
+│  ├─ chartType: 'candlestick'|...    (PERSISTED)                          │
+│  ├─ timeframe: '1m'|'5m'|...        (PERSISTED)                          │
+│  ├─ orderVolume: number             (PERSISTED)                          │
+│  ├─ wsConnected: boolean            (NOT persisted)                      │
+│  └─ loading states...               (NOT persisted)                      │
+│                                                                            │
+│  Storage Format:                                                          │
+│  {                                                                         │
+│    "selectedSymbol": "EURUSD",                                            │
+│    "chartType": "candlestick",                                            │
+│    "timeframe": "1m",                                                     │
+│    "orderVolume": 0.01                                                    │
+│  }                                                                         │
+│                                                                            │
+│  Lifecycle:                                                               │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐       │
+│  │   Browser Load   │→ │ Read localStorage │→ │ Hydrate Zustand │       │
+│  │   (page refresh) │  │ (JSON parse)      │  │ (setState)       │       │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘       │
+│           ↓                                                               │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐       │
+│  │   State Update   │←─│Write to Zustand  │←─│ Component Action │       │
+│  │ (auto-persist)   │  │ (via action)      │  │ (e.g., setChart │       │
+│  └──────────────────┘  └──────────────────┘  │  Type)           │       │
+│           ↓                                    └──────────────────┘       │
+│  ┌──────────────────┐                                                     │
+│  │ localStorage set │                                                     │
+│  │ (JSON stringify) │                                                     │
+│  └──────────────────┘                                                     │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ useMarketDataStore ─────────────────────────────────────────────────────┐
+│                                                                            │
+│  Configuration:                                                           │
+│  - Storage Key: "MarketDataStore"                                         │
+│  - Middleware: subscribeWithSelector() + devtools()                       │
+│  - Persist Mode: default (full state, but live data, not persisted)      │
+│                                                                            │
+│  State Structure:                                                         │
+│  ├─ symbolData: Record<string, SymbolData>                               │
+│  │  └─ EURUSD: {                                                         │
+│  │     ├─ currentTick: Tick | null                                       │
+│  │     ├─ previousTick: Tick | null                                      │
+│  │     ├─ stats: SymbolStats | null                                      │
+│  │     ├─ ohlcv1m: OHLCV[] (max 1000)                                   │
+│  │     ├─ ohlcv5m: OHLCV[] (max 500)                                    │
+│  │     ├─ ohlcv15m: OHLCV[] (max 300)                                   │
+│  │     ├─ ohlcv1h: OHLCV[] (max 200)                                    │
+│  │     ├─ tickBuffer: Tick[] (max 10000)                                │
+│  │     └─ lastAggregation: number                                        │
+│  │  }                                                                     │
+│  └─ subscribedSymbols: Set<string> (EURUSD, GBPUSD, ...)                │
+│                                                                            │
+│  Performance Optimization:                                                │
+│  - OHLCV aggregation runs in Web Worker (non-blocking)                   │
+│  - Tick buffer limited to prevent memory issues                          │
+│  - Separate OHLCV arrays per timeframe for efficient queries             │
+│  - subscribeWithSelector allows granular subscriptions                    │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+
+3. SINGLETON SERVICE MANAGERS (Manual Persistence)
+================================================================================
+
+┌─ WindowManager ──────────────────────────────────────────────────────────┐
+│  Purpose: Multi-chart window layout management                          │
+│  Storage Key: "windowManagerState"                                       │
+│                                                                           │
+│  Public API:                                                             │
+│  ├─ setLayoutMode(mode: LayoutMode): void                               │
+│  ├─ getLayoutMode(): LayoutMode                                          │
+│  ├─ addChart(symbol: string): string                                     │
+│  ├─ removeChart(id: string): void                                        │
+│  ├─ getCharts(): ChartWindow[]                                           │
+│  ├─ subscribe(callback): () => void                                      │
+│  └─ reset(): void                                                        │
+│                                                                           │
+│  Layout Modes:                                                           │
+│  ├─ "single"      - Only 1 chart (default)                              │
+│  ├─ "horizontal"  - Charts in row (N cols × 1 row)                      │
+│  ├─ "vertical"    - Charts in column (1 col × N rows)                   │
+│  └─ "grid"        - Charts in grid (√N cols × √N rows)                  │
+│                                                                           │
+│  Storage Format:                                                         │
+│  {                                                                        │
+│    "layoutMode": "grid",                                                 │
+│    "charts": [                                                           │
+│      {                                                                   │
+│        "id": "chart-1234567890-abc123",                                  │
+│        "symbol": "EURUSD",                                               │
+│        "position": { "row": 0, "col": 0 }                                │
+│      },                                                                  │
+│      { "id": "chart-...", "symbol": "GBPUSD", ... }                     │
+│    ]                                                                     │
+│  }                                                                        │
+│                                                                           │
+│  Persistence:                                                            │
+│  ├─ loadState() called in constructor                                    │
+│  ├─ saveState() called after any layout change                           │
+│  └─ reset() clears localStorage key                                      │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌─ IndicatorManager ───────────────────────────────────────────────────────┐
+│  Purpose: Technical indicators on charts                                 │
+│  Storage Key: "chart-indicators-{SYMBOL}" (per-symbol)                  │
+│                                                                           │
+│  Supported Indicators:                                                   │
+│  ├─ SMA (Simple Moving Average)                                          │
+│  ├─ EMA (Exponential Moving Average)                                     │
+│  ├─ RSI (Relative Strength Index)                                        │
+│  └─ MACD (Moving Average Convergence Divergence)                         │
+│                                                                           │
+│  Public API:                                                             │
+│  ├─ addIndicator(config: IndicatorConfig): void                          │
+│  ├─ removeIndicator(id: string): void                                    │
+│  ├─ toggleIndicator(id: string): void                                    │
+│  ├─ updateIndicator(id, params): void                                    │
+│  ├─ getIndicators(): IndicatorConfig[]                                   │
+│  ├─ saveToStorage(symbol: string): void     [MANUAL]                    │
+│  └─ loadFromStorage(symbol: string): void   [MANUAL]                    │
+│                                                                           │
+│  Storage Format:                                                         │
+│  [                                                                        │
+│    {                                                                     │
+│      "id": "ind-1",                                                      │
+│      "name": "SMA 20",                                                   │
+│      "type": "sma",                                                      │
+│      "parameters": { "period": 20 },                                     │
+│      "visible": true,                                                    │
+│      "color": "#FF0000"                                                  │
+│    },                                                                    │
+│    {                                                                     │
+│      "id": "ind-2",                                                      │
+│      "name": "EMA 12",                                                   │
+│      "type": "ema",                                                      │
+│      "parameters": { "period": 12 },                                     │
+│      "visible": true                                                     │
+│    }                                                                     │
+│  ]                                                                        │
+│                                                                           │
+│  Persistence Pattern:                                                    │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐         │
+│  │ Component Mount │→ │ loadFromStorage │→ │ Add to chart   │         │
+│  │ (TradingChart)  │  │ (read localStorage│ │ (render)       │         │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘         │
+│                                                ↓                          │
+│           ┌────────────────────────────────────────────────────┐         │
+│           │  User adds/removes/edits indicator                 │         │
+│           └────────────────────────────────────────────────────┘         │
+│                                ↓                                          │
+│  ┌─────────────────┐  ┌──────────────────┐                             │
+│  │ saveToStorage() │←─│ Component calls  │                             │
+│  │ (write storage) │  │ on unmount/      │                             │
+│  └─────────────────┘  │ change symbol    │                             │
+│                        └──────────────────┘                             │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌─ DrawingManager ─────────────────────────────────────────────────────────┐
+│  Purpose: Chart drawings (trendlines, patterns, etc.)                   │
+│  Storage Key: "drawings-{SYMBOL}" (per-symbol)                          │
+│                                                                           │
+│  Supported Drawing Types:                                                │
+│  ├─ TREND_LINE         - Trendline (2+ points)                          │
+│  ├─ HORIZONTAL_LINE    - Horizontal support/resistance                  │
+│  ├─ VERTICAL_LINE      - Vertical line at time                          │
+│  ├─ FIBONACCI          - Fibonacci retracement                          │
+│  ├─ SUPPORT_RESISTANCE - S/R levels                                     │
+│  ├─ CHANNEL            - Price channel (parallel lines)                 │
+│  ├─ RECTANGLE          - Rectangle shape                                │
+│  ├─ TRIANGLE           - Triangle shape                                 │
+│  └─ TEXT_NOTE          - Text annotation                                │
+│                                                                           │
+│  Public API:                                                             │
+│  ├─ addDrawing(drawing: Drawing): void                                   │
+│  ├─ removeDrawing(id: string): void                                      │
+│  ├─ getDrawings(): Drawing[]                                             │
+│  ├─ lockDrawing(id: string): void                                        │
+│  ├─ unlockDrawing(id: string): void                                      │
+│  ├─ saveToStorage(symbol: string): void     [MANUAL]                    │
+│  └─ loadFromStorage(symbol: string): void   [MANUAL]                    │
+│                                                                           │
+│  Storage Format:                                                         │
+│  [                                                                        │
+│    {                                                                     │
+│      "id": "draw-1",                                                     │
+│      "type": "TREND_LINE",                                               │
+│      "points": [                                                         │
+│        { "x": 100, "y": 1.2500 },                                       │
+│        { "x": 200, "y": 1.2550 }                                        │
+│      ],                                                                  │
+│      "style": {                                                          │
+│        "color": "#FF0000",                                               │
+│        "lineWidth": 2,                                                   │
+│        "lineStyle": "solid"                                              │
+│      },                                                                  │
+│      "locked": false,                                                    │
+│      "visible": true                                                     │
+│    }                                                                     │
+│  ]                                                                        │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+
+
+4. MARKET WATCH CONFIGURATION STORAGE
+================================================================================
+
+Key: rtx5_hidden_symbols
+├─ Type: JSON Array of strings
+├─ Updated by: hideSymbol(), showAllSymbols()
+├─ Read by: getHiddenSymbols(), MarketWatchPanel
+└─ Example: ["SYMBOL1", "SYMBOL2"]
+
+Key: rtx5_symbol_sets
+├─ Type: JSON Object (name → symbols array)
+├─ Default Sets: forex.major, forex.crosses, forex.exotic, commodities, indices
+├─ Updated by: saveSymbolSet(), deleteSymbolSet()
+├─ Read by: loadSymbolSet(), getSymbolSets()
+└─ Example:
+    {
+      "My Favorites": ["EURUSD", "GBPUSD"],
+      "Forex Major": ["EURUSD", "GBPUSD", "USDJPY"],
+      "Custom Set": ["XAUUSD"]
+    }
+
+Key: rtx5_marketwatch_cols
+├─ Type: JSON Array (column IDs)
+├─ Available: symbol, bid, ask, spread, dailyChange, last, high, low, volume, time
+├─ Updated by: saveColumnConfig()
+├─ Read by: loadColumnConfig(), MarketWatchPanel
+└─ Example: ["symbol", "bid", "ask", "spread", "dailyChange"]
+
+Key: rtx5_marketwatch_options
+├─ Type: JSON Object (system options)
+├─ Updated by: saveSystemOptions()
+├─ Read by: loadSystemOptions(), MarketWatchPanel
+└─ Example:
+    {
+      "useSystemColors": true,
+      "showMilliseconds": false,
+      "autoRemoveExpired": true,
+      "autoArrange": true,
+      "showGrid": true
+    }
+
+Key: rtx5_marketwatch_lp_filter
+├─ Type: String ("true" / "false")
+├─ Purpose: Filter to show only real data (not mock)
+├─ Updated by: MarketWatchPanel onChange
+├─ Read by: MarketWatchPanel useState
+└─ Example: "false"
+
+Key: rtx5_subscribed_symbols
+├─ Type: JSON Array of strings
+├─ Purpose: Current subscribed symbols
+├─ Updated by: MarketWatchPanel useEffect
+├─ Read by: MarketWatchPanel
+└─ Example: ["EURUSD", "GBPUSD", "XAUUSD"]
+
+
+5. AUTHENTICATION & SESSION STORAGE
+================================================================================
+
+In Zustand (trading-app-storage):
+├─ isAuthenticated: boolean
+├─ accountId: string | null
+└─ authToken: string | null
+
+In localStorage:
+└─ rtx_token: string (JWT for WebSocket auth)
+
+Flow:
+┌──────────────┐  ┌──────────────┐  ┌───────────────┐
+│ Login Page   │→ │ API Login    │→ │ Set token in  │
+│ (credentials)│  │ (backend)    │  │ Zustand & LS  │
+└──────────────┘  └──────────────┘  └───────────────┘
+                                             ↓
+                                   ┌──────────────────┐
+                                   │ WebSocket reads  │
+                                   │ rtx_token from LS│
+                                   └──────────────────┘
+
+
+6. PERSISTENCE LIFECYCLE (Page Reload Scenario)
+================================================================================
+
+BEFORE RELOAD:
+  Browser Memory (React Components + Stores)
+  └─ App.tsx state: { selectedSymbol: "EURUSD", chartType: "candlestick", ... }
+  └─ useAppStore: { ...full state... }
+  └─ windowManager.layoutMode: "grid"
+  └─ indicatorManager.indicators: Map<string, IndicatorConfig>
+  └─ localStorage: { trading-app-storage: JSON, windowManagerState: JSON, ... }
+
+                            [PAGE RELOAD]
+
+AFTER RELOAD:
+  1. Browser loads HTML, JavaScript
+     ↓
+  2. App.tsx component mounts
+     ├─ localStorage.getItem('dockHeight') → restore to useState
+     ├─ Zustand hydrates from localStorage
+     │  └─ useAppStore.setState() with stored data
+     ├─ windowManager.loadState() called in constructor
+     │  └─ localStorage.getItem('windowManagerState')
+     └─ MarketWatchPanel mounts
+        ├─ localStorage.getItem('rtx5_marketwatch_cols')
+        ├─ localStorage.getItem('rtx5_hidden_symbols')
+        ├─ localStorage.getItem('rtx5_subscribed_symbols')
+        └─ localStorage.getItem('rtx5_marketwatch_options')
+     ↓
+  3. Chart components mount
+     ├─ indicatorManager.loadFromStorage(symbol)
+     │  └─ localStorage.getItem(`chart-indicators-${symbol}`)
+     └─ drawingManager.loadFromStorage(symbol)
+        └─ localStorage.getItem(`drawings-${symbol}`)
+     ↓
+  4. Connect to WebSocket
+     ├─ Get token from localStorage ('rtx_token')
+     └─ Establish connection
+     ↓
+  5. App ready
+     - Market data will be fetched via WebSocket
+     - Positions, orders, account info loaded via API
+     - UI restored to previous state
+
+
+7. MISSING / NOT PERSISTED
+================================================================================
+
+❌ Chart Tabs
+   - Open charts list not saved
+   - Resets to single default chart on reload
+   - Suggested Key: "chart_tabs" or per-profile
+
+❌ Theme Settings
+   - ThemeColors defined but not stored
+   - Dark theme hardcoded via Tailwind
+   - Suggested Key: "theme_config" or "theme_active"
+
+❌ Keyboard Shortcuts
+   - Hardcoded in useKeyboardShortcuts.ts
+   - No customization UI
+   - Not persisted (never changes at runtime)
+   - Suggested Key: "shortcuts_config"
+
+❌ Profiles / Workspaces
+   - No profile selection
+   - No profile export/import
+   - Single workspace only
+   - Suggested Keys: "profiles_list", "profile_{id}", "profile_active"
+
+❌ Panel Layout (Visibility & Sizes)
+   - Panel visibility states not persisted
+   - Only dockHeight is saved
+   - Suggested Key: "panel_layout_config"
+
+❌ Alerts & Notifications
+   - Price alerts not stored
+   - Alert history not persisted
+   - Suggested Key: "alerts_config", "alert_history"
+
+
+8. STORAGE QUOTAS & LIMITS
+================================================================================
+
+Browser localStorage Quota:
+├─ Chrome/Edge: ~10 MB
+├─ Firefox: ~10 MB
+├─ Safari: ~5 MB
+└─ IE/Opera: ~5-10 MB
+
+Trading Engine Typical Usage:
+├─ Zustand stores: ~200-500 bytes
+├─ Window layout: ~300-500 bytes
+├─ Indicators (5 symbols × 5 indicators): ~5-10 KB
+├─ Drawings (5 symbols × 100 drawings): ~50-100 KB
+├─ Market watch config: ~2-5 KB
+└─ TOTAL: ~60-120 KB (well within quota)
+
+Scalability Limits:
+├─ Symbols with indicators: ~5000 before slowdown
+├─ Drawings per symbol: ~1000 before performance issues
+├─ Custom symbol sets: ~100 before UI lag
+└─ Total keys: ~10000 before browser issues
+
+
+9. SUMMARY TABLE: STORAGE MECHANISMS
+================================================================================
+
+┌─────────────────────────┬──────────────┬────────────┬──────────────────┐
+│ Feature                 │ Storage Type │ Key        │ Persistence Size │
+├─────────────────────────┼──────────────┼────────────┼──────────────────┤
+│ Auth Token              │ Zustand + LS │ rtx_token  │ ~50 bytes        │
+│ Trading Preferences     │ Zustand      │ storage    │ ~200 bytes       │
+│ Market Data (OHLCV)     │ Zustand (RAM)│ (none)     │ ~1-10 MB (temp)  │
+│ Layout Mode             │ localStorage │ windowMgrS │ ~300 bytes       │
+│ Dock Height             │ localStorage │ dockHeight │ ~10 bytes        │
+│ Indicators per Symbol   │ localStorage │ chart-ind-*│ ~500-2000 bytes  │
+│ Drawings per Symbol     │ localStorage │ drawings-* │ ~2-50 KB each    │
+│ Hidden Symbols          │ localStorage │ rtx5_hid   │ ~100-500 bytes   │
+│ Symbol Sets             │ localStorage │ rtx5_sets  │ ~500-2000 bytes  │
+│ Market Watch Columns    │ localStorage │ rtx5_cols  │ ~100-200 bytes   │
+│ Market Watch Options    │ localStorage │ rtx5_opts  │ ~150 bytes       │
+│ LP Filter Toggle        │ localStorage │ rtx5_lp    │ ~5 bytes         │
+│ Subscribed Symbols      │ localStorage │ rtx5_subs  │ ~100-500 bytes   │
+├─────────────────────────┼──────────────┼────────────┼──────────────────┤
+│ TOTAL (typical)         │              │            │ ~60-120 KB       │
+│ TOTAL (max with data)   │              │            │ ~5-10 MB         │
+└─────────────────────────┴──────────────┴────────────┴──────────────────┘
+
+================================================================================

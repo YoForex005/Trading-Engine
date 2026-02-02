@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test - Trading Engine</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #4ec9b0;
+            border-bottom: 2px solid #4ec9b0;
+            padding-bottom: 10px;
+        }
+        .status {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: #1e4620;
+            border: 1px solid #4ec9b0;
+            color: #4ec9b0;
+        }
+        .status.disconnected {
+            background: #4a1c1c;
+            border: 1px solid #f48771;
+            color: #f48771;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #1177bb;
+        }
+        button:disabled {
+            background: #3e3e3e;
+            cursor: not-allowed;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: #252526;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #3e3e3e;
+        }
+        .stat-label {
+            color: #858585;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4ec9b0;
+        }
+        .ticks-container {
+            background: #252526;
+            border: 1px solid #3e3e3e;
+            border-radius: 5px;
+            margin-top: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .tick-header {
+            background: #2d2d30;
+            padding: 10px;
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+            display: grid;
+            grid-template-columns: 100px 100px 100px 100px 80px 150px;
+            gap: 10px;
+        }
+        .tick-row {
+            padding: 10px;
+            border-bottom: 1px solid #3e3e3e;
+            display: grid;
+            grid-template-columns: 100px 100px 100px 100px 80px 150px;
+            gap: 10px;
+            align-items: center;
+        }
+        .tick-row:hover {
+            background: #2d2d30;
+        }
+        .lp-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .lp-sim {
+            background: #854442;
+            color: #f48771;
+        }
+        .lp-yofx {
+            background: #1e4620;
+            color: #4ec9b0;
+        }
+        .logs {
+            background: #1e1e1e;
+            border: 1px solid #3e3e3e;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 3px 0;
+        }
+        .log-time {
+            color: #858585;
+        }
+        .log-info {
+            color: #4ec9b0;
+        }
+        .log-error {
+            color: #f48771;
+        }
+        .log-warning {
+            color: #dcdcaa;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 WebSocket Test - Trading Engine</h1>
+
+        <div id="status" class="status disconnected">
+            ⚠️ DISCONNECTED
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+            <button onclick="clearTicks()">Clear Ticks</button>
+            <button onclick="clearLogs()">Clear Logs</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-label">Connection Time</div>
+                <div class="stat-value" id="connTime">0s</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Messages Received</div>
+                <div class="stat-value" id="msgCount">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Unique Symbols</div>
+                <div class="stat-value" id="symbolCount">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Ticks/Second</div>
+                <div class="stat-value" id="tickRate">0</div>
+            </div>
+        </div>
+
+        <h2>📊 Latest Ticks (Last 20)</h2>
+        <div class="ticks-container">
+            <div class="tick-header">
+                <div>Symbol</div>
+                <div>Bid</div>
+                <div>Ask</div>
+                <div>Spread</div>
+                <div>LP</div>
+                <div>Timestamp</div>
+            </div>
+            <div id="ticksBody"></div>
+        </div>
+
+        <h2>📝 Connection Logs</h2>
+        <div class="logs" id="logs"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+        let symbols = new Set();
+        let connectTime = null;
+        let ticksPerSecond = 0;
+        let lastSecondCount = 0;
+        let ticks = [];
+
+        const WS_URL = 'ws://localhost:7999/ws';
+
+        function log(message, type = 'info') {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString() + '.' + now.getMilliseconds().toString().padStart(3, '0');
+            const logsDiv = document.getElementById('logs');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="log-${type}">${message}</span>`;
+            logsDiv.insertBefore(entry, logsDiv.firstChild);
+
+            // Keep only last 100 logs
+            while (logsDiv.children.length > 100) {
+                logsDiv.removeChild(logsDiv.lastChild);
+            }
+        }
+
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+
+            if (connected) {
+                statusDiv.className = 'status connected';
+                statusDiv.textContent = '✅ CONNECTED';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                connectTime = Date.now();
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = '⚠️ DISCONNECTED';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                connectTime = null;
+            }
+        }
+
+        function updateStats() {
+            // Update connection time
+            if (connectTime) {
+                const seconds = Math.floor((Date.now() - connectTime) / 1000);
+                document.getElementById('connTime').textContent = seconds + 's';
+            }
+
+            // Update counts
+            document.getElementById('msgCount').textContent = messageCount;
+            document.getElementById('symbolCount').textContent = symbols.size;
+            document.getElementById('tickRate').textContent = ticksPerSecond;
+        }
+
+        function updateTicksDisplay() {
+            const ticksBody = document.getElementById('ticksBody');
+            ticksBody.innerHTML = '';
+
+            // Show last 20 ticks
+            const displayTicks = ticks.slice(0, 20);
+            displayTicks.forEach(tick => {
+                const row = document.createElement('div');
+                row.className = 'tick-row';
+
+                const lpClass = tick.lp === 'SIM' ? 'lp-sim' : 'lp-yofx';
+                const time = new Date(tick.timestamp).toLocaleTimeString();
+
+                row.innerHTML = `
+                    <div>${tick.symbol}</div>
+                    <div>${tick.bid.toFixed(5)}</div>
+                    <div>${tick.ask.toFixed(5)}</div>
+                    <div>${tick.spread.toFixed(5)}</div>
+                    <div><span class="lp-badge ${lpClass}">${tick.lp}</span></div>
+                    <div>${time}</div>
+                `;
+                ticksBody.appendChild(row);
+            });
+        }
+
+        function connect() {
+            log('Connecting to ' + WS_URL + '...', 'info');
+
+            try {
+                ws = new WebSocket(WS_URL);
+
+                ws.onopen = () => {
+                    log('WebSocket connected successfully!', 'info');
+                    updateStatus(true);
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        messageCount++;
+
+                        if (data.type === 'tick') {
+                            symbols.add(data.symbol);
+                            ticks.unshift(data);
+
+                            // Keep only last 100 ticks in memory
+                            if (ticks.length > 100) {
+                                ticks = ticks.slice(0, 100);
+                            }
+
+                            lastSecondCount++;
+                            updateTicksDisplay();
+
+                            // Log first tick and every 100th tick
+                            if (messageCount === 1 || messageCount % 100 === 0) {
+                                log(`Received tick #${messageCount}: ${data.symbol} @ ${data.bid}/${data.ask} (${data.lp})`, 'info');
+                            }
+                        } else {
+                            log(`Received message: ${data.type}`, 'info');
+                        }
+
+                        updateStats();
+                    } catch (err) {
+                        log('Error parsing message: ' + err.message, 'error');
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    log('WebSocket error occurred', 'error');
+                    console.error('WebSocket error:', error);
+                };
+
+                ws.onclose = (event) => {
+                    log(`WebSocket closed (Code: ${event.code}, Reason: ${event.reason || 'None'})`, 'warning');
+                    updateStatus(false);
+                };
+
+            } catch (err) {
+                log('Failed to connect: ' + err.message, 'error');
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                log('Disconnecting...', 'info');
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function clearTicks() {
+            ticks = [];
+            updateTicksDisplay();
+            log('Ticks cleared', 'info');
+        }
+
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+        }
+
+        // Update ticks per second counter
+        setInterval(() => {
+            ticksPerSecond = lastSecondCount;
+            lastSecondCount = 0;
+            updateStats();
+        }, 1000);
+
+        // Auto-connect on load
+        window.onload = () => {
+            log('WebSocket Test initialized', 'info');
+            log('Click "Connect" to start receiving market data', 'info');
+        };
+    </script>
+</body>
+</html>

@@ -441,6 +441,12 @@ export const marketApi = {
     const data = await handleResponse<any[]>(response);
     return data || [];
   },
+
+  async getAvailableSymbols(): Promise<{ symbol: string; name: string; category: string; digits: number }[]> {
+    const response = await fetchWithTimeout(`${API_BASE_URL}/api/symbols/available`);
+    const data = await handleResponse<{ symbol: string; name: string; category: string; digits: number }[]>(response);
+    return data || [];
+  },
 };
 
 // ============================================

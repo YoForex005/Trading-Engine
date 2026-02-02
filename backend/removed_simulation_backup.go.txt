@@ -1,0 +1,123 @@
+// BACKUP: Simulation code removed on 2026-01-30
+// Reason: Using 100% real YOFX data only - simulation fallback no longer needed
+// Original location: backend/cmd/server/main.go lines 1657-1775
+
+// Simulated market data fallback - Hybrid Mode
+// If real data flows, we use it. If not, we simulate to keep the UI alive.
+go func() {
+	// Wait 2 seconds for initial connection (faster startup)
+	time.Sleep(2 * time.Second)
+
+	log.Println("[HYBRID-MD] Starting Hybrid Data Engine (Real + Simulation fallback)")
+
+	// Initial prices for simulation
+	prices := map[string]float64{
+		"EURUSD": 1.1050, "GBPUSD": 1.2500, "USDJPY": 145.00,
+		"AUDUSD": 0.6500, "USDCAD": 1.3500, "USDCHF": 0.9000,
+		"EURGBP": 0.8500, "EURJPY": 160.00, "GBPJPY": 188.00,
+		"XAUUSD": 2030.00, "XAGUSD": 22.50, "BTCUSD": 45000.00,
+		"ETHUSD": 2400.00,
+		// Additional pairs for full coverage
+		"EURAUD": 1.6500, "EURCAD": 1.4800, "EURCHF": 0.9400,
+		"AUDCAD": 0.8800, "AUDCHF": 0.5800, "AUDJPY": 97.00,
+		"AUDNZD": 1.0700, "CADCHF": 0.6400, "CADJPY": 109.00,
+		"CHFJPY": 169.00, "GBPAUD": 1.9200, "GBPCAD": 1.7100,
+		"GBPCHF": 1.1000, "GBPNZD": 2.0500, "NZDCAD": 0.8300,
+		"NZDCHF": 0.5400, "NZDJPY": 90.00,
+	}
+
+	// Sync initial prices with any real data received so far
+	tickMutex.RLock()
+	for sym, tick := range latestTicks {
+		prices[sym] = tick.Bid
+	}
+	tickMutex.RUnlock()
+
+	// Run every 200ms
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	lastTickTime := make(map[string]time.Time)
+
+	for range ticker.C {
+		// DO NOT Return if we have real data - run concurrently!
+		// Instead, check per-symbol freshness.
+
+		tickMutex.RLock()
+		// Update our knowledge of real data freshness
+		for sym, tick := range latestTicks {
+			if tick.Timestamp > 0 {
+				lastTickTime[sym] = time.UnixMilli(tick.Timestamp)
+			}
+		}
+		tickMutex.RUnlock()
+
+		for symbol, price := range prices {
+			// Check if we have FRESH real data for this symbol (last 5 seconds)
+			lastTime, ok := lastTickTime[symbol]
+			if ok && time.Since(lastTime) < 5*time.Second {
+				// We have live data for this symbol, skip simulation
+				// Update our sim price to match real data so we don't jump when fallback happens
+				tickMutex.RLock()
+				if realTick, exists := latestTicks[symbol]; exists {
+					prices[symbol] = realTick.Bid
+				}
+				tickMutex.RUnlock()
+				continue
+			}
+
+			// No fresh real data? Simulate!
+			// Random walk logic
+			change := (rand.Float64() - 0.5) * (price * 0.0001) // 0.01% volatility
+			if symbol == "XAUUSD" || symbol == "BTCUSD" {
+				change = (rand.Float64() - 0.5) * (price * 0.0005) // Higher volatility
+			}
+
+			newPrice := price + change
+			prices[symbol] = newPrice
+
+			// Construct simulated tick
+			spread := 0.0001
+			if strings.Contains(symbol, "JPY") {
+				spread = 0.01
+			}
+			if symbol == "XAUUSD" {
+				spread = 0.10
+			}
+
+			bid := newPrice
+			ask := newPrice + spread
+
+			// Determine "LP" name
+			lpName := "SIM"
+
+			// IMPORTANT: Persist tick to store
+			tickStore.StoreTick(symbol, bid, ask, spread, lpName, time.Now())
+
+			tick := &ws.MarketTick{
+				Type:        "tick",
+				Symbol:      symbol,
+				Bid:         bid,
+				Ask:         ask,
+				Spread:      spread,
+				Timestamp:   time.Now().UnixMilli(),
+				LP:          lpName,
+				DailyChange: (rand.Float64() * 2.0) - 1.0, // Random -1% to +1%
+			}
+
+			// Store for debugging
+			tickMutex.Lock()
+			latestTicks[symbol] = tick
+			totalTickCount++
+			tickMutex.Unlock()
+
+			// Broadcast to frontend
+			hub.BroadcastTick(tick)
+
+			// DEBUG: Log simulation activity every 100 ticks for EURUSD
+			if symbol == "EURUSD" && rand.Intn(20) == 0 {
+				log.Printf("[HYBRID] Simulating EURUSD: Bid=%.5f (Sim count active)", bid)
+			}
+		}
+	}
+}()

@@ -25,7 +25,7 @@ interface MarketWatchPanelProps {
     className?: string;
 }
 
-type ColumnId = 'symbol' | 'bid' | 'ask' | 'spread' | 'dailyChange' | 'last' | 'high' | 'low' | 'volume' | 'time';
+type ColumnId = 'symbol' | 'lp' | 'bid' | 'ask' | 'spread' | 'dailyChange' | 'last' | 'high' | 'low' | 'volume' | 'time';
 type TabId = 'symbols' | 'details' | 'trading' | 'ticks';
 
 interface ColumnConfig {
@@ -38,6 +38,7 @@ interface ColumnConfig {
 
 const ALL_COLUMNS: ColumnConfig[] = [
     { id: 'symbol', label: 'Symbol', width: 'flex-1', align: 'left', locked: true },
+    { id: 'lp', label: 'Source', width: 'w-16', align: 'center', locked: true },
     { id: 'bid', label: 'Bid', width: 'w-16', align: 'right', locked: true },
     { id: 'ask', label: 'Ask', width: 'w-16', align: 'right', locked: true },
     { id: 'spread', label: 'Spread', width: 'w-10', align: 'center', locked: true },
@@ -49,8 +50,8 @@ const ALL_COLUMNS: ColumnConfig[] = [
     { id: 'time', label: 'Time', width: 'w-16', align: 'right' },
 ];
 
-// Default strict columns: Symbol, Bid, Ask, Spread, Daily Change
-const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['symbol', 'bid', 'ask', 'spread', 'dailyChange'];
+// Default strict columns: Symbol, LP, Bid, Ask, Spread, Daily Change
+const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['symbol', 'lp', 'bid', 'ask', 'spread', 'dailyChange'];
 
 export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
     allSymbols,
@@ -127,10 +128,21 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         };
     });
 
+    // LP Filter State (persisted to localStorage)
+    const [showOnlyRealData, setShowOnlyRealData] = useState(() => {
+        const saved = localStorage.getItem('rtx5_marketwatch_lp_filter');
+        return saved ? JSON.parse(saved) : false;
+    });
+
     // Persist system options
     useEffect(() => {
         localStorage.setItem('rtx5_marketwatch_options', JSON.stringify(systemOptions));
     }, [systemOptions]);
+
+    // Persist LP filter
+    useEffect(() => {
+        localStorage.setItem('rtx5_marketwatch_lp_filter', JSON.stringify(showOnlyRealData));
+    }, [showOnlyRealData]);
 
     const toggleSystemOption = (key: string) => {
         setSystemOptions((prev: Record<string, boolean>) => ({ ...prev, [key]: !prev[key] }));
@@ -506,6 +518,12 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
             if (s.startsWith('-')) return false; // Filter out spacer rows
             if (hiddenSymbols.includes(s)) return false;
 
+            // LP Filter: Show only real data (YOFX) if enabled
+            if (showOnlyRealData) {
+                const tick = currentTicks[s];
+                if (tick && tick.lp !== 'YOFX') return false;
+            }
+
             // CRITICAL: Filter out FIX variant symbols with suffixes and numbers
             // Reject: USDCAD1, USDCHF.H, USDCHF.h, USDCHF.c, AUDCHF!, BTCUSD.H, etc.
             // Allow: EURUSD, XAUUSD, BTCUSD, US30, JP225, GOLD.APL2025, SILVER.DEC2024
@@ -549,7 +567,7 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         }
 
         return result;
-    }, [allSymbols, subscribedSymbols, hiddenSymbols, sortBy]);
+    }, [allSymbols, subscribedSymbols, hiddenSymbols, sortBy, showOnlyRealData]);
 
     // Build context menu items configuration
     const menuItems: ContextMenuItemConfig[] = useMemo(() => [
@@ -632,6 +650,17 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
             {/* Header Bar */}
             <div className="px-2 py-1 bg-[#2d3436] border-b border-zinc-700 text-xs font-bold text-zinc-400 uppercase tracking-wider flex justify-between items-center">
                 <span>Market Watch: {new Date().toLocaleTimeString()}</span>
+                <button
+                    onClick={() => setShowOnlyRealData(!showOnlyRealData)}
+                    className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                        showOnlyRealData
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
+                            : 'text-zinc-500 hover:text-zinc-300 border border-zinc-700 hover:border-zinc-600'
+                    }`}
+                    title={showOnlyRealData ? 'Showing only real data (YOFX)' : 'Showing all data (Real + Simulated)'}
+                >
+                    {showOnlyRealData ? '✓ Real Only' : 'All Data'}
+                </button>
             </div>
 
             {/* Content Area Based on Tab */}
@@ -993,6 +1022,27 @@ const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, selected, on
                                 </div>
                             );
                             break;
+                        case 'lp':
+                            const lpValue = tick.lp || 'SIM';
+                            const isReal = lpValue === 'YOFX';
+                            content = (
+                                <div className={`flex items-center justify-center gap-1 ${isReal ? 'text-[#4ade80]' : 'text-[#f87171]'}`} title={isReal ? '✓ Real market data from YOFX broker' : '⚠️ Simulated data - not real market prices'}>
+                                    {isReal ? (
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="flex-shrink-0">
+                                            <path d="M20 6L9 17l-5-5" />
+                                        </svg>
+                                    ) : (
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="flex-shrink-0">
+                                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                            <line x1="12" y1="9" x2="12" y2="13" />
+                                            <line x1="12" y1="17" x2="12.01" y2="17" />
+                                        </svg>
+                                    )}
+                                    <span className="text-[9px] font-bold uppercase">{lpValue}</span>
+                                </div>
+                            );
+                            cellClass = 'cursor-help';
+                            break;
                         case 'bid':
                             content = formatPrice(tick.bid, symbol);
                             cellClass = `${bidColor} transition-colors duration-200 ${flashBid === 'up' ? 'bg-emerald-500/30' :
@@ -1034,6 +1084,10 @@ const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, selected, on
                                     <span className={selected ? 'text-white font-bold' : 'text-zinc-200'}>{symbol}</span>
                                 </div>
                             );
+                            break;
+                        case 'lp':
+                            content = <span className="text-yellow-600 text-[9px] italic">...</span>;
+                            cellClass = 'text-center';
                             break;
                         case 'bid':
                         case 'ask':

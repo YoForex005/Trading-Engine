@@ -33,6 +33,8 @@ interface Tick {
   timestamp: number;
   prevBid?: number;
   lp?: string;
+  high24h?: number; // 24-hour high from backend
+  low24h?: number;  // 24-hour low from backend
 }
 
 interface Position {
@@ -402,7 +404,21 @@ function App() {
               prevBid: storeTicks[data.symbol]?.bid
             };
 
+            // CRITICAL FIX: Update BOTH stores for complete data flow
+            // useAppStore: Used by legacy components and chart
             useAppStore.getState().setTick(data.symbol, tick);
+
+            // useMarketDataStore: Used by MarketWatch component
+            // This was the missing link causing MarketWatch to show no data
+            useMarketDataStore.getState().updateTick(data.symbol, {
+              symbol: data.symbol,
+              bid: data.bid,
+              ask: data.ask,
+              spread: spread,
+              timestamp: data.timestamp || Date.now(),
+              lp: data.lp,
+              volume: 1 // Default volume for tick
+            });
           } else if (data.type === 'candle_update') {
             // Dispatch to market data store
             useMarketDataStore.getState().updateCandle(data);

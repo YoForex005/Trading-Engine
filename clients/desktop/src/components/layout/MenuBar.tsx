@@ -89,6 +89,31 @@ export const MenuBar = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    // Dynamic Symbol Loading
+    const [availableSymbols, setAvailableSymbols] = useState<{ symbol: string; name: string; category: string }[]>([]);
+    const [isLoadingSymbols, setIsLoadingSymbols] = useState(false);
+
+    useEffect(() => {
+        const fetchSymbols = async () => {
+            try {
+                // Dynamically import API to avoid circular deps if any, or just use global
+                // Assuming api is exported from services/api
+                const { default: api } = await import('../../services/api');
+                setIsLoadingSymbols(true);
+                const symbols = await api.market.getAvailableSymbols();
+                if (symbols && symbols.length > 0) {
+                    setAvailableSymbols(symbols);
+                }
+            } catch (error) {
+                console.error('Failed to load menu symbols:', error);
+            } finally {
+                setIsLoadingSymbols(false);
+            }
+        };
+
+        fetchSymbols();
+    }, []);
+
     const languageList: MenuItem[] = [
         // Western / Latin
         { label: 'English', icon: <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div> },
@@ -152,37 +177,52 @@ export const MenuBar = () => {
             {
                 label: 'New Chart',
                 icon: <PlusSquare size={14} className="text-emerald-500" />,
-                children: [
-                    { label: 'EURUSD' },
-                    { label: 'GBPUSD' },
-                    { label: 'USDCHF' },
-                    { label: 'USDJPY' },
-                    { label: 'USDCAD' },
-                    { label: 'AUDUSD' },
-                    { divider: true, label: '' },
-                    {
-                        label: 'TradingA',
-                        children: [
-                            {
-                                label: 'CFD-FX',
-                                children: [
-                                    { label: 'EURUSD' },
-                                    { label: 'GBPUSD' },
-                                    { label: 'USDCHF' },
-                                    { label: 'USDJPY' },
-                                    { label: 'USDCAD' },
-                                    { label: 'AUDUSD' },
-                                    { label: 'AUDNZD' },
-                                    { label: 'AUDCAD' },
-                                    { label: 'AUDCHF' },
-                                    { label: 'AUDJPY' }
-                                ]
-                            },
-                            { label: 'Crypto', children: [{ label: 'BTCUSD' }, { label: 'ETHUSD' }] },
-                            { label: 'CFD-Metels', children: [{ label: 'XAUUSD' }, { label: 'XAGUSD' }] }
+                children: isLoadingSymbols
+                    ? [{ label: 'Loading...' }]
+                    : availableSymbols.length > 0
+                        ? (() => {
+                            const buildNestedMenu = (symbols: typeof availableSymbols): MenuItem[] => {
+                                const root: MenuItem[] = [];
+                                const groups: Record<string, typeof availableSymbols> = {};
+
+                                symbols.forEach(sym => {
+                                    // If category is empty, it's a root item
+                                    if (!sym.category || sym.category.trim() === '') {
+                                        root.push({
+                                            label: sym.name,
+                                            action: () => window.dispatchEvent(new CustomEvent('open-chart', { detail: { symbol: sym.symbol } }))
+                                        });
+                                        return;
+                                    }
+
+                                    const parts = sym.category.split('.');
+                                    const topLevel = parts[0];
+                                    if (!groups[topLevel]) groups[topLevel] = [];
+
+                                    if (parts.length > 1) {
+                                        groups[topLevel].push({ ...sym, category: parts.slice(1).join('.') });
+                                    } else {
+                                        groups[topLevel].push({ ...sym, category: '' });
+                                    }
+                                });
+
+                                // Add grouped items (folders) after root items
+                                Object.keys(groups).sort().forEach(key => {
+                                    const groupSymbols = groups[key];
+                                    // Recurse
+                                    root.push({
+                                        label: key,
+                                        children: buildNestedMenu(groupSymbols)
+                                    });
+                                });
+                                return root;
+                            };
+                            return buildNestedMenu(availableSymbols);
+                        })()
+                        : [
+                            // Fallback if no API symbols
+                            { label: 'EURUSD' }, { label: 'GBPUSD' }, { label: 'USDJPY' }
                         ]
-                    }
-                ]
             },
             { label: 'Open Deleted', disabled: true },
             { label: 'Profiles', children: [{ label: 'Default' }, { label: 'Euro' }, { label: 'Market' }] },
@@ -396,22 +436,16 @@ const MenuItem = ({ item }: { item: MenuItem }) => {
     }
 
     return (
-        <div className="relative group px-1">
+        <div className="relative group px-1 [&:hover>div]:block">
             <button
                 disabled={item.disabled}
                 onClick={() => {
                     if (item.action) {
                         item.action();
-                        // We rely on parent to close, but since we don't have access to setActiveMenu here easily without context, 
-                        // we assume the action might involve closing or the blur will handle it.
-                        // Actually, for "Options" we want it to close the menu.
-                        // A simple hack is to simulate a click on body or just let the blur handler do it if we click away.
-                        // But since we are opening a modal, the focus moves? 
-                        // Let's just execute action.
                     }
                 }}
                 className={`w-full flex items-center gap-3 px-2 py-1.5 text-[12px] rounded-sm text-left
-                    ${item.disabled ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-300 hover:bg-[#2a2e39] hover:text-white cursor-default group'}`}
+                    ${item.disabled ? 'text-zinc-600 cursor-not-allowed' : 'text-zinc-300 hover:bg-[#2a2e39] hover:text-white group-hover:bg-[#2a2e39] group-hover:text-white cursor-default group'}`}
             >
                 {/* Icon Area */}
                 <div className="w-4 flex items-center justify-center text-zinc-400 group-hover:text-zinc-200">
@@ -429,9 +463,9 @@ const MenuItem = ({ item }: { item: MenuItem }) => {
                 )}
             </button>
 
-            {/* Submenu Logic (Hover-based simplified) */}
+            {/* Submenu Logic (Hover-based strict) */}
             {item.children && (
-                <div className={`absolute left-full top-0 ml-[-4px] mt-0 hidden group-hover:block min-w-[180px] bg-[#1e1e1e] border border-zinc-700 rounded-md shadow-xl py-1 z-[101]
+                <div className={`absolute left-full top-0 ml-[-4px] mt-0 hidden min-w-[180px] bg-[#1e1e1e] border border-zinc-700 rounded-md shadow-xl py-1 z-[101]
                     ${item.scrollableChildren ? 'max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent' : ''}
                  `}>
                     {item.children.map((subItem, idx) => (

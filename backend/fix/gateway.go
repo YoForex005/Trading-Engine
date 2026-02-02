@@ -109,6 +109,8 @@ type MarketData struct {
 	Ask       float64
 	BidSize   float64
 	AskSize   float64
+	High24h   float64
+	Low24h    float64
 	MDReqID   string
 	SessionID string
 	Timestamp time.Time
@@ -184,6 +186,22 @@ type SecurityDefinition struct {
 	Digits            int
 }
 
+// PricePoint represents a price at a specific time for high/low tracking
+type PricePoint struct {
+	Price     float64
+	Timestamp time.Time
+}
+
+// SymbolHighLow tracks 24h high/low for a symbol using time-windowed data
+type SymbolHighLow struct {
+	Symbol     string
+	High24h    float64
+	Low24h     float64
+	HighPoints []PricePoint
+	LowPoints  []PricePoint
+	mu         sync.RWMutex
+}
+
 // FIXGateway manages connections to Liquidity Providers
 type FIXGateway struct {
 	sessions            map[string]*LPSession
@@ -203,6 +221,10 @@ type FIXGateway struct {
 	// Securities discovered from LP
 	securities   map[string]SecurityDefinition
 	securitiesMu sync.RWMutex
+
+	// 24-hour high/low tracking
+	highLowData   map[string]*SymbolHighLow
+	highLowDataMu sync.RWMutex
 }
 
 func NewFIXGateway() *FIXGateway {
@@ -302,6 +324,7 @@ func NewFIXGateway() *FIXGateway {
 		posSubscriptions:    make(map[string]bool),
 		quoteCache:          make(map[string]*MarketData),
 		securities:          make(map[string]SecurityDefinition),
+		highLowData:         make(map[string]*SymbolHighLow),
 	}
 
 	// Load persisted sequence numbers for all sessions
@@ -440,22 +463,33 @@ func (g *FIXGateway) connectSession(session *LPSession) {
 	var conn net.Conn
 	var err error
 
+	// Use longer timeout for better reliability
+	dialTimeout := 30 * time.Second
+
+	log.Printf("[FIX] Initiating connection to %s at %s:%d (timeout: %v)",
+		session.Name, session.Host, session.Port, dialTimeout)
+
 	if session.UseProxy {
 		// Connect via HTTP CONNECT proxy
+		log.Printf("[FIX] Using proxy: %s:%d", session.ProxyHost, session.ProxyPort)
 		conn, err = g.dialViaHTTPProxy(session)
 	} else {
 		// Direct connection
 		addr := net.JoinHostPort(session.Host, strconv.Itoa(session.Port))
-		conn, err = net.DialTimeout("tcp", addr, 10*time.Second)
+		log.Printf("[FIX] Dialing direct TCP connection to %s", addr)
+		conn, err = net.DialTimeout("tcp", addr, dialTimeout)
 	}
 
 	if err != nil {
-		log.Printf("[FIX] Failed to connect to %s: %v", session.Name, err)
+		log.Printf("[FIX] TCP connection failed for %s: %v (Host: %s:%d)",
+			session.Name, err, session.Host, session.Port)
 		g.mu.Lock()
 		session.Status = "DISCONNECTED"
 		g.mu.Unlock()
 		return
 	}
+
+	log.Printf("[FIX] TCP connection established to %s", session.Name)
 
 	// Wrap with TLS if SSL is enabled
 	if session.SSL {
@@ -1814,6 +1848,13 @@ func (g *FIXGateway) GetStatus() map[string]string {
 	return status
 }
 
+// GetSession returns a specific session (for connection manager)
+func (g *FIXGateway) GetSession(sessionID string) *LPSession {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.sessions[sessionID]
+}
+
 // SessionInfo contains detailed information about a FIX session
 type SessionInfo struct {
 	ID             string    `json:"id"`
@@ -2239,6 +2280,97 @@ func (g *FIXGateway) RequestSecurityList(sessionID string) (string, error) {
 	return securityReqID, nil
 }
 
+// updateHighLow tracks 24-hour high/low for a symbol using rolling time window
+func (g *FIXGateway) updateHighLow(symbol string, bid, ask float64) (high24h, low24h float64) {
+	g.highLowDataMu.Lock()
+	defer g.highLowDataMu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-24 * time.Hour)
+
+	hl, exists := g.highLowData[symbol]
+	if !exists {
+		hl = &SymbolHighLow{
+			Symbol:     symbol,
+			High24h:    ask,
+			Low24h:     bid,
+			HighPoints: make([]PricePoint, 0, 1000),
+			LowPoints:  make([]PricePoint, 0, 1000),
+		}
+		g.highLowData[symbol] = hl
+	}
+
+	hl.mu.Lock()
+	defer hl.mu.Unlock()
+
+	midPrice := (bid + ask) / 2
+
+	if hl.High24h == 0 || midPrice > hl.High24h {
+		hl.High24h = midPrice
+		hl.HighPoints = append(hl.HighPoints, PricePoint{Price: midPrice, Timestamp: now})
+	}
+
+	if hl.Low24h == 0 || midPrice < hl.Low24h {
+		hl.Low24h = midPrice
+		hl.LowPoints = append(hl.LowPoints, PricePoint{Price: midPrice, Timestamp: now})
+	}
+
+	newHighPoints := make([]PricePoint, 0, len(hl.HighPoints))
+	for _, p := range hl.HighPoints {
+		if p.Timestamp.After(cutoff) {
+			newHighPoints = append(newHighPoints, p)
+		}
+	}
+	hl.HighPoints = newHighPoints
+
+	newLowPoints := make([]PricePoint, 0, len(hl.LowPoints))
+	for _, p := range hl.LowPoints {
+		if p.Timestamp.After(cutoff) {
+			newLowPoints = append(newLowPoints, p)
+		}
+	}
+	hl.LowPoints = newLowPoints
+
+	if len(hl.HighPoints) > 0 {
+		maxPrice := hl.HighPoints[0].Price
+		for _, p := range hl.HighPoints {
+			if p.Price > maxPrice {
+				maxPrice = p.Price
+			}
+		}
+		hl.High24h = maxPrice
+	} else {
+		hl.High24h = midPrice
+	}
+
+	if len(hl.LowPoints) > 0 {
+		minPrice := hl.LowPoints[0].Price
+		for _, p := range hl.LowPoints {
+			if p.Price < minPrice {
+				minPrice = p.Price
+			}
+		}
+		hl.Low24h = minPrice
+	} else {
+		hl.Low24h = midPrice
+	}
+
+	return hl.High24h, hl.Low24h
+}
+
+// getHighLow retrieves current 24h high/low for a symbol
+func (g *FIXGateway) getHighLow(symbol string) (high24h, low24h float64) {
+	g.highLowDataMu.RLock()
+	defer g.highLowDataMu.RUnlock()
+
+	if hl, exists := g.highLowData[symbol]; exists {
+		hl.mu.RLock()
+		defer hl.mu.RUnlock()
+		return hl.High24h, hl.Low24h
+	}
+	return 0, 0
+}
+
 // handleMarketDataSnapshot processes incoming market data (35=W)
 func (g *FIXGateway) handleMarketDataSnapshot(session *LPSession, msg string) {
 	symbol := g.extractTag(msg, "55")
@@ -2285,6 +2417,10 @@ func (g *FIXGateway) handleMarketDataSnapshot(session *LPSession, msg string) {
 		}
 	}
 
+	high24h, low24h := g.updateHighLow(symbol, md.Bid, md.Ask)
+	md.High24h = high24h
+	md.Low24h = low24h
+
 	// Update quote cache with snapshot data
 	g.quoteCacheMu.Lock()
 	g.quoteCache[symbol] = &MarketData{
@@ -2293,13 +2429,15 @@ func (g *FIXGateway) handleMarketDataSnapshot(session *LPSession, msg string) {
 		Ask:       md.Ask,
 		BidSize:   md.BidSize,
 		AskSize:   md.AskSize,
+		High24h:   high24h,
+		Low24h:    low24h,
 		SessionID: session.ID,
 		Timestamp: md.Timestamp,
 	}
 	g.quoteCacheMu.Unlock()
 
-	log.Printf("[FIX] MarketData from %s: %s Bid=%.5f Ask=%.5f",
-		session.Name, symbol, md.Bid, md.Ask)
+	log.Printf("[FIX] MarketData from %s: %s Bid=%.5f Ask=%.5f High24h=%.5f Low24h=%.5f",
+		session.Name, symbol, md.Bid, md.Ask, high24h, low24h)
 
 	// Send to channel (non-blocking)
 	select {
@@ -2844,6 +2982,8 @@ func (g *FIXGateway) handleMarketDataIncremental(session *LPSession, msg string)
 					askSize = currentSize
 				}
 
+				high24h, low24h := g.updateHighLow(currentSymbol, bid, ask)
+
 				// Create merged market data
 				md := MarketData{
 					Symbol:    currentSymbol,
@@ -2853,6 +2993,8 @@ func (g *FIXGateway) handleMarketDataIncremental(session *LPSession, msg string)
 					Ask:       ask,
 					BidSize:   bidSize,
 					AskSize:   askSize,
+					High24h:   high24h,
+					Low24h:    low24h,
 				}
 
 				// Update cache with merged data
@@ -2863,6 +3005,8 @@ func (g *FIXGateway) handleMarketDataIncremental(session *LPSession, msg string)
 					Ask:       ask,
 					BidSize:   bidSize,
 					AskSize:   askSize,
+					High24h:   high24h,
+					Low24h:    low24h,
 					SessionID: session.ID,
 					Timestamp: now,
 				}

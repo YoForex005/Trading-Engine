@@ -37,7 +37,7 @@ rtx-trading-engine/
 ```bash
 cd backend
 go mod tidy  # Download dependencies (first time only)
-go run main.go
+go run cmd/server/main.go
 ```
 
 The backend will start on `http://localhost:8080` with:
@@ -110,3 +110,23 @@ Open `http://localhost:3001` (adjust port if needed).
 ## License
 
 Proprietary - All Rights Reserved
+
+## Whole Project run
+1.Backend: cd backend && go run cmd/server/main.go
+2.Desktop: cd clients/desktop && npm run dev
+3.Broker Admin: cd admin/broker-admin && npm run dev
+4.Super Admin: cd admin/super-admin && npm run dev
+
+## Market Data Features
+
+**As of January 30, 2026**: Trading Engine uses **100% real YOFX market data** with the following features:
+
+- ✅ **Real-time Ticks**: Direct FIX gateway feed from YOFX broker
+- ✅ **24-Hour High/Low Tracking**: Enhanced market data with daily ranges
+- ✅ **Zero Simulation**: Removed all mock data fallbacks
+- ✅ **Secure Configuration**: All credentials externalized via environment variables
+- ✅ **WebSocket API**: Real-time price streaming to connected clients
+- ✅ **Production Ready**: Fully configured for multi-environment deployment
+
+For configuration details, see [docs/MOCK_DATA_REMOVAL.md](docs/MOCK_DATA_REMOVAL.md)
+For WebSocket API docs, see [docs/WEBSOCKET_MARKET_DATA_API.md](docs/WEBSOCKET_MARKET_DATA_API.md)

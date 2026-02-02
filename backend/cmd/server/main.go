@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -26,6 +25,7 @@ import (
 	"github.com/epic1st/rtx/backend/lpmanager/adapters"
 	"github.com/epic1st/rtx/backend/tickstore"
 	"github.com/epic1st/rtx/backend/ws"
+	"github.com/joho/godotenv"
 )
 
 type BrokerConfig struct {
@@ -58,6 +58,14 @@ func main() {
 	// ============================================
 	// GC TUNING - Prevents memory crashes during high-frequency quote processing
 	// ============================================
+	// Load .env explicitly
+	if err := godotenv.Load(); err != nil {
+		log.Printf("[WARN] No .env file found: %v", err)
+	} else {
+		log.Printf("[INIT] Loaded .env file. YOFX_PROXY_HOST=%s", os.Getenv("YOFX_PROXY_HOST"))
+	}
+
+	// GC TUNING - Prevents memory crashes during high-frequency quote processing
 	// GOGC=50: More frequent, shorter GC pauses (default 100)
 	// GOMEMLIMIT=2GiB: Hard cap prevents OOM crashes
 	if os.Getenv("GOGC") == "" {
@@ -73,6 +81,21 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	// ============================================
+	// PRODUCTION VALIDATION - CRITICAL SAFEGUARD
+	// ============================================
+	// Prevents simulation code from running in production
+	if cfg.Environment == "production" {
+		log.Println("[PRODUCTION] Running production environment validation...")
+		validator := config.NewProductionValidator(cfg)
+		if err := validator.ValidateProduction(); err != nil {
+			log.Fatalf("❌ PRODUCTION VALIDATION FAILED: %v\nServer will not start with invalid production configuration.", err)
+		}
+		log.Println("[PRODUCTION] ✓ Production validation passed - environment is production-safe")
+	} else {
+		log.Printf("[ENVIRONMENT] Running in %s mode (production validation skipped)", cfg.Environment)
 	}
 
 	// Initialize broker config from loaded configuration
@@ -233,81 +256,6 @@ func main() {
 		log.Println("[Main] Quote pipe closed!")
 	}()
 
-	// ============================================
-	// MARKET SIMULATION (Requested by User)
-	// ============================================
-	// Generates realistic market movement for demo/visual purposes
-	go func() {
-		log.Println("[Simulation] Starting market simulation service...")
-		// Initial prices
-		prices := map[string]float64{
-			"EURUSD": 1.0850,
-			"GBPUSD": 1.2750,
-			"BTCUSD": 65000.00,
-			"XAUUSD": 2350.00,
-			"USDJPY": 155.50,
-			"AUDUSD": 0.6650,
-			"USDCAD": 1.3650,
-			"USDCHF": 0.9050,
-		}
-
-		// Random walk parameters
-		volatility := map[string]float64{
-			"EURUSD": 0.0001,
-			"GBPUSD": 0.00015,
-			"BTCUSD": 15.0,
-			"XAUUSD": 0.50,
-			"USDJPY": 0.05,
-			"AUDUSD": 0.0001,
-			"USDCAD": 0.0001,
-			"USDCHF": 0.0001,
-		}
-
-		ticker := time.NewTicker(200 * time.Millisecond) // 5 ticks per sec
-		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-		for range ticker.C {
-			for symbol, currentPrice := range prices {
-				// Random walk: -1 to +1 * volatility
-				change := (rng.Float64()*2.0 - 1.0) * volatility[symbol]
-
-				// Apply drift (slight trend)
-				// change += 0.00001
-
-				newMid := currentPrice + change
-				prices[symbol] = newMid
-
-				// Calculate Bid/Ask
-				spread := 0.0001 // 1 pip
-				switch symbol {
-				case "BTCUSD":
-					spread = 10.0
-				case "XAUUSD":
-					spread = 0.50
-				}
-
-				bid := newMid - (spread / 2)
-				ask := newMid + (spread / 2)
-
-				// Create Tick
-				tick := &ws.MarketTick{
-					Type:      "tick",
-					Symbol:    symbol,
-					Bid:       bid,
-					Ask:       ask,
-					Spread:    spread,
-					Timestamp: time.Now().UnixMilli(),
-					LP:        "SIM",
-				}
-
-				// Broadcast to WebSocket
-				hub.BroadcastTick(tick)
-
-				// Store in TickStore (for History/OHLC)
-				tickStore.StoreTick(symbol, bid, ask, spread, "SIM", time.Now())
-			}
-		}
-	}()
 
 	// NOTE: FIX market data is piped via the dedicated goroutine below (line ~1594)
 	// to avoid competing readers on the same channel with mismatched timestamp units.
@@ -781,13 +729,25 @@ func main() {
 			securities := fixGateway.GetSecurities()
 			if len(securities) > 0 {
 				for _, sec := range securities {
-					category := "forex.major" // Default
-					if strings.Contains(sec.Symbol, "XAU") || strings.Contains(sec.Symbol, "XAG") {
-						category = "metals"
+					// LOGIC: Majors are Root Level (Empty Category), others are nested
+					category := "TradingA.Other"
+
+					// Define Majors that should be at root
+					majors := map[string]bool{
+						"EURUSD": true, "GBPUSD": true, "USDCHF": true,
+						"USDJPY": true, "USDCAD": true, "AUDUSD": true,
+					}
+
+					if majors[sec.Symbol] {
+						category = "" // Root Level
+					} else if strings.Contains(sec.Symbol, "XAU") || strings.Contains(sec.Symbol, "XAG") {
+						category = "TradingA.CFD-Metals"
 					} else if strings.Contains(sec.Symbol, "BTC") || strings.Contains(sec.Symbol, "ETH") {
-						category = "crypto"
+						category = "TradingA.Crypto"
 					} else if strings.Contains(sec.Symbol, "US") && !strings.Contains(sec.Symbol, "USD") {
-						category = "indices"
+						category = "TradingA.Indices"
+					} else {
+						category = "TradingA.CFD-FX"
 					}
 
 					availableSymbols = append(availableSymbols, map[string]interface{}{
@@ -801,9 +761,32 @@ func main() {
 			}
 		}
 
-		// Fallback if FIX is not ready yet
+		// Fallback if FIX is not ready yet or returned no symbols
 		if len(availableSymbols) == 0 {
-			log.Println("[API] FIX symbols not ready, returning empty list")
+			log.Println("[API] FIX symbols not ready, returning default structure for menu")
+			availableSymbols = []map[string]interface{}{
+				// Root Level Majors (Empty Category)
+				{"symbol": "EURUSD", "name": "EURUSD", "category": "", "digits": 5},
+				{"symbol": "GBPUSD", "name": "GBPUSD", "category": "", "digits": 5},
+				{"symbol": "USDJPY", "name": "USDJPY", "category": "", "digits": 3},
+				{"symbol": "USDCHF", "name": "USDCHF", "category": "", "digits": 5},
+				{"symbol": "USDCAD", "name": "USDCAD", "category": "", "digits": 5},
+				{"symbol": "AUDUSD", "name": "AUDUSD", "category": "", "digits": 5},
+
+				// Nested Items (TradingA Folder)
+				// 1. CFD-FX (Minors)
+				{"symbol": "AUDNZD", "name": "AUDNZD", "category": "TradingA.CFD-FX", "digits": 5},
+				{"symbol": "EURAUD", "name": "EURAUD", "category": "TradingA.CFD-FX", "digits": 5},
+				{"symbol": "GBPJPY", "name": "GBPJPY", "category": "TradingA.CFD-FX", "digits": 3},
+
+				// 2. CFD-Metals
+				{"symbol": "XAUUSD", "name": "Gold vs USD", "category": "TradingA.CFD-Metals", "digits": 2},
+				{"symbol": "XAGUSD", "name": "Silver vs USD", "category": "TradingA.CFD-Metals", "digits": 3},
+
+				// 3. Crypto
+				{"symbol": "BTCUSD", "name": "Bitcoin", "category": "TradingA.Crypto", "digits": 2},
+				{"symbol": "ETHUSD", "name": "Ethereum", "category": "TradingA.Crypto", "digits": 2},
+			}
 		}
 
 		json.NewEncoder(w).Encode(availableSymbols)
@@ -1201,6 +1184,11 @@ func main() {
 	// Register comprehensive admin routes
 	adminHandler.RegisterRoutes(http.DefaultServeMux)
 	log.Println("[Admin] Comprehensive admin system routes registered")
+
+	// Register FIX connection management endpoints
+	fixConnHandler := admin.NewFIXConnectionHandler(server.GetFIXGateway(), server.GetConnectionManager())
+	fixConnHandler.RegisterRoutes(http.DefaultServeMux)
+	log.Println("[Admin] FIX connection management endpoints registered")
 	/*
 		// Initialize LP Manager (Moved to top)
 		// lpMgr := lpmanager.NewManager("data/lp_config.json")
@@ -1428,79 +1416,7 @@ func main() {
 	})
 
 	// ===== FIX SESSION MANAGEMENT =====
-	// FIX Session Status
-	http.HandleFunc("/admin/fix/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Content-Type", "application/json")
-
-		status := make(map[string]interface{})
-		status["sessions"] = server.GetFIXStatus()
-		json.NewEncoder(w).Encode(status)
-	})
-
-	// Connect FIX Session
-	http.HandleFunc("/admin/fix/connect", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		var req struct {
-			SessionID string `json:"sessionId"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
-
-		if err := server.ConnectToLP(req.SessionID); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success":   true,
-			"sessionId": req.SessionID,
-			"message":   "Connection initiated",
-		})
-	})
-
-	// Disconnect FIX Session
-	http.HandleFunc("/admin/fix/disconnect", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		var req struct {
-			SessionID string `json:"sessionId"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
-
-		if err := server.DisconnectLP(req.SessionID); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success":   true,
-			"sessionId": req.SessionID,
-			"message":   "Disconnected",
-		})
-	})
+	// Note: /admin/fix/status, /admin/fix/connect, /admin/fix/disconnect are registered via fixConnHandler.RegisterRoutes()
 
 	// Manual FIX Subscription endpoint
 	http.HandleFunc("/admin/fix/subscribe", func(w http.ResponseWriter, r *http.Request) {
@@ -1582,21 +1498,35 @@ func main() {
 		})
 	})
 
-	// Auto-Connect FIX Sessions on startup
+	// Start FIX Connection Manager for automatic reconnection and health monitoring
+	connMgr := server.GetConnectionManager()
+	if connMgr != nil {
+		connMgr.Start()
+		log.Println("[FIX] Connection manager started - monitoring connection health")
+	}
+
+	// Auto-Connect FIX Sessions on startup with automatic reconnection enabled
 	go func() {
 		time.Sleep(3 * time.Second) // Wait for other services to initialize
+
+		// Enable auto-reconnect for YOFX sessions
+		if connMgr != nil {
+			connMgr.EnableAutoReconnect("YOFX1")
+			connMgr.EnableAutoReconnect("YOFX2")
+			log.Println("[FIX] Auto-reconnect enabled for YOFX1 and YOFX2 with exponential backoff (5s-5m)")
+		}
 
 		// Connect YOFX1 (Trading)
 		log.Println("[FIX] Auto-connecting YOFX1 session (Trading)...")
 		if err := server.ConnectToLP("YOFX1"); err != nil {
-			log.Printf("[FIX] Failed to auto-connect YOFX1: %v", err)
+			log.Printf("[FIX] Failed to auto-connect YOFX1: %v (will auto-retry)", err)
 		}
 
 		// Connect YOFX2 (Market Data) after short delay
 		time.Sleep(2 * time.Second)
 		log.Println("[FIX] Auto-connecting YOFX2 session (Market Data)...")
 		if err := server.ConnectToLP("YOFX2"); err != nil {
-			log.Printf("[FIX] Failed to auto-connect YOFX2: %v", err)
+			log.Printf("[FIX] Failed to auto-connect YOFX2: %v (will auto-retry)", err)
 		} else {
 			// First request security list to discover available symbols
 			time.Sleep(2 * time.Second)
@@ -1659,8 +1589,8 @@ func main() {
 		for md := range fixGateway.GetMarketData() {
 			tickCount++
 			if tickCount%100 == 1 {
-				log.Printf("[FIX-WS] Piping FIX tick #%d: %s Bid=%.5f Ask=%.5f",
-					tickCount, md.Symbol, md.Bid, md.Ask)
+				log.Printf("[FIX-WS] Piping FIX tick #%d: %s Bid=%.5f Ask=%.5f High24h=%.5f Low24h=%.5f",
+					tickCount, md.Symbol, md.Bid, md.Ask, md.High24h, md.Low24h)
 			}
 
 			tick := &ws.MarketTick{
@@ -1670,7 +1600,9 @@ func main() {
 				Ask:       md.Ask,
 				Spread:    md.Ask - md.Bid,
 				Timestamp: md.Timestamp.UnixMilli(),
-				LP:        "YOFX", // FIX LP source
+				LP:        "YOFX",
+				High24h:   md.High24h,
+				Low24h:    md.Low24h,
 			}
 
 			// Store latest tick for debugging
@@ -1683,125 +1615,19 @@ func main() {
 		log.Println("[FIX-WS] FIX market data pipe closed!")
 	}()
 
-	// Simulated market data fallback - Hybrid Mode
-	// If real data flows, we use it. If not, we simulate to keep the UI alive.
-	go func() {
-		// Wait 2 seconds for initial connection (faster startup)
-		time.Sleep(2 * time.Second)
-
-		log.Println("[HYBRID-MD] Starting Hybrid Data Engine (Real + Simulation fallback)")
-
-		// Initial prices for simulation
-		prices := map[string]float64{
-			"EURUSD": 1.1050, "GBPUSD": 1.2500, "USDJPY": 145.00,
-			"AUDUSD": 0.6500, "USDCAD": 1.3500, "USDCHF": 0.9000,
-			"EURGBP": 0.8500, "EURJPY": 160.00, "GBPJPY": 188.00,
-			"XAUUSD": 2030.00, "XAGUSD": 22.50, "BTCUSD": 45000.00,
-			"ETHUSD": 2400.00,
-			// Additional pairs for full coverage
-			"EURAUD": 1.6500, "EURCAD": 1.4800, "EURCHF": 0.9400,
-			"AUDCAD": 0.8800, "AUDCHF": 0.5800, "AUDJPY": 97.00,
-			"AUDNZD": 1.0700, "CADCHF": 0.6400, "CADJPY": 109.00,
-			"CHFJPY": 169.00, "GBPAUD": 1.9200, "GBPCAD": 1.7100,
-			"GBPCHF": 1.1000, "GBPNZD": 2.0500, "NZDCAD": 0.8300,
-			"NZDCHF": 0.5400, "NZDJPY": 90.00,
-		}
-
-		// Sync initial prices with any real data received so far
-		tickMutex.RLock()
-		for sym, tick := range latestTicks {
-			prices[sym] = tick.Bid
-		}
-		tickMutex.RUnlock()
-
-		// Run every 200ms
-		ticker := time.NewTicker(200 * time.Millisecond)
-		defer ticker.Stop()
-
-		lastTickTime := make(map[string]time.Time)
-
-		for range ticker.C {
-			// DO NOT Return if we have real data - run concurrently!
-			// Instead, check per-symbol freshness.
-
-			tickMutex.RLock()
-			// Update our knowledge of real data freshness
-			for sym, tick := range latestTicks {
-				if tick.Timestamp > 0 {
-					lastTickTime[sym] = time.UnixMilli(tick.Timestamp)
-				}
-			}
-			tickMutex.RUnlock()
-
-			for symbol, price := range prices {
-				// Check if we have FRESH real data for this symbol (last 5 seconds)
-				lastTime, ok := lastTickTime[symbol]
-				if ok && time.Since(lastTime) < 5*time.Second {
-					// We have live data for this symbol, skip simulation
-					// Update our sim price to match real data so we don't jump when fallback happens
-					tickMutex.RLock()
-					if realTick, exists := latestTicks[symbol]; exists {
-						prices[symbol] = realTick.Bid
-					}
-					tickMutex.RUnlock()
-					continue
-				}
-
-				// No fresh real data? Simulate!
-				// Random walk logic
-				change := (rand.Float64() - 0.5) * (price * 0.0001) // 0.01% volatility
-				if symbol == "XAUUSD" || symbol == "BTCUSD" {
-					change = (rand.Float64() - 0.5) * (price * 0.0005) // Higher volatility
-				}
-
-				newPrice := price + change
-				prices[symbol] = newPrice
-
-				// Construct simulated tick
-				spread := 0.0001
-				if strings.Contains(symbol, "JPY") {
-					spread = 0.01
-				}
-				if symbol == "XAUUSD" {
-					spread = 0.10
-				}
-
-				bid := newPrice
-				ask := newPrice + spread
-
-				// Determine "LP" name
-				lpName := "SIM"
-
-				// IMPORTANT: Persist tick to store
-				tickStore.StoreTick(symbol, bid, ask, spread, lpName, time.Now())
-
-				tick := &ws.MarketTick{
-					Type:        "tick",
-					Symbol:      symbol,
-					Bid:         bid,
-					Ask:         ask,
-					Spread:      spread,
-					Timestamp:   time.Now().UnixMilli(),
-					LP:          lpName,
-					DailyChange: (rand.Float64() * 2.0) - 1.0, // Random -1% to +1%
-				}
-
-				// Store for debugging
-				tickMutex.Lock()
-				latestTicks[symbol] = tick
-				totalTickCount++
-				tickMutex.Unlock()
-
-				// Broadcast to frontend
-				hub.BroadcastTick(tick)
-
-				// DEBUG: Log simulation activity every 100 ticks for EURUSD
-				if symbol == "EURUSD" && rand.Intn(20) == 0 {
-					log.Printf("[HYBRID] Simulating EURUSD: Bid=%.5f (Sim count active)", bid)
-				}
-			}
-		}
-	}()
+	// ============================================
+	// SIMULATION REMOVED - 2026-01-30
+	// ============================================
+	// Previously had hybrid simulation fallback (lines 1657-1775)
+	// Reason: Using 100% real YOFX data only - simulation no longer needed
+	// Backup saved to: backend/removed_simulation_backup.go.txt
+	//
+	// All market data now flows exclusively from:
+	// 1. FIX Gateway (YOFX1 Trading + YOFX2 Market Data)
+	// 2. LP Manager (Binance, OANDA aggregation)
+	//
+	// No simulated ticks are generated. If no real data is available,
+	// the frontend will display "No data" instead of fake prices.
 
 	// Debug endpoint to check market data flow
 	http.HandleFunc("/admin/fix/ticks", func(w http.ResponseWriter, r *http.Request) {

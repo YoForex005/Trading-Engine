@@ -1,0 +1,271 @@
+groups:
+  - name: trading_engine_production_safeguards
+    interval: 30s
+    rules:
+      # ========================================================================
+      # CRITICAL: Simulation Detection Alerts
+      # ========================================================================
+
+      - alert: SimulationDataInProduction
+        expr: |
+          market_data_source_type == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: data_integrity
+          environment: production
+        annotations:
+          summary: "CRITICAL: Simulation data detected in PRODUCTION"
+          description: |
+            Simulation market data (LP='SIM') is actively running in production environment.
+            This is a CRITICAL violation of production data integrity policies.
+
+            Immediate actions required:
+            1. Stop the trading server immediately
+            2. Verify ALLOW_SIMULATION environment variable is false
+            3. Check for simulation code in production binary
+            4. Review recent deployments
+            5. Tag affected data in database
+            6. Generate incident report
+
+            See: docs/PRODUCTION_DEPLOYMENT_GUIDE.md#emergency-procedures
+          dashboard: "http://grafana/d/trading-engine/production-safeguards"
+
+      - alert: SimulationTicksInDatabase
+        expr: |
+          sum(rate(ticks_total{lp_source="SIM"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: database_integrity
+          environment: production
+        annotations:
+          summary: "CRITICAL: Simulation ticks being written to production database"
+          description: |
+            Simulation ticks (LP='SIM') are being written to the production database.
+            Current rate: {{ $value | humanize }} ticks/sec
+
+            Database is being polluted with fake market data.
+
+            Immediate actions:
+            1. Stop server to prevent more simulation data
+            2. Run database scan: psql -f scripts/db/check-simulation-data.sql
+            3. Tag simulation data: psql -f scripts/db/tag-simulation-data.sql
+            4. Identify root cause (deployment error, config error, etc.)
+
+      - alert: MemoryContainsSimulationTicks
+        expr: |
+          simulation_ticks_in_memory > 0
+        for: 30s
+        labels:
+          severity: critical
+          component: runtime_integrity
+          environment: production
+        annotations:
+          summary: "Simulation ticks detected in memory"
+          description: |
+            {{ $value }} simulation ticks found in server memory.
+            This indicates simulation code is actively running.
+
+      # ========================================================================
+      # WARNING: Data Quality Alerts
+      # ========================================================================
+
+      - alert: NoRealLPData
+        expr: |
+          sum(rate(ticks_total{lp_source!="SIM"}[5m])) == 0
+        for: 10m
+        labels:
+          severity: critical
+          component: data_flow
+          environment: production
+        annotations:
+          summary: "No real liquidity provider data flowing"
+          description: |
+            No market data is being received from real liquidity providers.
+            All configured LPs appear offline or disconnected.
+
+            Check:
+            - YOFX FIX session status
+            - OANDA API connection
+            - Binance API connection
+            - Network connectivity
+
+      - alert: MarketDataStale
+        expr: |
+          (time() - data_last_tick_timestamp) > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: data_freshness
+          environment: production
+        annotations:
+          summary: "Market data is stale (no updates in 5+ minutes)"
+          description: |
+            Last market tick received {{ $value | humanizeDuration }} ago.
+            Market data may not be flowing correctly.
+
+            Age: {{ $value }} seconds
+            Threshold: 300 seconds (5 minutes)
+
+      - alert: LPSourceUnhealthy
+        expr: |
+          up{lp_source=~"YOFX|OANDA|BINANCE"} == 0
+        for: 3m
+        labels:
+          severity: warning
+          component: lp_connection
+          environment: production
+        annotations:
+          summary: "Liquidity provider {{ $labels.lp_source }} is DOWN"
+          description: |
+            LP {{ $labels.lp_source }} has been down for {{ $value | humanizeDuration }}.
+
+            Impact: Reduced liquidity, potential price gaps.
+
+      # ========================================================================
+      # Configuration Validation Alerts
+      # ========================================================================
+
+      - alert: ProductionValidationFailed
+        expr: |
+          production_validation_passed == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: startup_validation
+          environment: production
+        annotations:
+          summary: "Production environment validation failed"
+          description: |
+            Server started but production validation checks failed.
+            This should prevent server startup - investigate why it's running.
+
+      - alert: AllowSimulationEnabled
+        expr: |
+          allow_simulation_flag == 1
+        for: 30s
+        labels:
+          severity: critical
+          component: configuration
+          environment: production
+        annotations:
+          summary: "ALLOW_SIMULATION is enabled in production!"
+          description: |
+            Environment variable ALLOW_SIMULATION=true in production.
+            This is FORBIDDEN and must be immediately corrected.
+
+      # ========================================================================
+      # Health Check Alerts
+      # ========================================================================
+
+      - alert: DataSourceHealthCheckFailing
+        expr: |
+          probe_success{probe="data_source_health"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: health_check
+          environment: production
+        annotations:
+          summary: "Data source health check is failing"
+          description: |
+            Endpoint /admin/health/data-source is returning HTTP 500.
+            This indicates simulation data was detected.
+
+            Check: curl http://server:7999/admin/health/data-source
+
+      # ========================================================================
+      # Database Integrity Alerts
+      # ========================================================================
+
+      - alert: HighSimulationPercentage
+        expr: |
+          (
+            sum(ticks_total{lp_source="SIM"})
+            /
+            sum(ticks_total)
+          ) * 100 > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: database_integrity
+          environment: production
+        annotations:
+          summary: "More than 1% of ticks are simulation data"
+          description: |
+            {{ $value | humanize }}% of all ticks in database are simulation.
+
+            This suggests historical simulation data that needs cleanup.
+            Run: psql -f scripts/db/check-simulation-data.sql
+
+      - alert: DatabaseContainsSimulation
+        expr: |
+          ticks_simulation_count > 0
+        for: 1h
+        labels:
+          severity: warning
+          component: database_integrity
+          environment: production
+        annotations:
+          summary: "Database contains {{ $value }} simulation ticks"
+          description: |
+            Historical simulation data found in production database.
+
+            While no new simulation data is being written, old data should
+            be tagged for audit trail:
+
+            1. Review: psql -f scripts/db/check-simulation-data.sql
+            2. Tag: psql -f scripts/db/tag-simulation-data.sql
+            3. Document in incident log
+
+      # ========================================================================
+      # Rate-Based Anomaly Detection
+      # ========================================================================
+
+      - alert: UnexpectedSimulationBurst
+        expr: |
+          rate(ticks_total{lp_source="SIM"}[1m]) > 10
+        for: 30s
+        labels:
+          severity: critical
+          component: anomaly_detection
+          environment: production
+        annotations:
+          summary: "Sudden burst of simulation ticks detected"
+          description: |
+            Simulation tick rate: {{ $value | humanize }} ticks/sec
+
+            This suggests simulation code was recently activated.
+            Investigate deployment or configuration changes.
+
+# ============================================================================
+# Metric Definitions (for reference)
+# ============================================================================
+# These metrics should be exposed by the trading engine:
+#
+# market_data_source_type (gauge)
+#   - 0 = simulation active
+#   - 1 = real LP data only
+#
+# ticks_total (counter) labels: lp_source, symbol
+#   - Total ticks received by LP source
+#
+# simulation_ticks_in_memory (gauge)
+#   - Count of simulation ticks currently in memory
+#
+# data_last_tick_timestamp (gauge)
+#   - Unix timestamp of most recent tick
+#
+# production_validation_passed (gauge)
+#   - 1 = passed, 0 = failed
+#
+# allow_simulation_flag (gauge)
+#   - 1 = enabled, 0 = disabled
+#
+# ticks_simulation_count (gauge)
+#   - Total simulation ticks in database
+#
+# up{lp_source="YOFX"|"OANDA"|"BINANCE"} (gauge)
+#   - LP connection status
+# ============================================================================

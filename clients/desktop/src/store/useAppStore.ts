@@ -18,6 +18,8 @@ export interface Tick {
   dailyChange?: number;
   high?: number;
   low?: number;
+  high24h?: number;
+  low24h?: number;
   volume?: number;
   last?: number;
   open?: number;
