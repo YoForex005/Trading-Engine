@@ -189,6 +189,11 @@ export class DrawingManager {
   }
 
   unselectAll(): void {
+    // Defensive: Ensure drawings is an array
+    if (!Array.isArray(this.drawings)) {
+      this.drawings = [];
+      return;
+    }
     this.drawings.forEach(d => d.selected = false);
     this.renderAllDrawings();
   }
@@ -381,7 +386,9 @@ export class DrawingManager {
       this.overlayElements.set(drawing.id, element);
 
       // Add nodes for path-based drawings (Red Squares if selected)
-      drawing.points.forEach((point, index) => {
+      // Ensure points array exists before iterating
+      if (Array.isArray(drawing.points)) {
+        drawing.points.forEach((point, index) => {
         const node = document.createElement('div');
         node.className = `drawing-node drawing-node-${drawing.id} ${drawing.selected ? 'drawing-node-selected' : ''}`;
 
@@ -411,6 +418,7 @@ export class DrawingManager {
           container.appendChild(node);
         }
       });
+      } // End of Array.isArray check
 
       // Add mouse down to the element itself for dragging entire drawing
       element.addEventListener('mousedown', (e) => this.handleMouseDown(e, drawing.id));
@@ -429,7 +437,8 @@ export class DrawingManager {
    * Create HTML element for drawing
    */
   private createDrawingElement(drawing: Drawing): HTMLElement | null {
-    if (!this.series) return null;
+    // Defensive: Ensure both chart and series exist
+    if (!this.chart || !this.series) return null;
 
     const div = document.createElement('div');
     div.className = 'chart-drawing';
@@ -598,6 +607,8 @@ export class DrawingManager {
    * Update drawings on chart scroll/zoom
    */
   updateDrawingPositions(): void {
+    // Defensive: Ensure chart and series exist before rendering
+    if (!this.chart || !this.series) return;
     this.renderAllDrawings();
   }
 
@@ -639,7 +650,8 @@ export class DrawingManager {
       const response = await fetch(`http://localhost:7999/api/drawings?symbol=${symbol}&accountId=${this.currentAccountId}`);
       if (response.ok) {
         const drawings = await response.json();
-        this.drawings = drawings;
+        // Ensure drawings is always an array, never null or undefined
+        this.drawings = Array.isArray(drawings) ? drawings : [];
         this.renderAllDrawings();
       } else {
         this.loadFromStorage(symbol);
@@ -675,11 +687,15 @@ export class DrawingManager {
     try {
       const data = localStorage.getItem(`drawings-${symbol}`);
       if (data) {
-        this.drawings = JSON.parse(data);
+        const parsed = JSON.parse(data);
+        // Ensure drawings is always an array, never null or undefined
+        this.drawings = Array.isArray(parsed) ? parsed : [];
         this.renderAllDrawings();
       }
     } catch (e) {
       console.error('Failed to load from local storage', e);
+      // Reset to empty array on error
+      this.drawings = [];
     }
   }
 }

@@ -62,6 +62,7 @@ export function TradingChart({
     const seriesRef = useRef<ISeriesApi<any> | null>(null);
     const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
     const bidLineRef = useRef<any>(null);
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
     // Separate state: historical loaded once, forming updates from ticks
     const historicalCandlesRef = useRef<OHLC[]>([]); // Loaded from API, never modified
@@ -221,6 +222,23 @@ export function TradingChart({
             handleResize();
             setIsChartReady(true);
 
+            // Get canvas reference for export functionality
+            // Store the canvas ref globally for SavePictureDialog
+            const findCanvas = () => {
+                const canvas = chartContainerRef.current?.querySelector('canvas');
+                if (canvas) {
+                    canvasRef.current = canvas;
+                    // Store globally for access from FileMenu
+                    (window as any).__activeChartCanvas = canvas;
+                    (window as any).__activeChartContainer = chartContainerRef.current;
+                }
+            };
+
+            // Try immediately and then with a delay (canvas may render async)
+            findCanvas();
+            const canvasInterval = setInterval(findCanvas, 100);
+            setTimeout(() => clearInterval(canvasInterval), 2000);
+
             return () => {
                 resizeObserver.disconnect();
                 setIsChartReady(false);
@@ -230,9 +248,19 @@ export function TradingChart({
                 indicatorManager.setChart(null);
                 drawingManager.setChart(null, null);
 
+                // Clear global refs
+                if ((window as any).__activeChartCanvas === canvasRef.current) {
+                    (window as any).__activeChartCanvas = null;
+                }
+                if ((window as any).__activeChartContainer === chartContainerRef.current) {
+                    (window as any).__activeChartContainer = null;
+                }
+
+                clearInterval(canvasInterval);
                 chart.remove();
                 chartRef.current = null;
                 seriesRef.current = null;
+                canvasRef.current = null;
             };
         } catch (err) {
             console.error('Failed to initialize chart:', err);

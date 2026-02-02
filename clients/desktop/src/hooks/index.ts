@@ -16,3 +16,14 @@ export {
   useCommandListener,
   useCommandHistory,
 } from './useCommandBus';
+
+// New keyboard shortcut hooks
+export {
+  useKeyboardShortcut,
+  useKeyboardShortcuts as useKeyboardShortcutsMulti,
+  useShortcutList,
+  useShortcutsByCategory,
+  useShortcutToggle,
+  useShortcutFormat
+} from './useKeyboardShortcut';
+export type { UseKeyboardShortcutOptions } from './useKeyboardShortcut';

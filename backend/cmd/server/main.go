@@ -413,6 +413,37 @@ func main() {
 	drawingsHandler.RegisterRoutes(http.DefaultServeMux)
 	log.Println("[Drawings] Drawings API registered")
 
+	// Initialize User Data Folder Handler
+	userDataHandler := api.NewUserDataHandler()
+	http.HandleFunc("/api/user/data-folder", userDataHandler.HandleGetDataFolderPath)
+	http.HandleFunc("/api/user/data-folder/list", userDataHandler.HandleListFiles)
+	http.HandleFunc("/api/user/data-folder/download", userDataHandler.HandleDownloadFile)
+	http.HandleFunc("/api/user/data-folder/upload", userDataHandler.HandleUploadFile)
+	http.HandleFunc("/api/user/data-folder/delete", userDataHandler.HandleDeleteFile)
+	http.HandleFunc("/api/user/data-folder/mkdir", userDataHandler.HandleCreateDirectory)
+	log.Println("[UserData] User data folder API registered")
+
+	// Initialize Workspace API
+	http.HandleFunc("/api/workspaces", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			server.HandleSaveWorkspace(w, r)
+		} else if r.Method == http.MethodGet {
+			server.HandleListWorkspaces(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	http.HandleFunc("/api/workspaces/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			server.HandleLoadWorkspace(w, r)
+		} else if r.Method == http.MethodDelete {
+			server.HandleDeleteWorkspace(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	log.Println("[Workspaces] Workspace API registered")
+
 	// Health (no rate limit)
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -696,6 +727,36 @@ func main() {
 
 	http.HandleFunc("/api/account/summary", apiHandler.HandleGetAccountSummary)
 	http.HandleFunc("/api/account/create", apiHandler.HandleCreateAccount)
+
+	// Print Preferences API
+	printPrefsStore := api.NewPrintPreferencesStore()
+	http.HandleFunc("/api/accounts/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Route to print preferences handlers
+		if strings.Contains(r.URL.Path, "/print-preferences") {
+			switch r.Method {
+			case "GET":
+				printPrefsStore.HandleGetPrintPreferences(w, r)
+			case "POST":
+				printPrefsStore.HandleSavePrintPreferences(w, r)
+			case "DELETE":
+				printPrefsStore.HandleDeletePrintPreferences(w, r)
+			default:
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+			return
+		}
+
+		http.Error(w, "Not found", http.StatusNotFound)
+	})
 
 	// Positions (B-Book)
 	http.HandleFunc("/api/symbols", apiHandler.HandleGetSymbols)

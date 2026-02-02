@@ -187,7 +187,7 @@ func Load() (*Config, error) {
 		},
 
 		CORS: CORSConfig{
-			AllowedOrigins: getEnvAsSlice("ALLOWED_ORIGINS", []string{"http://localhost:3000"}, ","),
+			AllowedOrigins: getEnvAsSlice("ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}, ","),
 		},
 
 		Encryption: EncryptionConfig{

@@ -60,6 +60,7 @@ import {
     GraduationCap
 } from 'lucide-react';
 import { OptionsDialog } from '../settings/OptionsDialog';
+import { FileMenu } from './FileMenu';
 
 // Local interface definition to avoid export issues
 interface MenuItem {
@@ -414,10 +415,50 @@ export const MenuBar = () => {
 
                         {/* Dropdown */}
                         {activeMenu === key && (
-                            <div className="absolute top-full left-0 mt-1 min-w-[240px] bg-[#1e1e1e] border border-zinc-700 rounded-md shadow-xl py-1 z-[100] animate-in fade-in zoom-in-95 duration-100 origin-top-left">
-                                {menuItems[key].map((item, index) => (
-                                    <MenuItem key={index} item={item} />
-                                ))}
+                            <div className="absolute top-full left-0 mt-1 z-[100]">
+                                {key === 'File' ? (
+                                    <FileMenu
+                                        onSave={() => {
+                                            console.log('[MenuBar] Save workspace triggered');
+                                            // Dispatch custom event for save workspace
+                                            window.dispatchEvent(new CustomEvent('saveWorkspace'));
+                                            setActiveMenu(null);
+                                        }}
+                                        onSaveAsPicture={() => {
+                                            console.log('Save as picture');
+                                            setActiveMenu(null);
+                                        }}
+                                        onOpenDataFolder={() => {
+                                            console.log('[MenuBar] Open data folder triggered');
+                                            window.dispatchEvent(new CustomEvent('openDataFolder'));
+                                            setActiveMenu(null);
+                                        }}
+                                        onPrint={() => {
+                                            console.log('[MenuBar] Print triggered');
+                                            window.dispatchEvent(new CustomEvent('printChart'));
+                                            setActiveMenu(null);
+                                        }}
+                                        onPrintPreview={() => {
+                                            console.log('Print preview');
+                                            setActiveMenu(null);
+                                        }}
+                                        onPrintSetup={() => {
+                                            console.log('Print setup');
+                                            setActiveMenu(null);
+                                        }}
+                                        onExit={() => {
+                                            console.log('Exit');
+                                            setActiveMenu(null);
+                                        }}
+                                        hasUnsavedChanges={false}
+                                    />
+                                ) : (
+                                    <div className="min-w-[240px] bg-[#1e1e1e] border border-zinc-700 rounded-md shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100 origin-top-left">
+                                        {menuItems[key].map((item, index) => (
+                                            <MenuItem key={index} item={item} />
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>

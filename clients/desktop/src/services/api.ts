@@ -757,6 +757,83 @@ export const analyticsApi = {
 };
 
 // ============================================
+// Workspace API
+// ============================================
+
+export interface WorkspaceConfig {
+  charts: any[];
+  layout: any;
+  marketWatch: any;
+  orderPanel: any;
+  version: string;
+}
+
+export interface Workspace {
+  id?: string;
+  name: string;
+  description?: string;
+  userId: string;
+  accountId?: string;
+  charts: any;
+  layout: any;
+  marketWatch: any;
+  orderPanel: any;
+  version: string;
+  createdAt?: string;
+  updatedAt?: string;
+  thumbnail?: string;
+  isDefault: boolean;
+  tags?: string;
+}
+
+export interface SaveWorkspaceRequest {
+  workspace: Workspace;
+  overwrite: boolean;
+}
+
+export interface SaveWorkspaceResponse {
+  success: boolean;
+  workspaceId?: string;
+  message?: string;
+  conflict?: boolean;
+  conflictVersion?: Workspace;
+}
+
+export const workspaceApi = {
+  async saveWorkspace(workspace: Workspace, overwrite = false): Promise<SaveWorkspaceResponse> {
+    const response = await fetchWithTimeout(`${API_BASE_URL}/api/workspaces`, {
+      method: 'POST',
+      body: JSON.stringify({ workspace, overwrite }),
+    });
+
+    return handleResponse(response);
+  },
+
+  async loadWorkspace(workspaceId: string): Promise<{ success: boolean; workspace?: Workspace; message?: string }> {
+    const response = await fetchWithTimeout(`${API_BASE_URL}/api/workspaces/${workspaceId}`);
+
+    return handleResponse(response);
+  },
+
+  async listWorkspaces(userId: string, accountId?: string): Promise<{ success: boolean; workspaces: any[]; message?: string }> {
+    const params = new URLSearchParams({ userId });
+    if (accountId) params.append('accountId', accountId);
+
+    const response = await fetchWithTimeout(`${API_BASE_URL}/api/workspaces?${params}`);
+
+    return handleResponse(response);
+  },
+
+  async deleteWorkspace(workspaceId: string): Promise<{ success: boolean; message?: string }> {
+    const response = await fetchWithTimeout(`${API_BASE_URL}/api/workspaces/${workspaceId}`, {
+      method: 'DELETE',
+    });
+
+    return handleResponse(response);
+  },
+};
+
+// ============================================
 // Export All APIs
 // ============================================
 
@@ -772,6 +849,7 @@ export const api = {
   admin: adminApi,
   analytics: analyticsApi,
   alerts: alertsApi,
+  workspace: workspaceApi,
 };
 
 export default api;

@@ -3,7 +3,7 @@
  * Central export file for all trading components
  */
 
-export { TradingChart, ChartControls } from './TradingChart';
+export { TradingChart } from './TradingChart';
 export type { ChartType, Timeframe } from './TradingChart';
 
 // Historical data components

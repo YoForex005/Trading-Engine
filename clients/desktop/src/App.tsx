@@ -18,12 +18,17 @@ import { MarketWatchPanel } from './components/layout/MarketWatchPanel';
 import { StatusBar } from './components/layout/StatusBar';
 import { OrderPanelDialog } from './components/OrderPanelDialog';
 import { DepthOfMarket } from './components/DepthOfMarket';
+import { SaveWorkspaceDialog } from './components/dialogs/SaveWorkspaceDialog';
 
 // Services
 import { windowManager, type LayoutMode } from './services/windowManager';
 
 // Command Bus
 import { CommandBusProvider } from './contexts/CommandBusContext';
+
+// Keyboard Shortcuts
+import { KeyboardShortcutProvider } from './contexts/KeyboardShortcutContext';
+import { GlobalShortcuts } from './components/GlobalShortcuts';
 
 interface Tick {
   symbol: string;
@@ -218,101 +223,20 @@ function App() {
     };
   }, []); // Removed ticks dependency
 
-  // Global Keyboard Shortcuts (F9, F10, Alt+B, Ctrl+U, etc.)
+  // Handle Escape key for closing order panel
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // PERFORMANCE FIX: Access ticks directly from store state
-      const currentTicks = useAppStore.getState().ticks;
-
-      // F9 - New Order Dialog
-      if (e.key === 'F9') {
-        e.preventDefault();
-        if (selectedSymbol && currentTicks[selectedSymbol]) {
-          const tick = currentTicks[selectedSymbol];
-          setOrderPanelSymbol(selectedSymbol);
-          setOrderPanelPrice({ bid: tick.bid, ask: tick.ask });
-          setOrderPanelOpen(true);
-        }
-      }
-
-      // F10 - Chart Window (switch to selected symbol)
-      if (e.key === 'F10') {
-        e.preventDefault();
-        console.log('[App] F10 - Chart window for:', selectedSymbol);
-        // Chart is already visible, this could open in new window/tab in future
-        alert(`Chart window for ${selectedSymbol} - Feature coming soon`);
-      }
-
-      // Alt+B - Quick Buy
-      if (e.altKey && e.key === 'b') {
-        e.preventDefault();
-        if (selectedSymbol && currentTicks[selectedSymbol] && !orderLoading) {
-          console.log('[App] Alt+B - Quick buy:', selectedSymbol);
-          // Execute buy order inline to avoid dependency issues
-          setOrderLoading(true);
-          fetch('http://localhost:7999/api/orders/market', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              accountId: 1,
-              symbol: selectedSymbol,
-              side: 'BUY',
-              volume
-            })
-          })
-            .then(res => res.ok ? res.json() : Promise.reject(res.text()))
-            .then(() => fetch('http://localhost:7999/api/positions?accountId=1'))
-            .then(res => res.ok ? res.json() : [])
-            .then(pos => setPositions(pos || []))
-            .catch(err => alert('Quick buy failed: ' + err))
-            .finally(() => setOrderLoading(false));
-        }
-      }
-
-      // Alt+S - Quick Sell
-      if (e.altKey && e.key === 's') {
-        e.preventDefault();
-        if (selectedSymbol && currentTicks[selectedSymbol] && !orderLoading) {
-          console.log('[App] Alt+S - Quick sell:', selectedSymbol);
-          // Execute sell order inline to avoid dependency issues
-          setOrderLoading(true);
-          fetch('http://localhost:7999/api/orders/market', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              accountId: 1,
-              symbol: selectedSymbol,
-              side: 'SELL',
-              volume
-            })
-          })
-            .then(res => res.ok ? res.json() : Promise.reject(res.text()))
-            .then(() => fetch('http://localhost:7999/api/positions?accountId=1'))
-            .then(res => res.ok ? res.json() : [])
-            .then(pos => setPositions(pos || []))
-            .catch(err => alert('Quick sell failed: ' + err))
-            .finally(() => setOrderLoading(false));
-        }
-      }
-
-      // Ctrl+U - Unsubscribe from current symbol
-      if (e.ctrlKey && e.key === 'u') {
-        e.preventDefault();
-        console.log('[App] Ctrl+U - Unsubscribe from:', selectedSymbol);
-        // TODO: Implement unsubscribe logic when WebSocket subscription management is ready
-        alert(`Unsubscribe from ${selectedSymbol} - Feature coming soon`);
-      }
-
-      // Esc - Close order panel if open
-      if (e.key === 'Escape' && orderPanelOpen) {
-        e.preventDefault();
+    const handleCloseModal = () => {
+      if (orderPanelOpen) {
         setOrderPanelOpen(false);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedSymbol, orderPanelOpen, volume, orderLoading]);
+    window.addEventListener('close-modal', handleCloseModal);
+    return () => window.removeEventListener('close-modal', handleCloseModal);
+  }, [orderPanelOpen]);
+
+  // Handle global menu actions
+
 
   // Subscribe to layout mode changes
   useEffect(() => {
@@ -598,6 +522,157 @@ function App() {
     };
   }, []);
 
+  // ============================================================================
+  // ALL HOOKS MUST BE DECLARED BEFORE ANY EARLY RETURNS
+  // This fixes: "Rendered more hooks than during the previous render" error
+  // ============================================================================
+
+  // Workspace dialog state
+  const [showSaveWorkspaceDialog, setShowSaveWorkspaceDialog] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error'>('success');
+
+  // Toast notification handler
+  const displayToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  }, []);
+
+  // Keyboard shortcut handlers
+  const handleOpenOrderPanel = useCallback((symbol: string, price: { bid: number; ask: number }) => {
+    setOrderPanelSymbol(symbol);
+    setOrderPanelPrice(price);
+    setOrderPanelOpen(true);
+  }, []);
+
+  const handleQuickBuy = useCallback(() => {
+    if (selectedSymbol && !orderLoading) {
+      placeOrder('BUY');
+    }
+  }, [selectedSymbol, orderLoading, placeOrder]);
+
+  const handleQuickSell = useCallback(() => {
+    if (selectedSymbol && !orderLoading) {
+      placeOrder('SELL');
+    }
+  }, [selectedSymbol, orderLoading, placeOrder]);
+
+  // Workspace handlers
+  const handleSaveWorkspace = useCallback(() => {
+    console.log('[App] Save workspace triggered');
+    setShowSaveWorkspaceDialog(true);
+  }, []);
+
+  const handleConfirmSaveWorkspace = useCallback((workspaceName?: string) => {
+    console.log('[App] Workspace saved:', workspaceName);
+    setShowSaveWorkspaceDialog(false);
+    displayToast(`Workspace "${workspaceName}" saved successfully!`, 'success');
+  }, [displayToast]);
+
+  const handleOpenDataFolder = useCallback(() => {
+    console.log('[App] Open data folder');
+    try {
+      // Check if running in Electron environment
+      if (window.electron?.shell) {
+        window.electron.shell.openPath('./data');
+      } else {
+        // Fallback for web: Show info message
+        const dataPath = window.location.origin + '/data';
+        console.log('[App] Data folder location:', dataPath);
+        // Create a temporary link to trigger download folder
+        const link = document.createElement('a');
+        link.href = dataPath;
+        link.target = '_blank';
+        link.click();
+      }
+    } catch (error) {
+      console.error('[App] Failed to open data folder:', error);
+    }
+  }, []);
+
+  const handlePrintChart = useCallback(async () => {
+    console.log('[App] Print chart - Ctrl+P');
+    try {
+      // Import dynamically to avoid circular dependencies
+      const { chartPrinter } = await import('./services/chartPrinter');
+
+      // Try to capture the chart canvas
+      const chartContainer = document.querySelector('.tv-lightweight-charts');
+      let chartCanvas: HTMLCanvasElement | undefined;
+
+      if (chartContainer) {
+        const canvas = chartContainer.querySelector('canvas');
+        if (canvas) {
+          const copiedCanvas = document.createElement('canvas');
+          copiedCanvas.width = canvas.width;
+          copiedCanvas.height = canvas.height;
+          const ctx = copiedCanvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(canvas, 0, 0);
+            chartCanvas = copiedCanvas;
+          }
+        }
+      }
+
+      const chartData = {
+        symbol: selectedSymbol || 'BTCUSD',
+        timeframe: timeframe as string || '1m',
+        dateRange: {
+          from: new Date(Date.now() - 24 * 60 * 60 * 1000),
+          to: new Date(),
+        },
+        chartCanvas,
+        indicators: [],
+        drawings: [],
+      };
+
+      const preferences = chartPrinter.getPreferences();
+      await chartPrinter.printChart(chartData, preferences);
+    } catch (error) {
+      console.error('[App] Failed to print:', error);
+    }
+  }, [selectedSymbol, timeframe]);
+
+  const handleToggleFullScreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen();
+    } else {
+      document.exitFullscreen();
+    }
+  }, []);
+
+  // Handle global menu actions
+  useEffect(() => {
+    const handleSaveWorkspaceEvent = () => {
+      handleSaveWorkspace();
+    };
+
+    const handleOpenDataFolderEvent = () => {
+      handleOpenDataFolder();
+    };
+
+    const handlePrintChartEvent = () => {
+      handlePrintChart();
+    };
+
+    window.addEventListener('saveWorkspace', handleSaveWorkspaceEvent);
+    window.addEventListener('openDataFolder', handleOpenDataFolderEvent);
+    window.addEventListener('printChart', handlePrintChartEvent);
+
+    return () => {
+      window.removeEventListener('saveWorkspace', handleSaveWorkspaceEvent);
+      window.removeEventListener('openDataFolder', handleOpenDataFolderEvent);
+      window.removeEventListener('printChart', handlePrintChartEvent);
+    };
+  }, [handleSaveWorkspace, handleOpenDataFolder, handlePrintChart]);
+
+  // ============================================================================
+  // EARLY RETURNS - Must come AFTER all hooks
+  // ============================================================================
+
   if (!isAuthenticated) {
     return <Login onLogin={() => { setIsAuthenticated(true); setAccountId("1"); }} />;
   }
@@ -619,124 +694,175 @@ function App() {
 
   return (
     <CommandBusProvider>
-      <div className="flex flex-col h-screen w-full bg-[#1e1e1e] text-zinc-300 overflow-hidden font-sans">
-        {/* 1. Global Menu & Toolbar */}
-        <TopToolbar
-          chartType={chartType}
-          timeframe={timeframe}
-          onChartTypeChange={setChartType}
-          onTimeframeChange={setTimeframe}
+      <KeyboardShortcutProvider>
+        <GlobalShortcuts
+          onOpenOrderPanel={handleOpenOrderPanel}
+          onQuickBuy={handleQuickBuy}
+          onQuickSell={handleQuickSell}
+          onSaveWorkspace={handleSaveWorkspace}
+          onOpenDataFolder={handleOpenDataFolder}
+          onPrintChart={handlePrintChart}
+          onToggleFullScreen={handleToggleFullScreen}
+          selectedSymbol={selectedSymbol}
         />
+        <div className="flex flex-col h-screen w-full bg-[#1e1e1e] text-zinc-300 overflow-hidden font-sans">
+          {/* 1. Global Menu & Toolbar */}
+          <TopToolbar
+            chartType={chartType}
+            timeframe={timeframe}
+            onChartTypeChange={setChartType}
+            onTimeframeChange={setTimeframe}
+          />
 
-        {/* 2. Main Workspace */}
-        <div className="flex-1 flex overflow-hidden relative">
+          {/* 2. Main Workspace */}
+          <div className="flex-1 flex overflow-hidden relative">
 
-          {/* Left Sidebar */}
-          <div className="flex flex-col w-72 border-r border-[#2d3436] bg-[#1e1e1e] flex-shrink-0">
-            <MarketWatchPanel
-              className="flex-1 min-h-0"
-              allSymbols={allSymbols}
-              selectedSymbol={selectedSymbol}
-              onSymbolSelect={setSelectedSymbol}
-            />
-            <div className="h-2 bg-[#2d3436] cursor-row-resize hover:bg-blue-500/50 transition-colors" />
-            <div className="h-[40%] flex-shrink-0 min-h-0 overflow-hidden">
-              <NavigatorPanel />
-            </div>
-          </div>
-
-          {/* Center Content: Chart + DOM */}
-          <div className="flex-1 flex bg-[#131722] relative min-w-0 overflow-hidden">
-
-            {/* Chart Area */}
-            <div className="flex-1 flex flex-col min-w-0 relative">
-
-
-
-
-
-
-              <div className="flex-1 w-full h-full">
-                <ErrorBoundary>
-                  {enableHistoricalData ? (
-                    <ChartWithHistory
-                      symbol={selectedSymbol}
-                      chartType={chartType}
-                      timeframe={timeframe}
-                      positions={positions}
-                      onClosePosition={(id) => closePosition(id)}
-                      onModifyPosition={modifyPosition}
-                      enableHistoricalData={enableHistoricalData}
-                    />
-                  ) : (
-                    <TradingChart
-                      symbol={selectedSymbol}
-                      chartType={chartType}
-                      timeframe={timeframe}
-                      positions={positions}
-                      onClosePosition={(id) => closePosition(id)}
-                      onModifyPosition={modifyPosition}
-                    />
-                  )}
-                </ErrorBoundary>
+            {/* Left Sidebar */}
+            <div className="flex flex-col w-72 border-r border-[#2d3436] bg-[#1e1e1e] flex-shrink-0">
+              <MarketWatchPanel
+                className="flex-1 min-h-0"
+                allSymbols={allSymbols}
+                selectedSymbol={selectedSymbol}
+                onSymbolSelect={setSelectedSymbol}
+              />
+              <div className="h-2 bg-[#2d3436] cursor-row-resize hover:bg-blue-500/50 transition-colors" />
+              <div className="h-[40%] flex-shrink-0 min-h-0 overflow-hidden">
+                <NavigatorPanel />
               </div>
-
-              {/* DOM Panel (Right Side) */}
-              {showDOM && (
-                <div className="border-l border-black z-20 shadow-xl">
-                  <DepthOfMarket
-                    symbol={selectedSymbol}
-                    onClose={() => setShowDOM(false)}
-                    onPlaceOrder={(side, price, vol) => {
-                      setVolume(vol);
-                      // For now, just open order panel pre-filled
-                      // or implement direct placement if API supports it
-                      console.log(`DOM Order: ${side} ${vol} @ ${price}`);
-                      placeOrder(side);
-                    }}
-                  />
-                </div>
-              )}
             </div>
-            <ChartTabs
-              tabs={openCharts}
-              activeTabId={activeChartId || ''}
-              onTabClick={handleTabClick}
-              onTabClose={handleTabClose}
-            />
+
+            {/* Center Content: Chart + DOM */}
+            <div className="flex-1 flex bg-[#131722] relative min-w-0 overflow-hidden">
+
+              {/* Chart Area */}
+              <div className="flex-1 flex flex-col min-w-0 relative">
+
+
+
+
+
+
+                <div className="flex-1 w-full h-full">
+                  <ErrorBoundary>
+                    {enableHistoricalData ? (
+                      <ChartWithHistory
+                        symbol={selectedSymbol}
+                        chartType={chartType}
+                        timeframe={timeframe}
+                        positions={positions}
+                        onClosePosition={(id) => closePosition(id)}
+                        onModifyPosition={modifyPosition}
+                        enableHistoricalData={enableHistoricalData}
+                      />
+                    ) : (
+                      <TradingChart
+                        symbol={selectedSymbol}
+                        chartType={chartType}
+                        timeframe={timeframe}
+                        positions={positions}
+                        onClosePosition={(id) => closePosition(id)}
+                        onModifyPosition={modifyPosition}
+                      />
+                    )}
+                  </ErrorBoundary>
+                </div>
+
+                {/* DOM Panel (Right Side) */}
+                {showDOM && (
+                  <div className="border-l border-black z-20 shadow-xl">
+                    <DepthOfMarket
+                      symbol={selectedSymbol}
+                      onClose={() => setShowDOM(false)}
+                      onPlaceOrder={(side, price, vol) => {
+                        setVolume(vol);
+                        // For now, just open order panel pre-filled
+                        // or implement direct placement if API supports it
+                        console.log(`DOM Order: ${side} ${vol} @ ${price}`);
+                        placeOrder(side);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+              <ChartTabs
+                tabs={openCharts}
+                activeTabId={activeChartId || ''}
+                onTabClick={handleTabClick}
+                onTabClose={handleTabClose}
+              />
+            </div>
           </div>
+
+          {/* 3. Bottom Terminal */}
+          <BottomDock
+            height={dockHeight}
+            onHeightChange={setDockHeight}
+            account={account}
+            positions={positions}
+            orders={[]}
+            history={[]}
+            ledger={[]}
+            onClosePosition={closePosition}
+            onModifyPosition={modifyPosition}
+            onCancelOrder={() => { }}
+            onCloseBulk={closeBulkPositions}
+          />
+
+          {/* 4. Status Bar */}
+          <StatusBar />
+
+          {/* Headless Components */}
+          <AlertsContainer wsConnection={wsRef.current} />
+
+          {/* Order Panel Dialog (F9) */}
+          <OrderPanelDialog
+            isOpen={orderPanelOpen}
+            onClose={() => setOrderPanelOpen(false)}
+            symbol={orderPanelSymbol}
+            currentPrice={orderPanelPrice}
+            onSubmitOrder={handleOrderPanelSubmit}
+          />
+
+          {/* Save Workspace Dialog (Ctrl+S) */}
+          {showSaveWorkspaceDialog && (
+            <SaveWorkspaceDialog
+              onConfirm={handleConfirmSaveWorkspace}
+              onCancel={() => setShowSaveWorkspaceDialog(false)}
+              workspaceData={{
+                charts: openCharts,
+                layout: { dockHeight },
+                marketWatch: { selectedSymbol },
+                orderPanel: { volume }
+              }}
+              userId={accountId}
+              accountId={accountId}
+            />
+          )}
+
+          {/* Toast Notification */}
+          {showToast && (
+            <div className="fixed top-4 right-4 z-[300] animate-in slide-in-from-top-5 fade-in duration-200">
+              <div className={`px-4 py-3 rounded-lg shadow-xl border ${toastType === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+                }`}>
+                <div className="flex items-center gap-2">
+                  {toastType === 'success' ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  )}
+                  <span className="text-sm font-medium">{toastMessage}</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-
-        {/* 3. Bottom Terminal */}
-        <BottomDock
-          height={dockHeight}
-          onHeightChange={setDockHeight}
-          account={account}
-          positions={positions}
-          orders={[]}
-          history={[]}
-          ledger={[]}
-          onClosePosition={closePosition}
-          onModifyPosition={modifyPosition}
-          onCancelOrder={() => { }}
-          onCloseBulk={closeBulkPositions}
-        />
-
-        {/* 4. Status Bar */}
-        <StatusBar />
-
-        {/* Headless Components */}
-        <AlertsContainer wsConnection={wsRef.current} />
-
-        {/* Order Panel Dialog (F9) */}
-        <OrderPanelDialog
-          isOpen={orderPanelOpen}
-          onClose={() => setOrderPanelOpen(false)}
-          symbol={orderPanelSymbol}
-          currentPrice={orderPanelPrice}
-          onSubmitOrder={handleOrderPanelSubmit}
-        />
-      </div>
+      </KeyboardShortcutProvider>
     </CommandBusProvider>
   );
 }
