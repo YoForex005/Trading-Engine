@@ -83,7 +83,7 @@ function App() {
   const [volume, setVolume] = useState(0.01);
   const [orderLoading, setOrderLoading] = useState(false);
   const [chartType, setChartType] = useState<ChartType>('candlestick');
-  const [timeframe, setTimeframe] = useState<Timeframe>('1m');
+  const [timeframe, setTimeframe] = useState<Timeframe>('M1');
   const [brokerConfig, setBrokerConfig] = useState<BrokerConfig | null>(null);
   const [dockHeight, setDockHeight] = useState(() => {
     const saved = localStorage.getItem('dockHeight');
@@ -182,7 +182,7 @@ function App() {
       const newChart: ChartTab = {
         id: `chart-${Date.now()}`,
         symbol: symbol,
-        timeframe: '1m' // Default
+        timeframe: 'M1' // Default
       };
       setOpenCharts(prev => [...prev, newChart]);
       setActiveChartId(newChart.id);
@@ -234,6 +234,51 @@ function App() {
     window.addEventListener('close-modal', handleCloseModal);
     return () => window.removeEventListener('close-modal', handleCloseModal);
   }, [orderPanelOpen]);
+
+  // Handle Close Active Chart (File > Close menu and Ctrl+F4 shortcut)
+  useEffect(() => {
+    const handleCloseActiveChart = () => {
+      // Access current values via setters to avoid stale closures
+      setActiveChartId(currentId => {
+        setOpenCharts(currentCharts => {
+          if (currentCharts.length <= 1) {
+            console.log('[App] Cannot close - at least one chart must remain open');
+            return currentCharts;
+          }
+          if (!currentId) return currentCharts;
+
+          console.log('[App] Closing active chart:', currentId);
+          const newCharts = currentCharts.filter(c => c.id !== currentId);
+
+          // Set new active chart
+          setTimeout(() => {
+            if (newCharts.length > 0) {
+              setActiveChartId(newCharts[newCharts.length - 1].id);
+            }
+          }, 0);
+
+          return newCharts;
+        });
+        return currentId; // Keep current for now
+      });
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+F4 - Close active chart
+      if (e.ctrlKey && e.key === 'F4') {
+        e.preventDefault();
+        handleCloseActiveChart();
+      }
+    };
+
+    window.addEventListener('close-active-chart', handleCloseActiveChart);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('close-active-chart', handleCloseActiveChart);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []); // Empty deps - handler uses functional updates for current state
 
   // Handle global menu actions
 
@@ -619,7 +664,7 @@ function App() {
 
       const chartData = {
         symbol: selectedSymbol || 'BTCUSD',
-        timeframe: timeframe as string || '1m',
+        timeframe: timeframe as string || 'M1',
         dateRange: {
           from: new Date(Date.now() - 24 * 60 * 60 * 1000),
           to: new Date(),
@@ -843,8 +888,8 @@ function App() {
           {showToast && (
             <div className="fixed top-4 right-4 z-[300] animate-in slide-in-from-top-5 fade-in duration-200">
               <div className={`px-4 py-3 rounded-lg shadow-xl border ${toastType === 'success'
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
-                  : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
                 }`}>
                 <div className="flex items-center gap-2">
                   {toastType === 'success' ? (

@@ -337,10 +337,10 @@ const MainToolbar = ({
                     <button
                         key={tf}
                         onClick={() => {
-                            onTimeframeChange(tf.toLowerCase() as Timeframe);
-                            dispatchCommand({ type: 'SET_TIMEFRAME', payload: { timeframe: tf.toLowerCase() } });
+                            onTimeframeChange(tf as Timeframe);
+                            dispatchCommand({ type: 'SET_TIMEFRAME', payload: { timeframe: tf } });
                         }}
-                        className={`px-2.5 py-1 text-[10px] font-bold rounded-[3px] transition-all ${timeframe.toUpperCase() === tf
+                        className={`px-2.5 py-1 text-[10px] font-bold rounded-[3px] transition-all ${timeframe === tf
                             ? 'bg-blue-600 text-white shadow-sm'
                             : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
                             }`}

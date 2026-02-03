@@ -36,6 +36,10 @@ import './index.css'
 import './styles/print.css'
 import App from './App.tsx'
 
+import './i18n'; // Import i18n configuration
+import { Suspense } from 'react';
+import { ThemeProvider } from './contexts/ThemeContext';
+
 console.log('Mounting App...');
 
 try {
@@ -45,7 +49,11 @@ try {
   }
   createRoot(rootElement).render(
     <StrictMode>
-      <App />
+      <ThemeProvider>
+        <Suspense fallback={<div>Loading...</div>}>
+          <App />
+        </Suspense>
+      </ThemeProvider>
     </StrictMode>,
   )
 } catch (e) {

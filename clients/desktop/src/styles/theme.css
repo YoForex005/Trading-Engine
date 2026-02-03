@@ -50,13 +50,20 @@
   --font-mono: 'Roboto Mono', 'Courier New', monospace;
 
   /* Font Sizes */
-  --text-2xs: 0.625rem;   /* 10px */
-  --text-xs: 0.75rem;      /* 12px */
-  --text-sm: 0.875rem;     /* 14px */
-  --text-base: 1rem;       /* 16px */
-  --text-lg: 1.125rem;     /* 18px */
-  --text-xl: 1.25rem;      /* 20px */
-  --text-2xl: 1.5rem;      /* 24px */
+  --text-2xs: 0.625rem;
+  /* 10px */
+  --text-xs: 0.75rem;
+  /* 12px */
+  --text-sm: 0.875rem;
+  /* 14px */
+  --text-base: 1rem;
+  /* 16px */
+  --text-lg: 1.125rem;
+  /* 18px */
+  --text-xl: 1.25rem;
+  /* 20px */
+  --text-2xl: 1.5rem;
+  /* 24px */
 
   /* Line Heights */
   --leading-tight: 1.25;
@@ -64,13 +71,20 @@
   --leading-relaxed: 1.75;
 
   /* === Spacing === */
-  --space-1: 0.25rem;   /* 4px */
-  --space-2: 0.5rem;    /* 8px */
-  --space-3: 0.75rem;   /* 12px */
-  --space-4: 1rem;      /* 16px */
-  --space-5: 1.25rem;   /* 20px */
-  --space-6: 1.5rem;    /* 24px */
-  --space-8: 2rem;      /* 32px */
+  --space-1: 0.25rem;
+  /* 4px */
+  --space-2: 0.5rem;
+  /* 8px */
+  --space-3: 0.75rem;
+  /* 12px */
+  --space-4: 1rem;
+  /* 16px */
+  --space-5: 1.25rem;
+  /* 20px */
+  --space-6: 1.5rem;
+  /* 24px */
+  --space-8: 2rem;
+  /* 32px */
 
   /* === Shadows === */
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
@@ -82,10 +96,14 @@
   --shadow-glow-primary: 0 0 20px var(--color-primary-dimmer);
 
   /* === Border Radius === */
-  --radius-sm: 0.25rem;   /* 4px */
-  --radius-md: 0.375rem;  /* 6px */
-  --radius-lg: 0.5rem;    /* 8px */
-  --radius-xl: 0.75rem;   /* 12px */
+  --radius-sm: 0.25rem;
+  /* 4px */
+  --radius-md: 0.375rem;
+  /* 6px */
+  --radius-lg: 0.5rem;
+  /* 8px */
+  --radius-xl: 0.75rem;
+  /* 12px */
   --radius-full: 9999px;
 
   /* === Transitions === */
@@ -107,6 +125,260 @@
   --duration-flash: 200ms;
   --duration-pulse: 1000ms;
   --duration-spin: 1000ms;
+}
+
+/* === Light Theme === */
+.theme-light {
+  /* Backgrounds */
+  --bg-primary: #f4f4f5;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e4e4e7;
+  --bg-quaternary: #d4d4d8;
+  --bg-elevated: #ffffff;
+
+  /* Text Colors */
+  --text-primary: #18181b;
+  --text-secondary: #3f3f46;
+  --text-tertiary: #52525b;
+  --text-quaternary: #71717a;
+  --text-inverse: #ffffff;
+
+  /* Border Colors */
+  --border-primary: #d4d4d8;
+  --border-secondary: #a1a1aa;
+  --border-tertiary: #71717a;
+
+  /* Trading Colors - keep same for visibility */
+  --color-profit: #16a34a;
+  --color-profit-dim: #16a34a40;
+  --color-profit-dimmer: #16a34a20;
+  --color-loss: #dc2626;
+  --color-loss-dim: #dc262640;
+  --color-loss-dimmer: #dc262620;
+
+  /* Shadows - lighter for light mode */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.15), 0 8px 10px -6px rgb(0 0 0 / 0.15);
+}
+
+/* === Custom Theme (accent color is set via JS) === */
+.theme-custom {
+  /* Accent colors are dynamically set via JavaScript */
+  /* Uses dark theme as base with custom --color-primary */
+  color: inherit;
+}
+
+/* Custom Theme: Override blue accent colors with custom accent */
+.theme-custom [class*="bg-blue-500"] {
+  background-color: var(--color-primary) !important;
+}
+
+.theme-custom [class*="bg-blue-600"] {
+  background-color: var(--color-primary) !important;
+}
+
+.theme-custom [class*="bg-blue-400"] {
+  background-color: var(--color-primary) !important;
+}
+
+.theme-custom [class*="text-blue-500"] {
+  color: var(--color-primary) !important;
+}
+
+.theme-custom [class*="text-blue-400"] {
+  color: var(--color-primary) !important;
+}
+
+.theme-custom [class*="text-blue-600"] {
+  color: var(--color-primary) !important;
+}
+
+.theme-custom [class*="border-blue-500"] {
+  border-color: var(--color-primary) !important;
+}
+
+.theme-custom [class*="border-blue-400"] {
+  border-color: var(--color-primary) !important;
+}
+
+/* Custom Theme: Focus and active states */
+.theme-custom *:focus-visible {
+  outline-color: var(--color-primary) !important;
+}
+
+.theme-custom [class*="focus:border-blue"] {
+  border-color: var(--color-primary) !important;
+}
+
+/* Custom Theme: Active tab and selection indicators */
+.theme-custom [class*="bg-[#0078D7]"] {
+  background-color: var(--color-primary) !important;
+}
+
+/* Custom Theme: Primary buttons and accents */
+.theme-custom [class*="bg-emerald-500"] {
+  background-color: var(--color-primary) !important;
+}
+
+.theme-custom [class*="text-emerald-500"] {
+  color: var(--color-primary) !important;
+}
+
+/* Custom Theme: Hover states with accent */
+.theme-custom [class*="hover:bg-blue"]:hover {
+  background-color: var(--color-primary-dim) !important;
+}
+
+.theme-custom [class*="hover:text-blue"]:hover {
+  color: var(--color-primary) !important;
+}
+
+/* === Theme-Specific Container Overrides === */
+/* Light theme: Override hardcoded dark backgrounds */
+.theme-light,
+.theme-light body,
+.theme-light #root {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Light theme: Force all divs with inline dark backgrounds to light */
+.theme-light * {
+  --tw-bg-opacity: 1;
+}
+
+/* Aggressive background override for common dark colors */
+.theme-light [style*="background"],
+.theme-light [class*="bg-"] {
+  /* Let more specific rules below override */
+}
+
+/* Target specific Tailwind arbitrary value classes by matching partial strings */
+.theme-light [class*="1e1e1e"],
+.theme-light [class*="252525"],
+.theme-light [class*="181818"],
+.theme-light [class*="131722"] {
+  background-color: var(--bg-secondary) !important;
+}
+
+.theme-light [class*="09090b"] {
+  background-color: var(--bg-primary) !important;
+}
+
+.theme-light [class*="232323"],
+.theme-light [class*="2a2e39"],
+.theme-light [class*="2d3436"],
+.theme-light [class*="333"] {
+  background-color: var(--bg-tertiary) !important;
+}
+
+.theme-light [class*="bg-\[#09090b\]"],
+.theme-light [style*="background-color: rgb(9, 9, 11)"] {
+  background-color: var(--bg-primary) !important;
+}
+
+.theme-light [class*="bg-\[#131722\]"],
+.theme-light [style*="background-color: rgb(19, 23, 34)"] {
+  background-color: var(--bg-tertiary) !important;
+}
+
+.theme-light [class*="bg-\[#232323\]"],
+.theme-light [class*="bg-\[#2a2e39\]"],
+.theme-light [class*="bg-\[#2d3436\]"] {
+  background-color: var(--bg-quaternary) !important;
+}
+
+/* Tailwind zinc background overrides */
+.theme-light .bg-zinc-900,
+.theme-light .bg-zinc-800,
+.theme-light .bg-zinc-700 {
+  background-color: var(--bg-secondary) !important;
+}
+
+/* Text color overrides for light theme */
+.theme-light .text-zinc-300,
+.theme-light .text-zinc-200,
+.theme-light .text-white {
+  color: var(--text-primary) !important;
+}
+
+.theme-light .text-zinc-400 {
+  color: var(--text-secondary) !important;
+}
+
+.theme-light .text-zinc-500 {
+  color: var(--text-tertiary) !important;
+}
+
+.theme-light .text-zinc-600 {
+  color: var(--text-quaternary) !important;
+}
+
+/* Border color overrides */
+.theme-light .border-zinc-700,
+.theme-light .border-zinc-800,
+.theme-light .border-zinc-600,
+.theme-light [class*="border-\[#2d3436\]"],
+.theme-light [class*="border-\[#2a2e39\]"] {
+  border-color: var(--border-primary) !important;
+}
+
+/* Menu and dropdown backgrounds */
+.theme-light [class*="bg-\[#1e1e1e\]"][class*="border"],
+.theme-light [class*="shadow-xl"],
+.theme-light [class*="shadow-2xl"] {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-primary) !important;
+}
+
+/* Hover states for light theme */
+.theme-light [class*="hover\:bg-\[#2a2e39\]"]:hover,
+.theme-light [class*="hover\:bg-\[#2d3436\]"]:hover {
+  background-color: var(--bg-quaternary) !important;
+}
+
+.theme-light .hover\:bg-zinc-700:hover,
+.theme-light .hover\:bg-zinc-800:hover {
+  background-color: var(--bg-tertiary) !important;
+}
+
+/* Input and form elements */
+.theme-light input,
+.theme-light select,
+.theme-light textarea {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-primary) !important;
+}
+
+/* Chart area - keep dark for readability */
+.theme-light .tv-lightweight-charts {
+  filter: none;
+  /* Remove invert for better chart readability */
+}
+
+/* Scrollbar for light mode */
+.theme-light ::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+}
+
+.theme-light ::-webkit-scrollbar-thumb {
+  background: var(--border-secondary);
+}
+
+/* Table row alternating colors */
+.theme-light tr:nth-child(even) {
+  background-color: var(--bg-tertiary) !important;
+}
+
+.theme-light tr:nth-child(odd) {
+  background-color: var(--bg-secondary) !important;
+}
+
+.theme-light tr:hover {
+  background-color: var(--bg-quaternary) !important;
 }
 
 /* === Global Styles === */
@@ -175,15 +447,31 @@ body {
 
 /* === Flash Animations === */
 @keyframes flash-profit {
-  0% { background-color: transparent; }
-  50% { background-color: var(--color-profit-dimmer); }
-  100% { background-color: transparent; }
+  0% {
+    background-color: transparent;
+  }
+
+  50% {
+    background-color: var(--color-profit-dimmer);
+  }
+
+  100% {
+    background-color: transparent;
+  }
 }
 
 @keyframes flash-loss {
-  0% { background-color: transparent; }
-  50% { background-color: var(--color-loss-dimmer); }
-  100% { background-color: transparent; }
+  0% {
+    background-color: transparent;
+  }
+
+  50% {
+    background-color: var(--color-loss-dimmer);
+  }
+
+  100% {
+    background-color: transparent;
+  }
 }
 
 .flash-profit {
@@ -196,10 +484,13 @@ body {
 
 /* === Pulse Animation === */
 @keyframes pulse-glow {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
     box-shadow: 0 0 8px currentColor;
   }
+
   50% {
     opacity: 0.7;
     box-shadow: 0 0 16px currentColor;
@@ -244,18 +535,17 @@ body {
   0% {
     background-position: -200% 0;
   }
+
   100% {
     background-position: 200% 0;
   }
 }
 
 .skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--bg-tertiary) 0%,
-    var(--bg-quaternary) 50%,
-    var(--bg-tertiary) 100%
-  );
+  background: linear-gradient(90deg,
+      var(--bg-tertiary) 0%,
+      var(--bg-quaternary) 50%,
+      var(--bg-tertiary) 100%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
   border-radius: var(--radius-sm);

@@ -652,11 +652,10 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                 <span>Market Watch: {new Date().toLocaleTimeString()}</span>
                 <button
                     onClick={() => setShowOnlyRealData(!showOnlyRealData)}
-                    className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
-                        showOnlyRealData
-                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
-                            : 'text-zinc-500 hover:text-zinc-300 border border-zinc-700 hover:border-zinc-600'
-                    }`}
+                    className={`px-2 py-0.5 text-[10px] rounded transition-colors ${showOnlyRealData
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
+                        : 'text-zinc-500 hover:text-zinc-300 border border-zinc-700 hover:border-zinc-600'
+                        }`}
                     title={showOnlyRealData ? 'Showing only real data (YOFX)' : 'Showing all data (Real + Simulated)'}
                 >
                     {showOnlyRealData ? '✓ Real Only' : 'All Data'}
@@ -808,9 +807,107 @@ const TabButton = ({ label, active, onClick }: { label: string, active: boolean,
     </div>
 );
 
+// Fallback symbol specifications when API is unavailable
+const FALLBACK_SYMBOL_SPECS: Record<string, {
+    description: string;
+    contractSize: number;
+    pipValue: number;
+    pipPosition: number;
+    minLot: number;
+    maxLot: number;
+    lotStep: number;
+    marginRate: number;
+    swapLong: number;
+    swapShort: number;
+    commission: number;
+    baseCurrency: string;
+    quoteCurrency: string;
+}> = {
+    EURUSD: { description: 'Euro vs US Dollar', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.5, swapShort: 0.2, commission: 0.0, baseCurrency: 'EUR', quoteCurrency: 'USD' },
+    GBPUSD: { description: 'British Pound vs US Dollar', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.8, swapShort: 0.3, commission: 0.0, baseCurrency: 'GBP', quoteCurrency: 'USD' },
+    USDJPY: { description: 'US Dollar vs Japanese Yen', contractSize: 100000, pipValue: 1000.0, pipPosition: 3, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.3, swapShort: 0.1, commission: 0.0, baseCurrency: 'USD', quoteCurrency: 'JPY' },
+    USDCHF: { description: 'US Dollar vs Swiss Franc', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.4, swapShort: 0.15, commission: 0.0, baseCurrency: 'USD', quoteCurrency: 'CHF' },
+    USDCAD: { description: 'US Dollar vs Canadian Dollar', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.35, swapShort: 0.12, commission: 0.0, baseCurrency: 'USD', quoteCurrency: 'CAD' },
+    AUDUSD: { description: 'Australian Dollar vs US Dollar', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.6, swapShort: 0.25, commission: 0.0, baseCurrency: 'AUD', quoteCurrency: 'USD' },
+    NZDUSD: { description: 'New Zealand Dollar vs US Dollar', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.55, swapShort: 0.2, commission: 0.0, baseCurrency: 'NZD', quoteCurrency: 'USD' },
+    XAUUSD: { description: 'Gold vs US Dollar', contractSize: 100, pipValue: 1.0, pipPosition: 2, minLot: 0.01, maxLot: 50.0, lotStep: 0.01, marginRate: 0.02, swapLong: -2.5, swapShort: 0.5, commission: 0.0, baseCurrency: 'XAU', quoteCurrency: 'USD' },
+    XAGUSD: { description: 'Silver vs US Dollar', contractSize: 5000, pipValue: 5.0, pipPosition: 3, minLot: 0.01, maxLot: 50.0, lotStep: 0.01, marginRate: 0.02, swapLong: -1.5, swapShort: 0.3, commission: 0.0, baseCurrency: 'XAG', quoteCurrency: 'USD' },
+    BTCUSD: { description: 'Bitcoin vs US Dollar', contractSize: 1, pipValue: 1.0, pipPosition: 2, minLot: 0.01, maxLot: 10.0, lotStep: 0.01, marginRate: 0.1, swapLong: -5.0, swapShort: -5.0, commission: 0.1, baseCurrency: 'BTC', quoteCurrency: 'USD' },
+    ETHUSD: { description: 'Ethereum vs US Dollar', contractSize: 1, pipValue: 1.0, pipPosition: 2, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.1, swapLong: -5.0, swapShort: -5.0, commission: 0.1, baseCurrency: 'ETH', quoteCurrency: 'USD' },
+};
+
+const DEFAULT_SPEC = {
+    description: 'Currency Pair',
+    contractSize: 100000,
+    pipValue: 10.0,
+    pipPosition: 5,
+    minLot: 0.01,
+    maxLot: 100.0,
+    lotStep: 0.01,
+    marginRate: 0.01,
+    swapLong: -0.5,
+    swapShort: 0.2,
+    commission: 0.0,
+    baseCurrency: 'XXX',
+    quoteCurrency: 'USD',
+};
+
+interface SymbolSpec {
+    symbol: string;
+    description: string;
+    contractSize: number;
+    pipValue: number;
+    pipPosition: number;
+    minLot: number;
+    maxLot: number;
+    lotStep: number;
+    marginRate: number;
+    swapLong: number;
+    swapShort: number;
+    commission: number;
+    baseCurrency: string;
+    quoteCurrency: string;
+}
+
 const DetailsView = ({ symbol }: { symbol: string }) => {
     const tick = useTick(symbol);
-    if (!tick) return <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs">select a symbol</div>;
+    const [spec, setSpec] = useState<SymbolSpec | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [dataSource, setDataSource] = useState<'api' | 'fallback'>('fallback');
+
+    // Fetch symbol spec from API with fallback
+    useEffect(() => {
+        if (!symbol) return;
+
+        const fetchSpec = async () => {
+            setIsLoading(true);
+            try {
+                const response = await fetch(`${API_BASE}/api/symbols/${symbol}/spec`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setSpec(data);
+                    setDataSource('api');
+                    console.log(`[DetailsView] Loaded spec for ${symbol} from API`);
+                } else {
+                    throw new Error('API returned non-OK status');
+                }
+            } catch (error) {
+                console.log(`[DetailsView] API failed for ${symbol}, using fallback data`);
+                // Use fallback data
+                const fallback = FALLBACK_SYMBOL_SPECS[symbol] || DEFAULT_SPEC;
+                setSpec({
+                    symbol,
+                    ...fallback
+                });
+                setDataSource('fallback');
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        fetchSpec();
+    }, [symbol]);
+
+    if (!symbol) return <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs">select a symbol</div>;
 
     const Row = ({ label, value, color }: { label: string, value: string, color?: string }) => (
         <div className="flex justify-between items-center py-1 border-b border-zinc-800/50 text-xs">
@@ -819,24 +916,65 @@ const DetailsView = ({ symbol }: { symbol: string }) => {
         </div>
     );
 
-    return (
-        <div className="flex-1 p-3 overflow-y-auto">
-            <div className="text-sm font-bold text-white mb-1">{symbol}</div>
-            <div className="text-[10px] text-zinc-400 mb-4">{/* Description placeholder */}Generic Stock/Forex Pair</div>
+    const SectionHeader = ({ title }: { title: string }) => (
+        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mt-3 mb-1 border-b border-zinc-700 pb-1">{title}</div>
+    );
 
+    return (
+        <div className="flex-1 p-3 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-600">
+            {/* Header */}
+            <div className="flex justify-between items-start mb-2">
+                <div>
+                    <div className="text-sm font-bold text-white">{symbol}</div>
+                    <div className="text-[10px] text-zinc-400">{spec?.description || 'Loading...'}</div>
+                </div>
+                <div className={`text-[9px] px-1.5 py-0.5 rounded ${dataSource === 'api' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                    {isLoading ? '...' : dataSource === 'api' ? '● Live' : '○ Fallback'}
+                </div>
+            </div>
+
+            {/* Market Data Section */}
+            <SectionHeader title="Market Data" />
             <div className="space-y-0.5">
-                <Row label="Bid" value={tick.bid.toFixed(5)} color="text-[#f87171]" />
-                <Row label="Bid High" value={(tick.high || tick.bid).toFixed(5)} color="text-[#4ade80]" />
-                <Row label="Bid Low" value={(tick.low || tick.bid).toFixed(5)} color="text-[#f87171]" />
-                <div className="h-2"></div>
-                <Row label="Ask" value={tick.ask.toFixed(5)} color="text-[#4ade80]" />
-                <Row label="Ask High" value={(tick.high || tick.ask).toFixed(5)} color="text-[#4ade80]" />
-                <Row label="Ask Low" value={(tick.low || tick.ask).toFixed(5)} color="text-[#f87171]" />
-                <div className="h-2"></div>
-                <Row label="Open Price" value={(tick.open || tick.bid).toFixed(5)} />
-                <Row label="Close Price" value={(tick.close || tick.bid).toFixed(5)} />
-                <div className="h-2"></div>
-                <Row label="Daily Change" value={`${(tick.dailyChange || 0) >= 0 ? '+' : ''}${(tick.dailyChange || 0).toFixed(2)}%`} color={(tick.dailyChange || 0) >= 0 ? "text-[#4ade80]" : "text-[#f87171]"} />
+                <Row label="Bid" value={tick?.bid?.toFixed(spec?.pipPosition || 5) || 'Waiting...'} color="text-[#f87171]" />
+                <Row label="Ask" value={tick?.ask?.toFixed(spec?.pipPosition || 5) || 'Waiting...'} color="text-[#4ade80]" />
+                <Row label="Spread" value={tick ? `${((tick.ask - tick.bid) * Math.pow(10, spec?.pipPosition || 5 - 1)).toFixed(1)} pips` : '-'} />
+                <Row label="Daily Change" value={tick ? `${(tick.dailyChange || 0) >= 0 ? '+' : ''}${(tick.dailyChange || 0).toFixed(2)}%` : '-'} color={(tick?.dailyChange || 0) >= 0 ? "text-[#4ade80]" : "text-[#f87171]"} />
+            </div>
+
+            {/* Price Levels Section */}
+            <SectionHeader title="Price Levels" />
+            <div className="space-y-0.5">
+                <Row label="High" value={tick?.high?.toFixed(spec?.pipPosition || 5) || '-'} color="text-[#4ade80]" />
+                <Row label="Low" value={tick?.low?.toFixed(spec?.pipPosition || 5) || '-'} color="text-[#f87171]" />
+                <Row label="Open" value={tick?.open?.toFixed(spec?.pipPosition || 5) || '-'} />
+                <Row label="Close" value={tick?.close?.toFixed(spec?.pipPosition || 5) || '-'} />
+            </div>
+
+            {/* Contract Specifications Section */}
+            <SectionHeader title="Contract Specifications" />
+            <div className="space-y-0.5">
+                <Row label="Contract Size" value={spec ? spec.contractSize.toLocaleString() : '-'} />
+                <Row label="Pip Value" value={spec ? `$${spec.pipValue.toFixed(2)}` : '-'} />
+                <Row label="Min Lot" value={spec?.minLot?.toString() || '-'} />
+                <Row label="Max Lot" value={spec?.maxLot?.toString() || '-'} />
+                <Row label="Lot Step" value={spec?.lotStep?.toString() || '-'} />
+            </div>
+
+            {/* Trading Conditions Section */}
+            <SectionHeader title="Trading Conditions" />
+            <div className="space-y-0.5">
+                <Row label="Margin Rate" value={spec ? `${(spec.marginRate * 100).toFixed(1)}%` : '-'} />
+                <Row label="Swap Long" value={spec ? `${spec.swapLong.toFixed(2)}` : '-'} color={spec && spec.swapLong < 0 ? 'text-[#f87171]' : 'text-[#4ade80]'} />
+                <Row label="Swap Short" value={spec ? `${spec.swapShort.toFixed(2)}` : '-'} color={spec && spec.swapShort < 0 ? 'text-[#f87171]' : 'text-[#4ade80]'} />
+                <Row label="Commission" value={spec ? `$${spec.commission.toFixed(2)}` : '-'} />
+            </div>
+
+            {/* Currency Info Section */}
+            <SectionHeader title="Currency Info" />
+            <div className="space-y-0.5">
+                <Row label="Base Currency" value={spec?.baseCurrency || '-'} />
+                <Row label="Quote Currency" value={spec?.quoteCurrency || '-'} />
             </div>
         </div>
     );
@@ -844,9 +982,89 @@ const DetailsView = ({ symbol }: { symbol: string }) => {
 
 const TradingPanelRow = ({ symbol }: { symbol: string }) => {
     const tick = useTick(symbol);
-    if (!tick) return null;
+    const [volume, setVolume] = useState('0.10');
+    const [isOrdering, setIsOrdering] = useState<'BUY' | 'SELL' | null>(null);
+    const [orderResult, setOrderResult] = useState<{ success: boolean; message: string } | null>(null);
+
+    // Place market order via API
+    const placeOrder = async (side: 'BUY' | 'SELL') => {
+        if (!tick) return;
+
+        const volumeNum = parseFloat(volume);
+        if (isNaN(volumeNum) || volumeNum <= 0) {
+            setOrderResult({ success: false, message: 'Invalid volume' });
+            setTimeout(() => setOrderResult(null), 2000);
+            return;
+        }
+
+        setIsOrdering(side);
+        setOrderResult(null);
+
+        try {
+            const response = await fetch(`${API_BASE}/api/orders/market`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    symbol,
+                    side,
+                    quantity: volumeNum,
+                    accountId: 'RTX-000001'
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success || result.order) {
+                setOrderResult({ success: true, message: `${side} ${volumeNum} ${symbol} ✓` });
+                console.log(`[Trading] Order placed: ${side} ${volumeNum} ${symbol}`);
+            } else {
+                throw new Error(result.error || 'Order failed');
+            }
+        } catch (error) {
+            console.error(`[Trading] Order error:`, error);
+            setOrderResult({ success: false, message: error instanceof Error ? error.message : 'Order failed' });
+        } finally {
+            setIsOrdering(null);
+            setTimeout(() => setOrderResult(null), 3000);
+        }
+    };
+
+    // Show placeholder if no tick data
+    if (!tick) {
+        return (
+            <div className="bg-[#2d3436] rounded border border-zinc-700 p-1 flex items-center justify-between opacity-50">
+                <div className="flex flex-col w-1/4">
+                    <span className="text-zinc-100 font-bold text-xs">{symbol}</span>
+                    <span className="text-[9px] text-zinc-500">Waiting for data...</span>
+                </div>
+                <div className="flex gap-1 flex-1 justify-end">
+                    <div className="flex flex-col bg-zinc-800/50 border border-zinc-700 rounded px-2 py-1 w-20 opacity-50">
+                        <span className="text-[9px] text-zinc-500 font-bold">SELL</span>
+                        <span className="text-sm font-mono text-zinc-500">-.-----</span>
+                    </div>
+                    <div className="flex flex-col justify-center items-center w-12">
+                        <input type="text" value={volume} onChange={e => setVolume(e.target.value)} className="w-10 bg-[#1e1e1e] border border-zinc-600 rounded text-center text-xs text-zinc-300 py-0.5" />
+                    </div>
+                    <div className="flex flex-col bg-zinc-800/50 border border-zinc-700 rounded px-2 py-1 w-20 opacity-50">
+                        <span className="text-[9px] text-zinc-500 font-bold">BUY</span>
+                        <span className="text-sm font-mono text-zinc-500">-.-----</span>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className="bg-[#2d3436] rounded border border-zinc-700 p-1 flex items-center justify-between">
+        <div className="bg-[#2d3436] rounded border border-zinc-700 p-1 flex items-center justify-between relative">
+            {/* Order Result Overlay */}
+            {orderResult && (
+                <div className={`absolute inset-0 flex items-center justify-center rounded z-10 ${orderResult.success ? 'bg-emerald-900/90' : 'bg-red-900/90'}`}>
+                    <span className={`text-xs font-bold ${orderResult.success ? 'text-emerald-300' : 'text-red-300'}`}>
+                        {orderResult.message}
+                    </span>
+                </div>
+            )}
+
             <div className="flex flex-col w-1/4">
                 <span className="text-zinc-100 font-bold text-xs">{symbol}</span>
                 <span className="text-[9px] text-zinc-500">{new Date().toLocaleTimeString()}</span>
@@ -854,17 +1072,38 @@ const TradingPanelRow = ({ symbol }: { symbol: string }) => {
 
             <div className="flex gap-1 flex-1 justify-end">
                 {/* Sell Btn */}
-                <div className="flex flex-col bg-red-900/20 border border-red-800/50 rounded px-2 py-1 w-20 cursor-pointer hover:bg-red-900/40 transition-colors group">
-                    <span className="text-[9px] text-red-400 font-bold group-hover:text-red-300">SELL</span>
+                <div
+                    onClick={() => !isOrdering && placeOrder('SELL')}
+                    className={`flex flex-col bg-red-900/20 border border-red-800/50 rounded px-2 py-1 w-20 cursor-pointer transition-all group
+                        ${isOrdering === 'SELL' ? 'animate-pulse opacity-50' : 'hover:bg-red-900/40'}
+                        ${isOrdering && isOrdering !== 'SELL' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                    <span className="text-[9px] text-red-400 font-bold group-hover:text-red-300">
+                        {isOrdering === 'SELL' ? '...' : 'SELL'}
+                    </span>
                     <span className="text-sm font-mono text-zinc-200">{tick.bid.toFixed(5)}</span>
                 </div>
+
                 {/* Lots */}
                 <div className="flex flex-col justify-center items-center w-12">
-                    <input type="text" defaultValue="0.10" className="w-10 bg-[#1e1e1e] border border-zinc-600 rounded text-center text-xs text-zinc-300 py-0.5" />
+                    <input
+                        type="text"
+                        value={volume}
+                        onChange={e => setVolume(e.target.value)}
+                        className="w-10 bg-[#1e1e1e] border border-zinc-600 rounded text-center text-xs text-zinc-300 py-0.5 focus:border-blue-500 focus:outline-none"
+                    />
                 </div>
+
                 {/* Buy Btn */}
-                <div className="flex flex-col bg-emerald-900/20 border border-emerald-800/50 rounded px-2 py-1 w-20 cursor-pointer hover:bg-emerald-900/40 transition-colors group">
-                    <span className="text-[9px] text-emerald-400 font-bold group-hover:text-emerald-300">BUY</span>
+                <div
+                    onClick={() => !isOrdering && placeOrder('BUY')}
+                    className={`flex flex-col bg-emerald-900/20 border border-emerald-800/50 rounded px-2 py-1 w-20 cursor-pointer transition-all group
+                        ${isOrdering === 'BUY' ? 'animate-pulse opacity-50' : 'hover:bg-emerald-900/40'}
+                        ${isOrdering && isOrdering !== 'BUY' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                    <span className="text-[9px] text-emerald-400 font-bold group-hover:text-emerald-300">
+                        {isOrdering === 'BUY' ? '...' : 'BUY'}
+                    </span>
                     <span className="text-sm font-mono text-zinc-200">{tick.ask.toFixed(5)}</span>
                 </div>
             </div>
@@ -874,55 +1113,174 @@ const TradingPanelRow = ({ symbol }: { symbol: string }) => {
 
 const TicksView = ({ symbol }: { symbol: string }) => {
     const tick = useTick(symbol);
-    // Mock tick history generator for visualization
-    // In a real app, this would come from a history buffer prop
-    const [history, setHistory] = useState<{ bid: number, ask: number, time: number }[]>([]);
+    const [history, setHistory] = useState<{ bid: number, ask: number, time: number, spread?: number }[]>([]);
+    const [dataSource, setDataSource] = useState<'api' | 'realtime'>('realtime');
+    const [isLoading, setIsLoading] = useState(false);
+    const [tickCount, setTickCount] = useState(0);
 
+    // Fetch tick history from API on symbol change
+    useEffect(() => {
+        if (!symbol) return;
+
+        const fetchTickHistory = async () => {
+            setIsLoading(true);
+            try {
+                const response = await fetch(`${API_BASE}/api/ticks/?symbol=${symbol}&limit=50`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (Array.isArray(data) && data.length > 0) {
+                        // Transform API data to our format
+                        const apiHistory = data.map((t: any) => ({
+                            bid: t.bid || t.Bid || 0,
+                            ask: t.ask || t.Ask || 0,
+                            time: t.timestamp ? new Date(t.timestamp).getTime() : Date.now(),
+                            spread: t.spread || (t.ask - t.bid) || 0
+                        }));
+                        setHistory(apiHistory);
+                        setDataSource('api');
+                        setTickCount(apiHistory.length);
+                        console.log(`[TicksView] Loaded ${apiHistory.length} ticks for ${symbol} from API`);
+                        return;
+                    }
+                }
+                throw new Error('No tick data from API');
+            } catch (error) {
+                console.log(`[TicksView] API failed for ${symbol}, using real-time data`);
+                setDataSource('realtime');
+                setHistory([]);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchTickHistory();
+    }, [symbol]);
+
+    // Update history with real-time ticks (always append new ticks)
     useEffect(() => {
         if (tick) {
             setHistory(prev => {
-                const newH = [...prev, { bid: tick.bid, ask: tick.ask, time: Date.now() }];
-                if (newH.length > 50) return newH.slice(newH.length - 50);
+                const newTick = {
+                    bid: tick.bid,
+                    ask: tick.ask,
+                    time: Date.now(),
+                    spread: tick.ask - tick.bid
+                };
+                const newH = [...prev, newTick];
+                // Keep last 100 ticks
+                if (newH.length > 100) return newH.slice(newH.length - 100);
                 return newH;
             });
+            setTickCount(prev => prev + 1);
+            // Mark as real-time once we start receiving live ticks
+            if (dataSource === 'api') {
+                setDataSource('realtime');
+            }
         }
-    }, [tick]);
+    }, [tick?.bid, tick?.ask]);
 
-    if (!tick) return <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs">select a symbol</div>;
+    if (!symbol) return <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs">select a symbol</div>;
 
-    // Simple SVG scaler
-    const minP = Math.min(...history.map(h => h.bid)) * 0.9999;
-    const maxP = Math.max(...history.map(h => h.ask)) * 1.0001;
+    // Chart calculations
+    const chartHistory = history.length > 0 ? history : [{ bid: 1, ask: 1, time: Date.now() }];
+    const minP = Math.min(...chartHistory.map(h => h.bid)) * 0.9999;
+    const maxP = Math.max(...chartHistory.map(h => h.ask)) * 1.0001;
     const range = maxP - minP || 0.0001;
-    const width = 300; // viewbox width
-    const height = 200; // viewbox height
+    const width = 300;
+    const height = 150;
 
     const getY = (p: number) => height - ((p - minP) / range) * height;
-    const getX = (i: number) => (i / (50 - 1)) * width;
+    const getX = (i: number) => (i / Math.max(chartHistory.length - 1, 1)) * width;
 
-    const bidPath = history.map((h, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(h.bid)}`).join(' ');
-    const askPath = history.map((h, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(h.ask)}`).join(' ');
+    const bidPath = chartHistory.map((h, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(h.bid)}`).join(' ');
+    const askPath = chartHistory.map((h, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(h.ask)}`).join(' ');
+
+    // Get last 10 ticks for table display
+    const recentTicks = history.slice(-10).reverse();
 
     return (
-        <div className="flex-1 flex flex-col p-2 bg-[#1e1e1e]">
+        <div className="flex-1 flex flex-col p-2 bg-[#1e1e1e] overflow-hidden">
+            {/* Header */}
             <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-bold text-white">{symbol}</span>
-                <span className="text-[10px] text-zinc-400">Real-time Ticks</span>
+                <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-white">{symbol}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded ${dataSource === 'api' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                        {isLoading ? '...' : dataSource === 'api' ? '○ Historical' : '● Live'}
+                    </span>
+                </div>
+                <span className="text-[10px] text-zinc-400">{tickCount} ticks</span>
             </div>
-            <div className="flex-1 border border-zinc-700/50 bg-[#121212] relative overflow-hidden rounded-sm">
-                <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full" preserveAspectRatio="none">
-                    {/* Grid lines */}
-                    <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="#333" strokeDasharray="4" strokeWidth="1" />
-                    <line x1="0" y1={height / 4} x2={width} y2={height / 4} stroke="#222" strokeDasharray="4" strokeWidth="1" />
-                    <line x1="0" y1={height * 0.75} x2={width} y2={height * 0.75} stroke="#222" strokeDasharray="4" strokeWidth="1" />
 
-                    {/* Paths */}
-                    <path d={askPath} fill="none" stroke="#f87171" strokeWidth="1.5" />
-                    <path d={bidPath} fill="none" stroke="#3b82f6" strokeWidth="1.5" />
-                </svg>
+            {/* Chart */}
+            <div className="h-32 border border-zinc-700/50 bg-[#121212] relative overflow-hidden rounded-sm mb-2">
+                {history.length === 0 ? (
+                    <div className="absolute inset-0 flex items-center justify-center text-zinc-500 text-xs">
+                        {isLoading ? 'Loading tick history...' : 'Waiting for ticks...'}
+                    </div>
+                ) : (
+                    <>
+                        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full" preserveAspectRatio="none">
+                            {/* Grid lines */}
+                            <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="#333" strokeDasharray="4" strokeWidth="1" />
+                            <line x1="0" y1={height / 4} x2={width} y2={height / 4} stroke="#222" strokeDasharray="4" strokeWidth="1" />
+                            <line x1="0" y1={height * 0.75} x2={width} y2={height * 0.75} stroke="#222" strokeDasharray="4" strokeWidth="1" />
+                            {/* Paths */}
+                            <path d={askPath} fill="none" stroke="#f87171" strokeWidth="1.5" />
+                            <path d={bidPath} fill="none" stroke="#3b82f6" strokeWidth="1.5" />
+                        </svg>
+                        <div className="absolute top-1 right-1 text-[9px] text-red-400 font-mono">{tick?.ask?.toFixed(5) || '-'}</div>
+                        <div className="absolute bottom-1 right-1 text-[9px] text-blue-400 font-mono">{tick?.bid?.toFixed(5) || '-'}</div>
+                        <div className="absolute top-1 left-1 flex gap-2 text-[8px]">
+                            <span className="text-red-400">● Ask</span>
+                            <span className="text-blue-400">● Bid</span>
+                        </div>
+                    </>
+                )}
+            </div>
 
-                <div className="absolute top-1 right-1 text-[9px] text-red-400 font-mono">{tick.ask.toFixed(5)}</div>
-                <div className="absolute bottom-1 right-1 text-[9px] text-blue-400 font-mono">{tick.bid.toFixed(5)}</div>
+            {/* Tick Table */}
+            <div className="flex-1 overflow-hidden">
+                <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider mb-1 border-b border-zinc-700 pb-1">
+                    Recent Ticks
+                </div>
+                <div className="overflow-y-auto h-24 scrollbar-thin scrollbar-thumb-zinc-600">
+                    <table className="w-full text-[10px]">
+                        <thead className="sticky top-0 bg-[#1e1e1e]">
+                            <tr className="text-zinc-500">
+                                <th className="text-left font-medium py-0.5">Time</th>
+                                <th className="text-right font-medium py-0.5">Bid</th>
+                                <th className="text-right font-medium py-0.5">Ask</th>
+                                <th className="text-right font-medium py-0.5">Spread</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {recentTicks.length === 0 ? (
+                                <tr>
+                                    <td colSpan={4} className="text-center text-zinc-500 py-2 italic">
+                                        No tick data yet
+                                    </td>
+                                </tr>
+                            ) : (
+                                recentTicks.map((t, i) => (
+                                    <tr key={i} className="border-b border-zinc-800/30 hover:bg-zinc-800/30">
+                                        <td className="text-left text-zinc-400 py-0.5 font-mono">
+                                            {new Date(t.time).toLocaleTimeString()}
+                                        </td>
+                                        <td className="text-right text-blue-400 py-0.5 font-mono">
+                                            {t.bid.toFixed(5)}
+                                        </td>
+                                        <td className="text-right text-red-400 py-0.5 font-mono">
+                                            {t.ask.toFixed(5)}
+                                        </td>
+                                        <td className="text-right text-zinc-400 py-0.5 font-mono">
+                                            {((t.spread || 0) * 10000).toFixed(1)}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );

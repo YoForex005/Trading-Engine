@@ -287,11 +287,31 @@ const ProfessionalTradingDashboard: React.FC = () => {
                 e.preventDefault();
                 setShowOneClickTrading(prev => !prev);
             }
+
+            // Ctrl+F4 - Close active chart
+            if (e.ctrlKey && e.key === 'F4') {
+                e.preventDefault();
+                if (openCharts.length > 1) {
+                    handleCloseChart(activeChartIndex);
+                }
+            }
+        };
+
+        // Listen for close-active-chart event from menu
+        const handleCloseEvent = () => {
+            if (openCharts.length > 1) {
+                handleCloseChart(activeChartIndex);
+            }
         };
 
         window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
+        window.addEventListener('close-active-chart', handleCloseEvent);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('close-active-chart', handleCloseEvent);
+        };
+    }, [openCharts.length, activeChartIndex]);
 
 
 

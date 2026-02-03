@@ -18,7 +18,7 @@ import { useAppStore } from '../store/useAppStore';
 import { DrawingContextMenu } from './DrawingContextMenu';
 
 export type ChartType = 'candlestick' | 'heikinAshi' | 'bar' | 'line' | 'area';
-export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
+export type Timeframe = 'M1' | 'M5' | 'M15' | 'M30' | 'H1' | 'H4' | 'D1' | 'W1' | 'MN';
 
 interface ChartProps {
     symbol: string;
@@ -52,7 +52,7 @@ export function TradingChart({
     symbol,
     currentPrice: _, // Unused but kept for prop compatibility
     chartType = 'candlestick',
-    timeframe = '1m',
+    timeframe = 'M1',
     positions = [],
     onClosePosition,
     onModifyPosition
@@ -63,6 +63,7 @@ export function TradingChart({
     const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
     const bidLineRef = useRef<any>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const isDisposedRef = useRef(false); // Track if chart is disposed to prevent operations on disposed chart
 
     // Separate state: historical loaded once, forming updates from ticks
     const historicalCandlesRef = useRef<OHLC[]>([]); // Loaded from API, never modified
@@ -239,7 +240,13 @@ export function TradingChart({
             const canvasInterval = setInterval(findCanvas, 100);
             setTimeout(() => clearInterval(canvasInterval), 2000);
 
+            // Reset disposed flag on mount
+            isDisposedRef.current = false;
+
             return () => {
+                // CRITICAL: Set disposed flag FIRST to prevent any pending operations
+                isDisposedRef.current = true;
+
                 resizeObserver.disconnect();
                 setIsChartReady(false);
 
@@ -257,7 +264,14 @@ export function TradingChart({
                 }
 
                 clearInterval(canvasInterval);
-                chart.remove();
+
+                // Remove chart last (after all cleanup)
+                try {
+                    chart.remove();
+                } catch (e) {
+                    // Ignore - chart may already be disposed
+                }
+
                 chartRef.current = null;
                 seriesRef.current = null;
                 canvasRef.current = null;
@@ -508,18 +522,23 @@ export function TradingChart({
     // Helper to get timeframe in seconds
     const getTimeframeSeconds = (tf: Timeframe) => {
         switch (tf) {
-            case '1m': return 60;
-            case '5m': return 300;
-            case '15m': return 900;
-            case '1h': return 3600;
-            case '4h': return 14400;
-            case '1d': return 86400;
+            case 'M1': return 60;
+            case 'M5': return 300;
+            case 'M15': return 900;
+            case 'M30': return 1800;
+            case 'H1': return 3600;
+            case 'H4': return 14400;
+            case 'D1': return 86400;
+            case 'W1': return 604800;
+            case 'MN': return 2592000;
             default: return 60;
         }
     };
 
     // Real-time CANDLE + PRICE LINE updates
     useEffect(() => {
+        // Guard: Prevent operations on disposed chart
+        if (isDisposedRef.current) return;
         if (!currentTick || !seriesRef.current || !chartRef.current) return;
 
         // 1. Update Price Line (Removed redundant creation, managed by lifecycle effect)
@@ -603,6 +622,8 @@ export function TradingChart({
 
     // Update overlay positions
     useEffect(() => {
+        // Guard: Prevent operations on disposed chart
+        if (isDisposedRef.current) return;
         if (!chartRef.current || !seriesRef.current) return;
 
         const updateOverlays = () => {
@@ -955,12 +976,15 @@ function PositionOverlay({ pos, draggingState, onDragStart, onClose }: any) {
 
 function getTimeframeSeconds(tf: Timeframe): number {
     switch (tf) {
-        case '1m': return 60;
-        case '5m': return 300;
-        case '15m': return 900;
-        case '1h': return 3600;
-        case '4h': return 14400;
-        case '1d': return 86400;
+        case 'M1': return 60;
+        case 'M5': return 300;
+        case 'M15': return 900;
+        case 'M30': return 1800;
+        case 'H1': return 3600;
+        case 'H4': return 14400;
+        case 'D1': return 86400;
+        case 'W1': return 604800;
+        case 'MN': return 2592000;
         default: return 60;
     }
 }

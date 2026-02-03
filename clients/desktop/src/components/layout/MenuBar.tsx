@@ -57,10 +57,14 @@ import {
     Download,
     CheckCircle2,
     AlertTriangle,
-    GraduationCap
+    GraduationCap,
+    Moon,
+    Sun
 } from 'lucide-react';
 import { OptionsDialog } from '../settings/OptionsDialog';
 import { FileMenu } from './FileMenu';
+import { useTranslation } from 'react-i18next';
+import { useTheme } from '../../contexts/ThemeContext';
 
 // Local interface definition to avoid export issues
 interface MenuItem {
@@ -75,6 +79,8 @@ interface MenuItem {
 }
 
 export const MenuBar = () => {
+    const { t, i18n } = useTranslation();
+    const { theme, setTheme } = useTheme();
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
     const [isOptionsOpen, setIsOptionsOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -116,67 +122,41 @@ export const MenuBar = () => {
     }, []);
 
     const languageList: MenuItem[] = [
-        // Western / Latin
-        { label: 'English', icon: <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div> },
-        { label: 'German' },
-        { label: 'French' },
-        { label: 'Spanish' },
-        { label: 'Italian' },
-        { label: 'Portuguese (Brazil)' },
-        { label: 'Portuguese (Portugal)' },
-        { label: 'Dutch' },
-        { label: 'Danish' },
-        { label: 'Swedish' },
-        { label: 'Finnish' },
-        { label: 'Lithuanian' },
-        { label: 'Latvian' },
-        { label: 'Estonian' },
-        { label: 'Polish' },
-        { label: 'Czech' },
-        { label: 'Slovak' },
-        { label: 'Hungarian' },
-        { label: 'Romanian' },
-        { label: 'Slovenian' },
-        { label: 'Croatian' },
+        // Western / Latin - Fully Translated
+        { label: 'English', action: () => i18n.changeLanguage('en'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'en' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'Deutsch', action: () => i18n.changeLanguage('de'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'de' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'Français', action: () => i18n.changeLanguage('fr'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'fr' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'Español', action: () => i18n.changeLanguage('es'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'es' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'Italiano', action: () => i18n.changeLanguage('it'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'it' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'Português (BR)', action: () => i18n.changeLanguage('pt-BR'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'pt-BR' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'Nederlands', action: () => i18n.changeLanguage('nl'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'nl' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'Polski', action: () => i18n.changeLanguage('pl'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'pl' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'Türkçe', action: () => i18n.changeLanguage('tr'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'tr' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
         { divider: true, label: '' },
 
-        // Cyrillic
-        { label: 'Russian' },
-        { label: 'Bulgarian' },
-        { label: 'Serbian' },
-        { label: 'Mongolian' },
+        // Cyrillic - Fully Translated
+        { label: 'Русский', action: () => i18n.changeLanguage('ru'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'ru' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
         { divider: true, label: '' },
 
-        // Asian
-        { label: 'Chinese (Simplified)' },
-        { label: 'Chinese (Traditional)' },
-        { label: 'Japanese' },
-        { label: 'Korean' },
-        { label: 'Indonesian' },
-        { label: 'Malay' },
-        { label: 'Javanese' },
-        { label: 'Vietnamese' },
-        { label: 'Thai' },
+        // Asian - Fully Translated
+        { label: '简体中文', action: () => i18n.changeLanguage('zh-CN'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'zh-CN' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: '繁體中文', action: () => i18n.changeLanguage('zh-TW'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'zh-TW' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: '日本語', action: () => i18n.changeLanguage('ja'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'ja' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: '한국어', action: () => i18n.changeLanguage('ko'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'ko' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'Bahasa Indonesia', action: () => i18n.changeLanguage('id'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'id' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'Tiếng Việt', action: () => i18n.changeLanguage('vi'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'vi' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'ภาษาไทย', action: () => i18n.changeLanguage('th'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'th' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
         { divider: true, label: '' },
 
-        // Middle Eastern / Indic
-        { label: 'Arabic' },
-        { label: 'Persian' },
-        { label: 'Hebrew' },
-        { label: 'Turkish' },
-        { label: 'Hindi' },
-        { label: 'Punjabi (India)' },
-        { label: 'Punjabi (Pakistan)' },
-        { label: 'Bengali' },
-        { label: 'Marathi' },
-        { label: 'Swahili' },
-        { label: 'Hausa' }
+        // Middle Eastern / Indic - Fully Translated
+        { label: 'العربية', action: () => i18n.changeLanguage('ar'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'ar' ? 'bg-blue-500' : 'bg-transparent'}`}></div> },
+        { label: 'हिंदी', action: () => i18n.changeLanguage('hi'), icon: <div className={`w-1.5 h-1.5 rounded-full ${i18n.language === 'hi' ? 'bg-blue-500' : 'bg-transparent'}`}></div> }
     ];
 
     const menuItems: { [key: string]: MenuItem[] } = {
         File: [
             {
-                label: 'New Chart',
+                label: t('menu.file.newChart'),
                 icon: <PlusSquare size={14} className="text-emerald-500" />,
                 children: isLoadingSymbols
                     ? [{ label: 'Loading...' }]
@@ -225,55 +205,68 @@ export const MenuBar = () => {
                             { label: 'EURUSD' }, { label: 'GBPUSD' }, { label: 'USDJPY' }
                         ]
             },
-            { label: 'Open Deleted', disabled: true },
-            { label: 'Profiles', children: [{ label: 'Default' }, { label: 'Euro' }, { label: 'Market' }] },
-            { label: 'Close', shortcut: 'Ctrl+F4' },
+            { label: t('menu.file.openDeleted'), disabled: true },
+            { label: t('menu.file.profiles'), children: [{ label: 'Default' }, { label: 'Euro' }, { label: 'Market' }] },
+            { label: t('menu.file.close'), shortcut: 'Ctrl+F4', action: () => window.dispatchEvent(new CustomEvent('close-active-chart')) },
             { divider: true, label: '' },
-            { label: 'Save', icon: <Save size={14} />, shortcut: 'Ctrl+S' },
-            { label: 'Save As Picture', icon: <FileText size={14} /> },
+            { label: t('menu.file.save'), icon: <Save size={14} />, shortcut: 'Ctrl+S' },
+            { label: t('menu.file.saveAsPicture'), icon: <FileText size={14} /> },
             { divider: true, label: '' },
-            { label: 'Open Data Folder', icon: <FolderOpen size={14} />, shortcut: 'Ctrl+Shift+D' },
+            { label: t('menu.file.openDataFolder'), icon: <FolderOpen size={14} />, shortcut: 'Ctrl+Shift+D' },
             { divider: true, label: '' },
-            { label: 'Print', icon: <Printer size={14} />, shortcut: 'Ctrl+P' },
-            { label: 'Print Preview' },
-            { label: 'Print Setup', icon: <Settings size={14} /> },
+            { label: t('menu.file.print'), icon: <Printer size={14} />, shortcut: 'Ctrl+P' },
+            { label: t('menu.file.printPreview') },
+            { label: t('menu.file.printSetup'), icon: <Settings size={14} /> },
             { divider: true, label: '' },
-            { label: 'Open an Account', icon: <UserPlus size={14} className="text-blue-400" /> },
-            { label: 'Login to Trade Account', icon: <LogIn size={14} className="text-blue-400" /> },
-            { label: 'Login to Web Trader', icon: <Globe size={14} /> },
-            { label: 'Login to MQL5.community', icon: <GraduationCap size={14} className="text-blue-500" /> },
+            { label: t('menu.file.openAccount'), icon: <UserPlus size={14} className="text-blue-400" /> },
+            { label: t('menu.file.loginTrade'), icon: <LogIn size={14} className="text-blue-400" /> },
+            { label: t('menu.file.loginWeb'), icon: <Globe size={14} /> },
+            { label: t('menu.file.loginMql5'), icon: <GraduationCap size={14} className="text-blue-500" /> },
             { divider: true, label: '' },
-            { label: 'Exit', icon: <LogOut size={14} className="text-rose-400" />, action: () => alert('Exit clicked') }
+            { label: t('menu.file.exit'), icon: <LogOut size={14} className="text-rose-400" />, action: () => alert('Exit clicked') }
         ],
         View: [
-            { label: 'Languages', children: languageList, scrollableChildren: true },
-            { label: 'Color Themes', children: [{ label: 'Dark' }, { label: 'Light' }, { label: 'Color' }] },
+            { label: t('menu.view.languages'), children: languageList, scrollableChildren: true },
+            {
+                label: t('menu.view.colorThemes'), children: [
+                    {
+                        label: 'Dark',
+                        icon: theme === 'dark' ? <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div> : <Moon size={14} className="text-zinc-400" />,
+                        action: () => setTheme('dark')
+                    },
+                    {
+                        label: 'Light',
+                        icon: theme === 'light' ? <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div> : <Sun size={14} className="text-yellow-400" />,
+                        action: () => setTheme('light')
+                    }
+                ]
+            },
             { divider: true, label: '' },
-            { label: 'Toolbars', children: [{ label: 'Standard', icon: <Box size={12} /> }, { label: 'Line Studies' }, { label: 'Timeframes' }] },
-            { label: 'Status Bar', icon: <Layout size={14} /> },
-            { label: 'Charts Bar', icon: <Layers size={14} /> },
+            { label: t('menu.view.toolbars'), children: [{ label: 'Standard', icon: <Box size={12} /> }, { label: 'Line Studies' }, { label: 'Timeframes' }] },
+            { label: t('menu.view.statusBar'), icon: <Layout size={14} /> },
+            { label: t('menu.view.chartsBar'), icon: <Layers size={14} /> },
             { divider: true, label: '' },
-            { label: 'Symbols', shortcut: 'Ctrl+U' },
-            { label: 'Depth of Market', shortcut: 'Alt+B' },
-            { label: 'Market Watch', shortcut: 'Ctrl+M', icon: <Monitor size={14} /> },
-            { label: 'Data Window', shortcut: 'Ctrl+D' },
-            { label: 'Navigator', shortcut: 'Ctrl+N' },
-            { label: 'Toolbox', shortcut: 'Ctrl+T' },
-            { label: 'Strategy Tester', shortcut: 'Ctrl+R' },
+            { label: t('menu.view.symbols'), shortcut: 'Ctrl+U' },
+            { label: t('menu.view.depthOfMarket'), shortcut: 'Alt+B' },
+            { label: t('menu.view.marketWatch'), shortcut: 'Ctrl+M', icon: <Monitor size={14} /> },
+            { label: t('menu.view.dataWindow'), shortcut: 'Ctrl+D' },
+            { label: t('menu.view.navigator'), shortcut: 'Ctrl+N' },
+            { label: t('menu.view.toolbox'), shortcut: 'Ctrl+T' },
+            { label: t('menu.view.strategyTester'), shortcut: 'Ctrl+R' },
             { divider: true, label: '' },
-            { label: 'Full Screen', shortcut: 'F11' }
+            { label: t('menu.view.fullScreen'), shortcut: 'F11' }
         ],
         Insert: [
-            { label: 'Indicators', children: [{ label: 'Trend' }, { label: 'Oscillators' }, { label: 'Volumes' }] },
-            { label: 'Objects', children: [{ label: 'Lines' }, { label: 'Channels' }, { label: 'Gann' }, { label: 'Fibonacci' }] },
-            { label: 'Experts' },
-            { label: 'Scripts' }
+            { label: t('menu.insert.indicators'), children: [{ label: 'Trend' }, { label: 'Oscillators' }, { label: 'Volumes' }] },
+            { label: t('menu.insert.objects'), children: [{ label: 'Lines' }, { label: 'Channels' }, { label: 'Gann' }, { label: 'Fibonacci' }] },
+            { label: t('menu.insert.experts') },
+            { label: t('menu.insert.scripts') }
         ],
         Charts: [
-            { label: 'Depth of Market', shortcut: 'Alt+B', icon: <Box size={14} /> },
-            { label: 'Indicator List', shortcut: 'Ctrl+I', icon: <LucideLineChart size={14} /> },
+            { label: t('menu.charts.depthOfMarket'), shortcut: 'Alt+B', icon: <Box size={14} /> },
+            { label: t('menu.charts.indicatorList'), shortcut: 'Ctrl+I', icon: <LucideLineChart size={14} /> },
             {
-                label: 'Objects',
+                label: t('menu.charts.objects'),
                 children: [
                     // Management
                     { label: 'Object List', shortcut: 'Ctrl+B', icon: <List size={14} /> },
@@ -292,55 +285,55 @@ export const MenuBar = () => {
                 ]
             },
             { divider: true, label: '' },
-            { label: 'Bar Chart', shortcut: 'Alt+1', icon: <BarChart size={14} /> },
-            { label: 'Candlesticks', shortcut: 'Alt+2', icon: <CandlestickChart size={14} /> },
-            { label: 'Line Chart', shortcut: 'Alt+3', icon: <LucideLineChart size={14} /> },
+            { label: t('menu.charts.barChart'), shortcut: 'Alt+1', icon: <BarChart size={14} /> },
+            { label: t('menu.charts.candlesticks'), shortcut: 'Alt+2', icon: <CandlestickChart size={14} /> },
+            { label: t('menu.charts.lineChart'), shortcut: 'Alt+3', icon: <LucideLineChart size={14} /> },
             { divider: true, label: '' },
-            { label: 'Grid', shortcut: 'Ctrl+G', icon: <Grid size={14} /> },
-            { label: 'Auto Scroll', icon: <MoveDown size={14} /> },
-            { label: 'Chart Shift', icon: <MoveRight size={14} /> },
-            { label: 'Volumes', shortcut: 'Ctrl+L', icon: <BarChart3 size={14} /> },
-            { label: 'Tick Volumes' },
+            { label: t('menu.charts.grid'), shortcut: 'Ctrl+G', icon: <Grid size={14} /> },
+            { label: t('menu.charts.autoScroll'), icon: <MoveDown size={14} /> },
+            { label: t('menu.charts.chartShift'), icon: <MoveRight size={14} /> },
+            { label: t('menu.charts.volumes'), shortcut: 'Ctrl+L', icon: <BarChart3 size={14} /> },
+            { label: t('menu.charts.tickVolumes') },
             { divider: true, label: '' },
-            { label: 'Zoom In', shortcut: '+' },
-            { label: 'Zoom Out', shortcut: '-' },
+            { label: t('menu.charts.zoomIn'), shortcut: '+' },
+            { label: t('menu.charts.zoomOut'), shortcut: '-' },
             { divider: true, label: '' },
-            { label: 'Properties', shortcut: 'F8', icon: <Settings size={14} /> }
+            { label: t('menu.charts.properties'), shortcut: 'F8', icon: <Settings size={14} /> }
         ],
         Tools: [
             // Primary Trading
-            { label: 'New Order', shortcut: 'F9', icon: <PlusSquare size={14} className="text-emerald-500" /> },
+            { label: t('menu.tools.newOrder'), shortcut: 'F9', icon: <PlusSquare size={14} className="text-emerald-500" /> },
             { divider: true, label: '' },
 
             // Development & Automation (RTX5 Rebranded)
-            { label: 'Strategy Tester', shortcut: 'Ctrl+R', icon: <Activity size={14} /> },
-            { label: 'RTX5 Script Editor', shortcut: 'F4', icon: <CreditCard size={14} /> },
-            { label: 'Agents Manager', shortcut: 'F6', icon: <Cpu size={14} /> },
+            { label: t('menu.tools.strategyTester'), shortcut: 'Ctrl+R', icon: <Activity size={14} /> },
+            { label: t('menu.tools.scriptEditor'), shortcut: 'F4', icon: <CreditCard size={14} /> },
+            { label: t('menu.tools.agentsManager'), shortcut: 'F6', icon: <Cpu size={14} /> },
             { divider: true, label: '' },
 
             // System & Monitoring
-            { label: 'Task Manager', shortcut: 'F2', icon: <Server size={14} /> },
-            { label: 'Global Variables', shortcut: 'F3', icon: <Globe size={14} /> },
+            { label: t('menu.tools.taskManager'), shortcut: 'F2', icon: <Server size={14} /> },
+            { label: t('menu.tools.globalVariables'), shortcut: 'F3', icon: <Globe size={14} /> },
             { divider: true, label: '' },
 
             // RTX5 Services
-            { label: 'RTX5 Marketplace', icon: <Box size={14} className="text-blue-400" /> },
-            { label: 'RTX5 Signals Hub', icon: <Activity size={14} className="text-emerald-400" /> },
-            { label: 'RTX5 Cloud Hosting', icon: <Shield size={14} className="text-purple-400" /> },
+            { label: t('menu.tools.marketplace'), icon: <Box size={14} className="text-blue-400" /> },
+            { label: t('menu.tools.signalsHub'), icon: <Activity size={14} className="text-emerald-400" /> },
+            { label: t('menu.tools.cloudHosting'), icon: <Shield size={14} className="text-purple-400" /> },
             { divider: true, label: '' },
 
             // Settings
-            { label: 'Options', shortcut: 'Ctrl+O', icon: <Settings size={14} />, action: () => setIsOptionsOpen(true) }
+            { label: t('menu.tools.options'), shortcut: 'Ctrl+O', icon: <Settings size={14} />, action: () => setIsOptionsOpen(true) }
         ],
         Window: [
-            { label: 'Tile Windows', shortcut: 'Alt+R', icon: <LayoutGrid size={14} /> },
-            { label: 'Cascade', icon: <Layers size={14} /> },
-            { label: 'Tile Horizontally', icon: <AlignHorizontalJustifyCenter size={14} /> },
-            { label: 'Tile Vertically', icon: <AlignVerticalJustifyCenter size={14} /> },
-            { label: 'Arrange Icons', icon: <Grid size={14} /> },
+            { label: t('menu.window.tileWindows'), shortcut: 'Alt+R', icon: <LayoutGrid size={14} /> },
+            { label: t('menu.window.cascade'), icon: <Layers size={14} /> },
+            { label: t('menu.window.tileHorizontally'), icon: <AlignHorizontalJustifyCenter size={14} /> },
+            { label: t('menu.window.tileVertically'), icon: <AlignVerticalJustifyCenter size={14} /> },
+            { label: t('menu.window.arrangeIcons'), icon: <Grid size={14} /> },
             { divider: true, label: '' },
             {
-                label: 'Resolution',
+                label: t('menu.window.resolution'),
                 icon: <Monitor size={14} />,
                 children: [
                     { label: '2160p', shortcut: '3840x2160' },
@@ -353,26 +346,26 @@ export const MenuBar = () => {
             }
         ],
         Help: [
-            { label: 'Help Topics', shortcut: 'F1', icon: <HelpCircle size={14} /> },
-            { label: "What's New", icon: <Zap size={14} className="text-yellow-400" /> },
-            { label: 'RTX5 Telegram Channel', icon: <Send size={14} className="text-blue-400" /> },
-            { label: 'Video Guides', icon: <PlayCircle size={14} />, children: [{ label: 'Getting Started' }, { label: 'Trading' }, { label: 'Analysis' }] },
+            { label: t('menu.help.helpTopics'), shortcut: 'F1', icon: <HelpCircle size={14} /> },
+            { label: t('menu.help.whatsNew'), icon: <Zap size={14} className="text-yellow-400" /> },
+            { label: t('menu.help.telegramChannel'), icon: <Send size={14} className="text-blue-400" /> },
+            { label: t('menu.help.videoGuides'), icon: <PlayCircle size={14} />, children: [{ label: 'Getting Started' }, { label: 'Trading' }, { label: 'Analysis' }] },
             { divider: true, label: '' },
-            { label: 'RTX5 Web Trader', icon: <Globe size={14} /> },
-            { label: 'RTX5 Documentation', icon: <Book size={14} /> },
-            { label: 'RTX5 AlgoBook', icon: <BookOpen size={14} className="text-amber-400" /> },
-            { label: 'RTX5 NeuroBook', icon: <Brain size={14} className="text-purple-400" /> },
-            { label: 'RTX5 Articles', icon: <FileText size={14} /> },
-            { label: 'RTX5 Code Base', icon: <Code size={14} /> },
-            { label: 'RTX5 Jobs', icon: <Briefcase size={14} /> },
-            { label: 'RTX5 Marketplace', icon: <ShoppingBag size={14} className="text-blue-400" /> },
-            { label: 'RTX5 Signals', icon: <Radio size={14} className="text-emerald-400" /> },
-            { label: 'RTX5 Quotes', icon: <ArrowUpRight size={14} /> },
-            { label: 'RTX5 Forum', icon: <MessageSquare size={14} /> },
-            { label: 'RTX5 Cloud Hosting', icon: <Cloud size={14} className="text-sky-400" /> },
+            { label: t('menu.help.webTrader'), icon: <Globe size={14} /> },
+            { label: t('menu.help.documentation'), icon: <Book size={14} /> },
+            { label: t('menu.help.algoBook'), icon: <BookOpen size={14} className="text-amber-400" /> },
+            { label: t('menu.help.neuroBook'), icon: <Brain size={14} className="text-purple-400" /> },
+            { label: t('menu.help.articles'), icon: <FileText size={14} /> },
+            { label: t('menu.help.codeBase'), icon: <Code size={14} /> },
+            { label: t('menu.help.jobs'), icon: <Briefcase size={14} /> },
+            { label: t('menu.help.marketplace'), icon: <ShoppingBag size={14} className="text-blue-400" /> },
+            { label: t('menu.help.signals'), icon: <Radio size={14} className="text-emerald-400" /> },
+            { label: t('menu.help.quotes'), icon: <ArrowUpRight size={14} /> },
+            { label: t('menu.help.forum'), icon: <MessageSquare size={14} /> },
+            { label: t('menu.help.cloudHosting'), icon: <Cloud size={14} className="text-sky-400" /> },
             { divider: true, label: '' },
             {
-                label: 'Mobile',
+                label: t('menu.help.mobile'),
                 icon: <Smartphone size={14} />,
                 children: [
                     { label: 'Economic Calendar' },
@@ -381,11 +374,11 @@ export const MenuBar = () => {
                     { label: 'RTX5 for Android' }
                 ]
             },
-            { label: 'RTX5 for Mac', icon: <Laptop size={14} /> },
-            { label: 'RTX5 for Linux', icon: <Terminal size={14} /> },
+            { label: t('menu.help.mac'), icon: <Laptop size={14} /> },
+            { label: t('menu.help.linux'), icon: <Terminal size={14} /> },
             { divider: true, label: '' },
             {
-                label: 'Check For Updates',
+                label: t('menu.help.checkForUpdates'),
                 icon: <Download size={14} className="text-blue-500" />,
                 children: [
                     { label: 'Latest Release Version', icon: <CheckCircle2 size={12} className="text-emerald-500" /> },
@@ -393,7 +386,7 @@ export const MenuBar = () => {
                 ]
             },
             { divider: true, label: '' },
-            { label: 'About', icon: <Box size={14} /> }
+            { label: t('menu.help.about'), icon: <Box size={14} /> }
         ]
     };
 
@@ -455,7 +448,11 @@ export const MenuBar = () => {
                                 ) : (
                                     <div className="min-w-[240px] bg-[#1e1e1e] border border-zinc-700 rounded-md shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100 origin-top-left">
                                         {menuItems[key].map((item, index) => (
-                                            <MenuItem key={index} item={item} />
+                                            <MenuItem
+                                                key={index}
+                                                item={item}
+                                                onClose={() => setActiveMenu(null)}
+                                            />
                                         ))}
                                     </div>
                                 )}
@@ -471,7 +468,7 @@ export const MenuBar = () => {
     );
 };
 
-const MenuItem = ({ item }: { item: MenuItem }) => {
+const MenuItem = ({ item, onClose }: { item: MenuItem; onClose?: () => void }) => {
     if (item.divider) {
         return <div className="h-[1px] bg-zinc-700/50 my-1 mx-2"></div>;
     }
@@ -483,6 +480,7 @@ const MenuItem = ({ item }: { item: MenuItem }) => {
                 onClick={() => {
                     if (item.action) {
                         item.action();
+                        onClose?.();
                     }
                 }}
                 className={`w-full flex items-center gap-3 px-2 py-1.5 text-[12px] rounded-sm text-left
@@ -510,7 +508,11 @@ const MenuItem = ({ item }: { item: MenuItem }) => {
                     ${item.scrollableChildren ? 'max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent' : ''}
                  `}>
                     {item.children.map((subItem, idx) => (
-                        <MenuItem key={idx} item={subItem} />
+                        <MenuItem
+                            key={idx}
+                            item={subItem}
+                            onClose={onClose}
+                        />
                     ))}
                 </div>
             )}
