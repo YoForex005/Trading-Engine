@@ -15,7 +15,6 @@ import {
   Info,
   ChevronUp,
   ChevronDown,
-  Check,
   AlertTriangle,
   Clock,
 } from 'lucide-react';
@@ -79,7 +78,7 @@ export const RuleEffectivenessDashboard = () => {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`http://localhost:8080/api/analytics/rules/metrics?timeRange=${timeRange}`);
+        const response = await fetch(`http://localhost:7999/api/analytics/rules/metrics?timeRange=${timeRange}`);
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -697,7 +696,7 @@ const RulePerformanceChart = ({ selectedRuleIds, timeRange }: RulePerformanceCha
       try {
         const promises = selectedRuleIds.map(async (ruleId) => {
           const response = await fetch(
-            `http://localhost:8080/api/analytics/rules/${ruleId}/pnl?timeRange=${timeRange}`
+            `http://localhost:7999/api/analytics/rules/${ruleId}/pnl?timeRange=${timeRange}`
           );
           const data = await response.json();
           return { ruleId, data };
@@ -809,7 +808,7 @@ const DrawdownChart = ({ selectedRuleIds, timeRange }: DrawdownChartProps) => {
       try {
         const promises = selectedRuleIds.map(async (ruleId) => {
           const response = await fetch(
-            `http://localhost:8080/api/analytics/rules/${ruleId}/drawdown?timeRange=${timeRange}`
+            `http://localhost:7999/api/analytics/rules/${ruleId}/drawdown?timeRange=${timeRange}`
           );
           const data = await response.json();
           return { ruleId, data };

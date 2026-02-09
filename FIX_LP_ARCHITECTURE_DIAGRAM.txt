@@ -1,0 +1,247 @@
+╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║                     TRADING ENGINE - FIX & LP INTEGRATION ARCHITECTURE                                        ║
+╚═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              EXTERNAL LIQUIDITY PROVIDERS (REAL)                                              │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────┐           ┌──────────────────┐           ┌──────────────────┐
+    │    YoForex       │           │      OANDA       │           │     Binance      │
+    │  FIX.4.4 Server  │           │    REST API      │           │  REST/WebSocket  │
+    │ 23.106.238.138   │           │   forex.oanda.com│           │ api.binance.com  │
+    │    Port 12336    │           │                  │           │                  │
+    └────────┬─────────┘           └────────┬─────────┘           └────────┬─────────┘
+             │                              │                              │
+             │ (Proxy Tunnel)              │ (HTTPS)                      │ (HTTPS)
+             │ 81.29.145.69:49527          │                              │
+             │                              │                              │
+    ┌────────▼──────────────────┬──────────▼─────────────────────────────▼──────────────┐
+    │                           │                                                       │
+    │         FIX GATEWAY       │             LP MANAGER                               │
+    │  ┌─────────────────────┐  │  ┌──────────────────────────────────────────────┐   │
+    │  │                     │  │  │                                              │   │
+    │  │ ┌─────────────────┐ │  │  │  ADAPTERS                                   │   │
+    │  │ │ YOFX1 Session   │ │  │  │  ┌────────────────────────────────────┐    │   │
+    │  │ │ (Trading)       │ │  │  │  │  YoForex Adapter (FIX)           │    │   │
+    │  │ │                 │ │  │  │  │  • Forex pairs                   │    │   │
+    │  │ │ Status: -       │ │  │  │  │  • Commodities (XAUUSD)          │    │   │
+    │  │ │ OutSeqNum: N/A  │ │  │  │  │  • Real-time feed                │    │   │
+    │  │ │ InSeqNum: N/A   │ │  │  │  └────────────────────────────────────┘    │   │
+    │  │ └─────────────────┘ │  │  │  ┌────────────────────────────────────┐    │   │
+    │  │                     │  │  │  │  OANDA Adapter                   │    │   │
+    │  │ ┌─────────────────┐ │  │  │  │  • Forex pairs                   │    │   │
+    │  │ │ YOFX2 Session   │ │  │  │  │  • Account-based feeds           │    │   │
+    │  │ │ (Market Data)   │ │  │  │  └────────────────────────────────────┘    │   │
+    │  │ │                 │ │  │  │  ┌────────────────────────────────────┐    │   │
+    │  │ │ Status: -       │ │  │  │  │  Binance Adapter                 │    │   │
+    │  │ │ OutSeqNum: N/A  │ │  │  │  │  • Crypto pairs                   │    │   │
+    │  │ │ InSeqNum: N/A   │ │  │  │  │  • Spot market data               │    │   │
+    │  │ └─────────────────┘ │  │  │  └────────────────────────────────────┘    │   │
+    │  │                     │  │  │                                              │   │
+    │  │ ┌─────────────────┐ │  │  │  Quote Channel: chan Quote (buffer: 1000)  │   │
+    │  │ │ LMAX_PROD       │ │  │  │                                              │   │
+    │  │ │ (Production)    │ │  │  │  Registry: map[string]LPAdapter             │   │
+    │  │ │                 │ │  │  │                                              │   │
+    │  │ │ Status: -       │ │  │  │  Config File: data/lp_config.json          │   │
+    │  │ │ fix.lmax.com:443│ │  │  │                                              │   │
+    │  │ └─────────────────┘ │  │  └──────────────────────────────────────────────┘   │
+    │  │                     │  │                                                    │
+    │  │ ┌─────────────────┐ │  │                                                    │
+    │  │ │ LMAX_DEMO       │ │  │                                                    │
+    │  │ │ (Testing)       │ │  │                                                    │
+    │  │ │                 │ │  │                                                    │
+    │  │ │ Status: -       │ │  │                                                    │
+    │  │ │ demo-fix.lmax.. │ │  │                                                    │
+    │  │ └─────────────────┘ │  │                                                    │
+    │  │                     │  │                                                    │
+    │  │ Message Channels:   │  │                                                    │
+    │  │ • Execution Reports │  │                                                    │
+    │  │ • Market Data       │  │                                                    │
+    │  │ • MD Rejects        │  │                                                    │
+    │  │ • Positions         │  │                                                    │
+    │  │ • Trades            │  │                                                    │
+    │  │ • Order Statuses    │  │                                                    │
+    │  │                     │  │                                                    │
+    │  │ Persistence:        │  │                                                    │
+    │  │ fixstore/           │  │                                                    │
+    │  │ • *.seqnums         │  │                                                    │
+    │  │ • *.msgs            │  │                                                    │
+    │  │                     │  │                                                    │
+    │  │ Connection Manager: │  │                                                    │
+    │  │ • Auto-reconnect    │  │                                                    │
+    │  │ • Exponential BO    │  │                                                    │
+    │  │ • Health monitoring │  │                                                    │
+    │  │ • Heartbeat track   │  │                                                    │
+    │  └─────────────────────┘  │                                                    │
+    │                           │                                                    │
+    └───────┬───────────────────┴──────────────────────────────────────────────────┘
+            │
+            │ Quote Channel │ Market Data │ Trade Reports
+            │
+    ┌───────▼───────────────────────────────────────────────────────────────────────────┐
+    │                    WEBSOCKET HUB (Quote Aggregation)                             │
+    │  ┌─────────────────────────────────────────────────────────────────────────┐    │
+    │  │ Quote Channel Receiver                                                  │    │
+    │  │                                                                         │    │
+    │  │ Aggregated Quote Stream (buffer: 10,000)                              │    │
+    │  │ - Real-time price updates                                              │    │
+    │  │ - Spread calculation                                                   │    │
+    │  │ - LP attribution                                                       │    │
+    │  │ - Broadcast to all connected clients                                   │    │
+    │  └─────────────────────────────────────────────────────────────────────────┘    │
+    │                                    │                                            │
+    │  Connected to:                     │                                            │
+    │  • Tick Store (persistence)        │                                            │
+    │  • B-Book Engine (pricing)         │                                            │
+    │  • Analytics Hub (monitoring)      │                                            │
+    └────────────────────────────────┬───┴────────────────────────────────────────────┘
+                                    │
+            ┌───────────────────────┼───────────────────────┐
+            │                       │                       │
+    ┌───────▼────────────┐  ┌──────▼──────────┐   ┌────────▼────────┐
+    │  TICK STORE        │  │   B-BOOK       │   │  ADMIN API     │
+    │                    │  │   ENGINE       │   │                │
+    │ SQLite Database    │  │                │   │ Connection Mgmt│
+    │ • Quote history    │  │ Market Maker   │   │ • Connect      │
+    │ • OHLC calcs      │  │ • Price source │   │ • Disconnect   │
+    │ • Real-time access │  │ • Risk models  │   │ • Reconnect    │
+    │ • Daily rotation   │  │ • Execution    │   │ • Status       │
+    │                    │  │                │   │ • Stats        │
+    │ API Endpoints:     │  │ API Handlers   │   │ • Diagnostics  │
+    │ • /api/v1/ticks/  │  │ • /api/v1/...  │   │                │
+    │ • /api/v1/ohlc/   │  │                │   │ HTTP Endpoints │
+    │                    │  │                │   │ /admin/fix/... │
+    └────────────────────┘  └────────────────┘   └────────────────┘
+            │                       │                     │
+            │                       │                     │
+    ┌───────▼───────────────────────▼─────────────────────▼─────────────┐
+    │                     WEBSOCKET CLIENT (UI)                        │
+    │  ws://localhost:7999/ws                                         │
+    │                                                                 │
+    │  Receives:                                                      │
+    │  • Real-time market quotes                                      │
+    │  • Trade updates                                                │
+    │  • Position changes                                             │
+    │  • Analytics data                                               │
+    │                                                                 │
+    └─────────────────────────────────────────────────────────────────┘
+
+
+╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║                           DATA FLOW: LP QUOTE TO CLIENT                                                     ║
+╚═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+
+External LP (e.g., YoForex via FIX)
+         │
+         │ FIX Message: MarketDataSnapshot (35=W)
+         │ Bid: 2345.50, Ask: 2345.75, Symbol: XAUUSD
+         │
+         ├─────────────────────────────────────────────────────────────────────┐
+         │                                                                     │
+         ▼                                                                     ▼
+    FIX Gateway                                                         LP Manager
+    • Parse message                                              • Route by adapter
+    • Validate                                                   • Priority resolution
+    • Store quote                                                • Rate limiting
+    • Send to channels
+         │
+         ├─ Market Data Channel ◄──────────────────────┐
+         │                                              │
+         ▼                                              │
+    WebSocket Hub                                      │
+    • Receive quote                                    │
+    • Format for UI                                    │
+    • Broadcast to clients                  Aggregated Quote Channel
+         │                                   (OANDA, Binance, etc.)
+         │
+    ┌────┴─────────────────────────────────────┬───────────────┐
+    │                                          │               │
+    ▼                                          ▼               ▼
+Client #1 (Browser)                    Tick Store        Analytics Hub
+receives: {                            • Persist to DB    • Generate metrics
+  type: 'tick',                         • Update OHLC     • Update stats
+  symbol: 'XAUUSD',                     • Calculate PIPs   • Alert checks
+  bid: 2345.50,
+  ask: 2345.75,
+  lp: 'yoforex'
+}
+
+
+╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║                        SECURITY: HARDCODED CREDENTIALS (CRITICAL)                                           ║
+╚═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+
+Location: backend/fix/gateway.go (lines 267-314)
+
+┌─ YOFX1 Session ──────────────────────────┐
+│ Username:        YOFX1                   │ ⚠️ HARDCODED
+│ Password:        Brand#143               │ ⚠️ HARDCODED
+│ Account:         50153                   │ ⚠️ HARDCODED
+│ Proxy Host:      81.29.145.69            │ ⚠️ HARDCODED
+│ Proxy Port:      49527                   │ ⚠️ HARDCODED
+│ Proxy Username:  fGUqTcsdMsBZlms         │ ⚠️ HARDCODED
+│ Proxy Password:  3eo1qF91WA7Fyku         │ ⚠️ HARDCODED
+│                                          │
+│ RISK: All credentials in git repository  │
+└──────────────────────────────────────────┘
+
+IMPACT:
+  • Anyone with repository access → Full LP access
+  • Git history contains all previous credentials
+  • Cannot rotate without code changes
+  • Production LP trading account exposed
+
+
+╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║                     ENVIRONMENT VARIABLES FOR CREDENTIALS (RECOMMENDED)                                     ║
+╚═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+
+YOFX_HOST                    = 23.106.238.138     (Current: env var with fallback)
+YOFX_PORT                    = 12336              (Current: env var with fallback)
+YOFX1_USERNAME               = YOFX1              (Current: env var with fallback)
+YOFX1_PASSWORD               = Brand#143          (Current: HARDCODED - MUST FIX)
+YOFX2_USERNAME               = YOFX2              (Current: env var with fallback)
+YOFX2_PASSWORD               = Brand#143          (Current: HARDCODED - MUST FIX)
+YOFX_TRADING_ACCOUNT         = 50153              (Current: HARDCODED - MUST FIX)
+YOFX_USE_PROXY               = true               (Current: env var with fallback)
+YOFX_PROXY_HOST              = 81.29.145.69       (Current: HARDCODED - MUST FIX)
+YOFX_PROXY_PORT              = 49527              (Current: HARDCODED - MUST FIX)
+YOFX_PROXY_USERNAME          = fGUqTcsdMsBZlms    (Current: HARDCODED - MUST FIX)
+YOFX_PROXY_PASSWORD          = 3eo1qF91WA7Fyku    (Current: HARDCODED - MUST FIX)
+
+OANDA_API_KEY                = (your key)         (Current: env var only)
+OANDA_ACCOUNT_ID             = (your id)          (Current: env var only)
+
+BINANCE_API_KEY              = (your key)         (Current: env var only)
+BINANCE_SECRET_KEY           = (your secret)      (Current: env var only)
+
+FIX_PROVISIONING_ENABLED     = false              (Current: env var with default)
+FIX_PROVISIONING_STORE_PATH  = ./data/fix_creds   (Current: env var with default)
+FIX_MASTER_PASSWORD          = (vault)            (Current: env var with default)
+
+
+╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║                    CONNECTION RETRY STRATEGY (EXPONENTIAL BACKOFF)                                          ║
+╚═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+
+Initial Delay:       5 seconds
+Maximum Delay:       5 minutes (300 seconds)
+Backoff Multiplier:  2.0x
+
+Retry Timeline:
+┌─────────────┬──────────┬─────────────────────────────────────────────────────────────────────┐
+│ Attempt #   │ Wait Time│ Timeline                                                            │
+├─────────────┼──────────┼─────────────────────────────────────────────────────────────────────┤
+│    1        │  5s      │ ▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │
+│    2        │ 10s      │ ▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │
+│    3        │ 20s      │ ▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │
+│    4        │ 40s      │ ▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │
+│    5        │ 80s      │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │
+│    6        │ 160s     │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░ │
+│    7        │ 300s*    │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░ │
+│    8+       │ 300s*    │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░ │
+│             │          │ (* = capped at max 5 minutes)                                    │
+└─────────────┴──────────┴─────────────────────────────────────────────────────────────────────┘
+
+Total time to reach 5-minute cap: ~6 failed attempts (approximately 475 seconds)

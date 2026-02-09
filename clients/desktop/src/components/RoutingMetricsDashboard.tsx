@@ -8,7 +8,6 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   createChart,
   type IChartApi,
-  type ISeriesApi,
   type LineData,
   type HistogramData,
   ColorType,
@@ -83,15 +82,13 @@ export const RoutingMetricsDashboard = ({ className = '' }: RoutingMetricsDashbo
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   // Chart refs
-  const pieChartRef = useRef<HTMLDivElement>(null);
   const timelineChartRef = useRef<HTMLDivElement>(null);
   const confidenceChartRef = useRef<HTMLDivElement>(null);
-  const pieChart = useRef<IChartApi | null>(null);
   const timelineChart = useRef<IChartApi | null>(null);
   const confidenceChart = useRef<IChartApi | null>(null);
 
   // API base URL
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:7999';
 
   // ============================================
   // Data Fetching
@@ -153,7 +150,7 @@ export const RoutingMetricsDashboard = ({ className = '' }: RoutingMetricsDashbo
   useEffect(() => {
     if (!accountId || !autoRefresh) return;
 
-    const ws = getWebSocketService('ws://localhost:8080/ws');
+    const ws = getWebSocketService('ws://localhost:7999/ws');
     ws.connect();
 
     const unsubscribe = ws.subscribe('routing_decisions', (data: RoutingDecision) => {
@@ -212,7 +209,7 @@ export const RoutingMetricsDashboard = ({ className = '' }: RoutingMetricsDashbo
       });
 
       // Add series for each book type
-      const abookSeries = timelineChart.current.addSeries({ type: 'Area',
+      const abookSeries = (timelineChart.current as any).addAreaSeries({
         topColor: 'rgba(34, 197, 94, 0.4)',
         bottomColor: 'rgba(34, 197, 94, 0.0)',
         lineColor: 'rgba(34, 197, 94, 1)',
@@ -220,7 +217,7 @@ export const RoutingMetricsDashboard = ({ className = '' }: RoutingMetricsDashbo
         title: 'A-Book',
       });
 
-      const bbookSeries = timelineChart.current.addSeries({ type: 'Area',
+      const bbookSeries = (timelineChart.current as any).addAreaSeries({
         topColor: 'rgba(59, 130, 246, 0.4)',
         bottomColor: 'rgba(59, 130, 246, 0.0)',
         lineColor: 'rgba(59, 130, 246, 1)',
@@ -228,7 +225,7 @@ export const RoutingMetricsDashboard = ({ className = '' }: RoutingMetricsDashbo
         title: 'B-Book',
       });
 
-      const cbookSeries = timelineChart.current.addSeries({ type: 'Area',
+      const cbookSeries = (timelineChart.current as any).addAreaSeries({
         topColor: 'rgba(168, 85, 247, 0.4)',
         bottomColor: 'rgba(168, 85, 247, 0.0)',
         lineColor: 'rgba(168, 85, 247, 1)',
@@ -279,7 +276,7 @@ export const RoutingMetricsDashboard = ({ className = '' }: RoutingMetricsDashbo
         },
       });
 
-      const histogramSeries = confidenceChart.current.addHistogramSeries({
+      const histogramSeries = (confidenceChart.current as any).addHistogramSeries({
         color: '#3b82f6',
         priceFormat: {
           type: 'volume',
@@ -423,11 +420,10 @@ export const RoutingMetricsDashboard = ({ className = '' }: RoutingMetricsDashbo
           {/* Auto Refresh Toggle */}
           <button
             onClick={() => setAutoRefresh(!autoRefresh)}
-            className={`p-2 rounded transition-colors ${
-              autoRefresh
-                ? 'bg-blue-600 text-white'
-                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
-            }`}
+            className={`p-2 rounded transition-colors ${autoRefresh
+              ? 'bg-blue-600 text-white'
+              : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+              }`}
             title={autoRefresh ? 'Auto-refresh enabled' : 'Auto-refresh disabled'}
           >
             <RefreshCw className={`w-4 h-4 ${autoRefresh ? 'animate-spin' : ''}`} />

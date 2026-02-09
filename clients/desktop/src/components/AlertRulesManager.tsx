@@ -33,7 +33,7 @@ export function AlertRulesManager() {
   const fetchRules = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:8080/api/alerts/rules');
+      const response = await fetch('http://localhost:7999/api/alerts/rules');
       if (response.ok) {
         const data = await response.json();
         setRules(data || []);
@@ -47,7 +47,7 @@ export function AlertRulesManager() {
 
   const createRule = async (rule: Omit<AlertRule, 'id'>) => {
     try {
-      const response = await fetch('http://localhost:8080/api/alerts/rules', {
+      const response = await fetch('http://localhost:7999/api/alerts/rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(rule),
@@ -64,7 +64,7 @@ export function AlertRulesManager() {
 
   const updateRule = async (id: string, updates: Partial<AlertRule>) => {
     try {
-      const response = await fetch(`http://localhost:8080/api/alerts/rules/${id}`, {
+      const response = await fetch(`http://localhost:7999/api/alerts/rules/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -83,7 +83,7 @@ export function AlertRulesManager() {
     if (!confirm('Delete this alert rule?')) return;
 
     try {
-      const response = await fetch(`http://localhost:8080/api/alerts/rules/${id}`, {
+      const response = await fetch(`http://localhost:7999/api/alerts/rules/${id}`, {
         method: 'DELETE',
       });
 
@@ -101,7 +101,7 @@ export function AlertRulesManager() {
 
   const testRule = async (id: string) => {
     try {
-      const response = await fetch(`http://localhost:8080/api/alerts/rules/${id}/test`, {
+      const response = await fetch(`http://localhost:7999/api/alerts/rules/${id}/test`, {
         method: 'POST',
       });
 

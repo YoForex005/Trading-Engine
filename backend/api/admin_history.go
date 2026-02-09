@@ -20,15 +20,15 @@ type AdminHistoryHandler struct {
 
 // StatsResponse contains statistics about historical data storage
 type StatsResponse struct {
-	TotalSymbols    int                      `json:"total_symbols"`
-	TotalTicks      int64                    `json:"total_ticks"`
-	TotalSizeBytes  int64                    `json:"total_size_bytes"`
-	TotalSizeMB     float64                  `json:"total_size_mb"`
-	OldestTick      time.Time                `json:"oldest_tick"`
-	NewestTick      time.Time                `json:"newest_tick"`
-	DaysOfData      int                      `json:"days_of_data"`
-	SymbolStats     []SymbolStats            `json:"symbol_stats"`
-	StorageHealth   string                   `json:"storage_health"`
+	TotalSymbols   int           `json:"total_symbols"`
+	TotalTicks     int64         `json:"total_ticks"`
+	TotalSizeBytes int64         `json:"total_size_bytes"`
+	TotalSizeMB    float64       `json:"total_size_mb"`
+	OldestTick     time.Time     `json:"oldest_tick"`
+	NewestTick     time.Time     `json:"newest_tick"`
+	DaysOfData     int           `json:"days_of_data"`
+	SymbolStats    []SymbolStats `json:"symbol_stats"`
+	StorageHealth  string        `json:"storage_health"`
 }
 
 // SymbolStats contains stats for a single symbol
@@ -43,10 +43,10 @@ type SymbolStats struct {
 
 // ImportDataRequest is the request for bulk data import
 type ImportDataRequest struct {
-	Source    string                       `json:"source"` // "csv", "json", "external"
-	Format    string                       `json:"format"` // "tick", "ohlc"
-	Data      map[string][]tickstore.Tick  `json:"data"`   // symbol -> ticks
-	Overwrite bool                         `json:"overwrite"`
+	Source    string                      `json:"source"` // "csv", "json", "external"
+	Format    string                      `json:"format"` // "tick", "ohlc"
+	Data      map[string][]tickstore.Tick `json:"data"`   // symbol -> ticks
+	Overwrite bool                        `json:"overwrite"`
 }
 
 // CleanupRequest is the request for cleaning up old data
@@ -71,14 +71,14 @@ type BackupRequest struct {
 
 // MonitoringResponse contains real-time monitoring data
 type MonitoringResponse struct {
-	ActiveSymbols    int                    `json:"active_symbols"`
-	TicksPerSecond   float64                `json:"ticks_per_second"`
-	AvgLatency       float64                `json:"avg_latency_ms"`
-	MemoryUsageMB    float64                `json:"memory_usage_mb"`
-	DiskUsageMB      float64                `json:"disk_usage_mb"`
-	LastTickReceived time.Time              `json:"last_tick_received"`
-	Health           string                 `json:"health"`
-	Alerts           []string               `json:"alerts"`
+	ActiveSymbols    int       `json:"active_symbols"`
+	TicksPerSecond   float64   `json:"ticks_per_second"`
+	AvgLatency       float64   `json:"avg_latency_ms"`
+	MemoryUsageMB    float64   `json:"memory_usage_mb"`
+	DiskUsageMB      float64   `json:"disk_usage_mb"`
+	LastTickReceived time.Time `json:"last_tick_received"`
+	Health           string    `json:"health"`
+	Alerts           []string  `json:"alerts"`
 }
 
 // NewAdminHistoryHandler creates a new admin history handler
@@ -412,20 +412,10 @@ func (h *AdminHistoryHandler) HandleGetMonitoring(w http.ResponseWriter, r *http
 }
 
 // Helper: setCORS sets CORS headers
-func (h *AdminHistoryHandler) setCORS(w http.ResponseWriter, r *http.Request) {
+func (h *AdminHistoryHandler) setCORS(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 }
 
 // Helper: isValidSymbol validates symbol format to prevent path traversal
-func isValidSymbol(symbol string) bool {
-	// Only allow alphanumeric characters (A-Z, 0-9)
-	// Prevents path traversal attacks like "../../../etc/passwd"
-	for _, c := range symbol {
-		if !((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
-			return false
-		}
-	}
-	return len(symbol) > 0 && len(symbol) <= 20
-}

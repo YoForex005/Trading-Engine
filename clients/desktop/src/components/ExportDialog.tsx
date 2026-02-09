@@ -11,7 +11,7 @@ interface ExportDialogProps {
 type ExportFormat = 'csv' | 'pdf' | 'json';
 type ExportDataType = 'trades' | 'positions' | 'performance';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:7999';
 
 export const ExportDialog = ({ accountId, onClose }: ExportDialogProps) => {
   const [format, setFormat] = useState<ExportFormat>('csv');
@@ -165,8 +165,8 @@ export const ExportDialog = ({ accountId, onClose }: ExportDialogProps) => {
       dataType === 'trades'
         ? `/api/trades?accountId=${accountId}`
         : dataType === 'positions'
-        ? `/api/positions?accountId=${accountId}`
-        : `/api/performance?accountId=${accountId}`;
+          ? `/api/positions?accountId=${accountId}`
+          : `/api/performance?accountId=${accountId}`;
 
     const response = await fetch(`${API_BASE_URL}${endpoint}`);
 
@@ -232,11 +232,10 @@ export const ExportDialog = ({ accountId, onClose }: ExportDialogProps) => {
                 <button
                   key={type}
                   onClick={() => setDataType(type)}
-                  className={`p-2 rounded border text-sm font-medium transition-colors ${
-                    dataType === type
+                  className={`p-2 rounded border text-sm font-medium transition-colors ${dataType === type
                       ? 'bg-emerald-600 border-emerald-500 text-white'
                       : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
-                  }`}
+                    }`}
                 >
                   {type.charAt(0).toUpperCase() + type.slice(1)}
                 </button>
@@ -252,33 +251,30 @@ export const ExportDialog = ({ accountId, onClose }: ExportDialogProps) => {
             <div className="grid grid-cols-3 gap-2">
               <button
                 onClick={() => setFormat('csv')}
-                className={`flex items-center justify-center gap-2 p-3 rounded border transition-colors ${
-                  format === 'csv'
+                className={`flex items-center justify-center gap-2 p-3 rounded border transition-colors ${format === 'csv'
                     ? 'bg-blue-600 border-blue-500 text-white'
                     : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
-                }`}
+                  }`}
               >
                 <FileSpreadsheet className="w-4 h-4" />
                 <span className="text-sm font-medium">CSV</span>
               </button>
               <button
                 onClick={() => setFormat('pdf')}
-                className={`flex items-center justify-center gap-2 p-3 rounded border transition-colors ${
-                  format === 'pdf'
+                className={`flex items-center justify-center gap-2 p-3 rounded border transition-colors ${format === 'pdf'
                     ? 'bg-blue-600 border-blue-500 text-white'
                     : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
-                }`}
+                  }`}
               >
                 <FileText className="w-4 h-4" />
                 <span className="text-sm font-medium">PDF</span>
               </button>
               <button
                 onClick={() => setFormat('json')}
-                className={`flex items-center justify-center gap-2 p-3 rounded border transition-colors ${
-                  format === 'json'
+                className={`flex items-center justify-center gap-2 p-3 rounded border transition-colors ${format === 'json'
                     ? 'bg-blue-600 border-blue-500 text-white'
                     : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
-                }`}
+                  }`}
               >
                 <FileJson className="w-4 h-4" />
                 <span className="text-sm font-medium">JSON</span>

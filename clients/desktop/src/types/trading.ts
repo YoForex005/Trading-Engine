@@ -39,8 +39,8 @@ export type MarketWatchItem = {
   change: number;
   changePercent: number;
   volume: number;
-  high24h: number;
-  low24h: number;
+  high24h?: number;
+  low24h?: number;
   timestamp: number;
   direction?: 'up' | 'down' | 'neutral';
 };
@@ -403,3 +403,90 @@ export type KeyboardShortcut = {
   action: string;
   description: string;
 };
+
+// Workspace Types
+export type WorkspaceConfig = {
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  layout: PanelLayout;
+  charts: ChartConfig[];
+  watchlists: string[];
+  settings: Record<string, unknown>;
+};
+
+export type ChartConfig = {
+  id: string;
+  symbol: string;
+  timeframe: string;
+  indicators: TechnicalIndicator[];
+  drawings: Drawing[];
+  settings: ChartSettings;
+};
+
+// Print Types
+export type PrintOrientation = 'portrait' | 'landscape';
+export type PrintPaperSize = 'A4' | 'Letter' | 'Legal' | 'A3';
+export type PrintColorMode = 'color' | 'grayscale' | 'black-white';
+export type PrintQuality = 'draft' | 'normal' | 'high';
+
+export type PrintConfiguration = {
+  orientation: PrintOrientation;
+  paperSize: PrintPaperSize;
+  margins: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
+  includeHeader: boolean;
+  includeFooter: boolean;
+  includeTimestamp: boolean;
+  colorMode: PrintColorMode;
+  quality: PrintQuality;
+};
+
+// Export Types
+export type ExportFormat = 'PNG' | 'JPG' | 'SVG' | 'PDF';
+export type ExportResolution = '1x' | '2x' | '3x' | '4x';
+
+export type ExportOptions = {
+  format: ExportFormat;
+  resolution: ExportResolution;
+  quality: number;
+  includeWatermark: boolean;
+  backgroundColor: string;
+  transparentBackground: boolean;
+};
+
+// Dialog Types
+export type DialogType =
+  | 'SAVE_WORKSPACE'
+  | 'PRINT_SETUP'
+  | 'PRINT_PREVIEW'
+  | 'EXIT_CONFIRM'
+  | 'EXPORT_CHART'
+  | 'SETTINGS';
+
+export type DialogState = {
+  type: DialogType;
+  isOpen: boolean;
+  data?: Record<string, unknown>;
+};
+
+// Window/Electron Types (for Electron integration)
+declare global {
+  interface Window {
+    electron?: {
+      shell: {
+        openPath: (path: string) => Promise<string>;
+        openExternal: (url: string) => Promise<void>;
+      };
+      ipcRenderer: {
+        send: (channel: string, data?: unknown) => void;
+        on: (channel: string, func: (...args: unknown[]) => void) => void;
+        removeListener: (channel: string, func: (...args: unknown[]) => void) => void;
+      };
+    };
+  }
+}

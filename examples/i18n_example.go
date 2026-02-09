@@ -53,7 +53,6 @@ func main() {
 	fmt.Printf("US Time: %s\n", formatterUS.FormatTime(now))
 	fmt.Printf("ES Time: %s\n", formatterES.FormatTime(now))
 	fmt.Printf("DateTime: %s\n", formatterUS.FormatDateTime(now))
-	fmt.Printf("Long Date: %s\n", formatterUS.FormatLongDate(now))
 
 	pastTime := now.Add(-2 * time.Hour)
 	fmt.Printf("Relative: %s\n", formatterUS.FormatRelativeTime(pastTime))

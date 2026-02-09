@@ -17,6 +17,8 @@ export {
 export { chartManager } from './chartManager';
 export { drawingManager } from './drawingManager';
 export { indicatorManager } from './indicatorManager';
+export { ChartExporter } from './chartExporter';
+export type { ChartExportOptions, ChartMetadata } from './chartExporter';
 
 // Candle Engine
 export { CandleEngine, createCandleEngine } from './candleEngine';

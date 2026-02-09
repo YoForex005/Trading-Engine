@@ -57,7 +57,7 @@ export const RoutingRulesPanel = () => {
   const fetchRules = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8080/api/routing/rules');
+      const response = await fetch('http://localhost:7999/api/routing/rules');
       if (response.ok) {
         const data = await response.json();
         setRules(Array.isArray(data) ? data : []);
@@ -72,7 +72,7 @@ export const RoutingRulesPanel = () => {
 
   const fetchLiquidityProviders = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/routing/liquidity-providers');
+      const response = await fetch('http://localhost:7999/api/routing/liquidity-providers');
       if (response.ok) {
         const data = await response.json();
         setLiquidityProviders(Array.isArray(data) ? data : []);
@@ -86,8 +86,8 @@ export const RoutingRulesPanel = () => {
     try {
       const method = rule.id ? 'PUT' : 'POST';
       const endpoint = rule.id
-        ? `http://localhost:8080/api/routing/rules/${rule.id}`
-        : 'http://localhost:8080/api/routing/rules';
+        ? `http://localhost:7999/api/routing/rules/${rule.id}`
+        : 'http://localhost:7999/api/routing/rules';
 
       const response = await fetch(endpoint, {
         method,
@@ -113,7 +113,7 @@ export const RoutingRulesPanel = () => {
     if (!confirm('Are you sure you want to delete this rule?')) return;
 
     try {
-      const response = await fetch(`http://localhost:8080/api/routing/rules/${id}`, {
+      const response = await fetch(`http://localhost:7999/api/routing/rules/${id}`, {
         method: 'DELETE',
       });
 
@@ -130,7 +130,7 @@ export const RoutingRulesPanel = () => {
 
   const reorderRules = async (reorderedRules: RoutingRule[]) => {
     try {
-      const response = await fetch('http://localhost:8080/api/routing/rules/reorder', {
+      const response = await fetch('http://localhost:7999/api/routing/rules/reorder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -197,11 +197,10 @@ export const RoutingRulesPanel = () => {
       {/* Message Toast */}
       {message && (
         <div
-          className={`mx-4 mt-4 p-3 rounded border flex items-center gap-2 ${
-            message.type === 'success'
+          className={`mx-4 mt-4 p-3 rounded border flex items-center gap-2 ${message.type === 'success'
               ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
               : 'bg-red-500/10 border-red-500/20 text-red-400'
-          }`}
+            }`}
         >
           {message.type === 'success' ? (
             <CheckCircle className="w-4 h-4" />
@@ -288,11 +287,10 @@ const RuleRow = ({
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      className={`p-3 rounded-lg border transition-all ${
-        isDragging
+      className={`p-3 rounded-lg border transition-all ${isDragging
           ? 'bg-emerald-500/10 border-emerald-500/30 opacity-50'
           : 'bg-zinc-800/50 border-zinc-700 hover:bg-zinc-800'
-      }`}
+        }`}
     >
       <div className="flex items-center gap-3">
         {/* Drag Handle */}
@@ -315,11 +313,10 @@ const RuleRow = ({
           <div className="flex items-center gap-2">
             <h3 className="font-medium text-white">{rule.name}</h3>
             <span
-              className={`px-2 py-0.5 rounded text-xs font-medium ${
-                rule.enabled
+              className={`px-2 py-0.5 rounded text-xs font-medium ${rule.enabled
                   ? 'bg-emerald-500/20 text-emerald-400'
                   : 'bg-zinc-700 text-zinc-400'
-              }`}
+                }`}
             >
               {rule.enabled ? 'Enabled' : 'Disabled'}
             </span>

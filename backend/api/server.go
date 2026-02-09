@@ -29,6 +29,7 @@ type Server struct {
 	riskEngine      *risk.Engine
 	smartRouter     *router.SmartRouter
 	fixGateway      *fix.FIXGateway
+	connManager     *fix.ConnectionManager // FIX connection manager for auto-reconnect
 	hub             *ws.Hub
 	tickStore       tickstore.TickStorageService // Interface for both TickStore and OptimizedTickStore
 	orderService    *orders.OrderService
@@ -45,6 +46,10 @@ func NewServer(authService *auth.Service, bbookAPI *handlers.APIHandler, lpMgr *
 	fixGateway := fix.NewFIXGateway()
 	riskEngine := risk.NewEngine()
 
+	// Initialize connection manager for automatic reconnection and health monitoring
+	connManager := fix.NewConnectionManager(fixGateway)
+	log.Println("[FIX] Connection manager initialized")
+
 	// Initialize A-Book execution engine
 	abookEngine := abook.NewExecutionEngine(fixGateway, lpMgr, riskEngine)
 	abookHandler := handlers.NewABookHandler(abookEngine)
@@ -56,6 +61,7 @@ func NewServer(authService *auth.Service, bbookAPI *handlers.APIHandler, lpMgr *
 		riskEngine:      riskEngine,
 		smartRouter:     router.NewSmartRouter(),
 		fixGateway:      fixGateway,
+		connManager:     connManager,
 		orderService:    orders.NewOrderService(),
 		positionManager: orders.NewPositionManager(true), // Hedging mode
 		trailingService: orders.NewTrailingStopService(),
@@ -96,6 +102,11 @@ func (s *Server) GetRiskCalculator() *risk.RiskCalculator {
 // GetFIXGateway returns the FIX gateway for market data access
 func (s *Server) GetFIXGateway() *fix.FIXGateway {
 	return s.fixGateway
+}
+
+// GetConnectionManager returns the FIX connection manager
+func (s *Server) GetConnectionManager() *fix.ConnectionManager {
+	return s.connManager
 }
 
 func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {

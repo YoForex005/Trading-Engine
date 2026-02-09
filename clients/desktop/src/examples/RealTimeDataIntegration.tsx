@@ -10,7 +10,7 @@ import { getCacheManager } from '../services/cache-manager';
 import { useWebWorker } from '../hooks/useWebWorker';
 import { getPerformanceMonitor } from '../services/performance-monitor';
 import { getErrorHandler, setupGlobalErrorHandler } from '../services/error-handler';
-import { useMemoizedSelector, useThrottledSelector } from '../hooks/useOptimizedSelector';
+
 
 // ============================================
 // Real-Time Price Display Component
@@ -128,7 +128,7 @@ export const RealTimeDataIntegration: React.FC = () => {
         console.log('[App] Cache initialized');
 
         // Initialize WebSocket
-        const ws = getEnhancedWebSocketService('ws://localhost:8080/ws');
+        const ws = getEnhancedWebSocketService('ws://localhost:7999/ws');
 
         // Listen to connection state
         ws.onStateChange((state) => {

@@ -1,0 +1,214 @@
+================================================================================
+TRADING ENGINE - REAL DATA SOURCES QUICK REFERENCE
+================================================================================
+
+STATUS: PRODUCTION-READY (100% Real Data Only)
+Last Updated: 2026-02-02
+
+================================================================================
+1. ACTIVE REAL DATA SOURCES
+================================================================================
+
+PRIMARY: FIX Protocol (YOFX)
+├─ Host: 23.106.238.138
+├─ Port: 12336
+├─ Proxy: 81.29.145.69:49527 (required - whitelisted IP)
+├─ Sessions: YOFX1 (trading) + YOFX2 (market data)
+├─ Symbols: 30+ forex pairs + metals + crypto
+├─ Status: ACTIVE (3.4M+ FIX messages in store)
+└─ File: backend/fix/gateway.go
+
+SECONDARY: OANDA REST API
+├─ Provider: Open & Manage Trade (fxpractice.oanda.com)
+├─ Auth: API Key + Account ID
+├─ Symbols: 50+ forex pairs
+├─ Status: READY (requires credentials)
+└─ File: backend/lpmanager/adapters/oanda.go
+
+TERTIARY: Binance WebSocket
+├─ Endpoint: wss://stream.binance.com:9443/stream
+├─ Symbols: 1000+ trading pairs (crypto)
+├─ Status: READY (public, no auth needed)
+└─ File: backend/lpmanager/adapters/binance.go
+
+================================================================================
+2. REMOVED SIMULATION CODE
+================================================================================
+
+WHAT WAS REMOVED:
+✗ Hybrid Market Data Engine (fallback simulation)
+✗ Random price generators (200ms ticks with random walk)
+✗ Hardcoded initial prices (27 currency pairs)
+✗ 'SIM' LP source data generation
+✗ 5-second staleness timeout (triggering fallback)
+
+WHEN REMOVED:
+• Commit 50a92e5 (2026-01-30) - Final cleanup
+• Backup file: backend/removed_simulation_backup.go.txt
+
+STATUS: COMPLETELY REMOVED from production binary
+
+================================================================================
+3. PRODUCTION SAFEGUARDS
+================================================================================
+
+VALIDATION ON STARTUP:
+✓ Environment must be "production"
+✓ ALLOW_SIMULATION must be unset or "false"
+✓ SIMULATION_MODE must not be set
+✓ At least 1 real LP configured (YOFX, OANDA, or Binance)
+✓ Database must have NO simulation ticks (lp_source='SIM')
+✓ JWT_SECRET configured (32+ chars)
+✓ Admin credentials configured
+
+ACTION IF ANY CHECK FAILS:
+→ Server WILL NOT START
+→ Error message lists critical failures
+
+FILE: backend/config/validate_production.go (346 lines)
+
+API ENDPOINTS FOR VERIFICATION:
+• GET  /api/admin/health/data-sources           → Check current data sources
+• POST /api/admin/cleanup/simulation-data       → Tag simulation ticks (dry-run safe)
+• GET  /api/admin/reports/simulation            → Detailed breakdown
+
+FILE: backend/admin/data_source_verification.go (409 lines)
+
+DATABASE SAFEGUARDS:
+• Column: ticks.lp_source (identifies source)
+• Column: ticks.flags (bit 0 marks simulation for audit)
+• Check: lp_source ∉ {'SIM', 'SIMULATION'}
+• Script: scripts/db/check-simulation-data.sql (detection)
+• Script: scripts/db/tag-simulation-data.sql (non-destructive marking)
+
+================================================================================
+4. CONFIGURATION REQUIREMENTS
+================================================================================
+
+FOR FIX PROTOCOL (YOFX):
+backend/fix/config/.env:
+  YOFX_HOST=23.106.238.138
+  YOFX_PORT=12336
+  YOFX_SENDER_COMP_ID=YOFX1
+  YOFX_TARGET_COMP_ID=YOFX
+  YOFX_USERNAME=your_username
+  YOFX_PASSWORD=your_password
+  YOFX_TRADING_ACCOUNT=50153
+  YOFX_USE_PROXY=true
+  YOFX_PROXY_HOST=81.29.145.69
+  YOFX_PROXY_PORT=49527
+  YOFX_PROXY_USERNAME=your_proxy_user
+  YOFX_PROXY_PASSWORD=your_proxy_pass
+
+FOR OANDA:
+backend/.env:
+  OANDA_API_KEY=your_oanda_api_key
+  OANDA_ACCOUNT_ID=your_account_id
+
+FOR BINANCE:
+  (Public API - no credentials needed)
+
+FOR PRODUCTION:
+backend/.env:
+  ENVIRONMENT=production           (REQUIRED)
+  PRICE_FEED_LP=OANDA             (or YOFX/BINANCE)
+  JWT_SECRET=<32+ char string>    (REQUIRED)
+  MASTER_ENCRYPTION_KEY=<base64>  (REQUIRED)
+  DB_HOST, DB_PORT, DB_NAME, etc. (REQUIRED)
+  ALLOW_SIMULATION=false          (or unset) - CRITICAL
+  (SIMULATION_MODE must be unset)
+
+================================================================================
+5. DATA FLOW
+================================================================================
+
+FIX PROTOCOL FLOW:
+  YOFX Server → Proxy Tunnel → Trading Engine → WebSocket Hub → Client Terminal
+
+REST API FLOW:
+  OANDA API → OANDAAdapter → WebSocket Hub → Client Terminal
+
+WEBSOCKET FLOW:
+  Binance WSS → BinanceAdapter → WebSocket Hub → Client Terminal
+
+STORAGE:
+  All real ticks → ticks table (PostgreSQL)
+  Sequence numbers → fixstore/{YOFX1|YOFX2}.seqnums
+  FIX messages → fixstore/{YOFX1|YOFX2}.msgs
+
+================================================================================
+6. SEARCH RESULTS
+================================================================================
+
+MOCK DATA PATTERNS: NONE FOUND IN PRODUCTION
+
+Searched for:
+✓ MockData          → 0 results
+✓ GeneratePrice     → 0 results (production)
+✓ SimulatedPrice    → 0 results (production)
+✓ FakeQuote         → 0 results (production)
+✓ TestQuote         → Found in tests only (non-production)
+✓ mock/dummy/sim    → 1 backup file only
+
+REAL DATA PATTERNS: ALL FOUND AND ACTIVE
+
+Confirmed:
+✓ OANDA              → 5 production files
+✓ Binance            → 3 production files
+✓ YOFX               → 8 production files
+✓ FIX Protocol       → 15+ production files
+✓ RealData           → 2 production files
+✓ MarketData         → 30+ production files
+
+================================================================================
+7. VERIFICATION COMMANDS
+================================================================================
+
+DEVELOPMENT:
+  # Check if simulation data exists
+  psql trading_engine -f scripts/db/check-simulation-data.sql
+
+  # Dry-run: see what would be tagged
+  curl -X POST http://localhost:7999/api/admin/cleanup/simulation-data \
+    -H "Content-Type: application/json" \
+    -d '{"dryRun":true}'
+
+PRODUCTION:
+  # Check current data sources (should show 0 simulation ticks)
+  curl https://your-api.com/api/admin/health/data-sources
+
+  # Server logs should show:
+  "[PRODUCTION] ✓ Production validation passed - environment is production-safe"
+
+  # Database check:
+  SELECT COUNT(*) FROM ticks WHERE lp_source IN ('SIM', 'SIMULATION');
+  # Result should be: 0 (zero)
+
+================================================================================
+8. SUMMARY TABLE
+================================================================================
+
+Feature                    | Status        | Evidence
+-------------------------- | ------------- | -----------------------------------------------
+Simulation code removed     | ✅ REMOVED    | removed_simulation_backup.go.txt
+Real FIX connections        | ✅ ACTIVE     | YOFX1.msgs (3.4M), YOFX2.msgs (524K)
+Real REST APIs              | ✅ ACTIVE     | oanda.go, binance.go implementations
+Production validation       | ✅ ACTIVE     | validate_production.go (7 checks)
+DB safeguards               | ✅ ACTIVE     | data_source_verification.go
+Admin detection API         | ✅ ACTIVE     | /api/admin/health/data-sources endpoint
+Env variable checks         | ✅ ACTIVE     | ALLOW_SIMULATION & SIMULATION_MODE blocked
+Database cleanup scripts    | ✅ READY      | check-simulation-data.sql, tag-simulation-data.sql
+No hardcoded test prices    | ✅ VERIFIED   | 0 const price declarations in production
+No random generators        | ✅ VERIFIED   | 0 price generators in production paths
+Audit trail for SIM data    | ✅ READY      | flags column supports bit 0 marking
+
+================================================================================
+PRODUCTION READINESS: ✅ VERIFIED SAFE
+================================================================================
+
+The Trading Engine is configured for 100% real data only.
+All simulation code has been removed and safeguards are in place.
+
+Key assurance: If deployment is attempted without proper real LP configuration,
+the server will NOT START and will report critical errors.
+

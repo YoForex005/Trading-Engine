@@ -32,7 +32,7 @@ export function FloatingAccountPanel({ initialPosition = { x: 20, y: 100 } }: Fl
         const fetchAccount = async () => {
             try {
                 // Use RTX B-Book API for internal balance (NOT OANDA)
-                const res = await fetch('http://localhost:8080/api/account/summary?accountId=1');
+                const res = await fetch('http://localhost:7999/api/account/summary?accountId=1');
                 if (res.ok) {
                     const data = await res.json();
                     setAccount(data);

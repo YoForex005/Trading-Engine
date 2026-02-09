@@ -14,10 +14,11 @@ import { X } from 'lucide-react';
 import { chartManager } from '../services/chartManager';
 import { drawingManager } from '../services/drawingManager';
 import { indicatorManager } from '../services/indicatorManager';
-import { useCurrentTick } from '../store/useMarketDataStore';
+import { useAppStore } from '../store/useAppStore';
+import { DrawingContextMenu } from './DrawingContextMenu';
 
 export type ChartType = 'candlestick' | 'heikinAshi' | 'bar' | 'line' | 'area';
-export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
+export type Timeframe = 'M1' | 'M5' | 'M15' | 'M30' | 'H1' | 'H4' | 'D1' | 'W1' | 'MN';
 
 interface ChartProps {
     symbol: string;
@@ -49,9 +50,9 @@ function getAllCandles(historicalCandles: OHLC[], formingCandle: OHLC | null): O
 
 export function TradingChart({
     symbol,
-    currentPrice,
+    currentPrice: _, // Unused but kept for prop compatibility
     chartType = 'candlestick',
-    timeframe = '1m',
+    timeframe = 'M1',
     positions = [],
     onClosePosition,
     onModifyPosition
@@ -59,9 +60,10 @@ export function TradingChart({
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<any> | null>(null);
-    const volumeSeriesRef = useRef<ISeriesApi<'Histogram'>>();
+    const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
     const bidLineRef = useRef<any>(null);
-    const askLineRef = useRef<any>(null);
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const isDisposedRef = useRef(false); // Track if chart is disposed to prevent operations on disposed chart
 
     // Separate state: historical loaded once, forming updates from ticks
     const historicalCandlesRef = useRef<OHLC[]>([]); // Loaded from API, never modified
@@ -72,8 +74,14 @@ export function TradingChart({
     // State for overlays
     const [overlayPositions, setOverlayPositions] = useState<any[]>([]);
 
-    // Get real-time tick data from Zustand store
-    const currentTick = useCurrentTick(symbol);
+    // Get real-time tick data from AppStore (Fast Path)
+    const currentTick = useAppStore(state => state.ticks[symbol]);
+
+    // Legend Data State
+    const [legendData, setLegendData] = useState<Partial<OHLC>>({});
+
+    // Active tool state for cursor management
+    const [activeDrawingType, setActiveDrawingType] = useState<string | null>(null);
 
     // Initialize chart ONCE
     useEffect(() => {
@@ -82,30 +90,46 @@ export function TradingChart({
         try {
             const chart = createChart(chartContainerRef.current, {
                 layout: {
-                    background: { type: ColorType.Solid, color: 'transparent' },
-                    textColor: '#71717a',
+                    background: { type: ColorType.Solid, color: '#000000' }, // Black background
+                    textColor: '#d1d4dc',
                     attributionLogo: false,
                 },
                 grid: {
-                    vertLines: { color: 'rgba(70, 70, 70, 0.3)', style: 2 }, // 2 = dotted
-                    horzLines: { color: 'rgba(70, 70, 70, 0.3)', style: 2 }, // 2 = dotted
+                    vertLines: { color: '#2b2b2b', style: 2 }, // Dotted Grid
+                    horzLines: { color: '#2b2b2b', style: 2 }, // Dotted Grid
                 },
                 crosshair: {
                     mode: CrosshairMode.Normal,
-                    vertLine: { color: '#525252', width: 1, style: 2, labelBackgroundColor: '#18181b' },
-                    horzLine: { color: '#525252', width: 1, style: 2, labelBackgroundColor: '#18181b' },
+                    vertLine: {
+                        color: '#758696',
+                        width: 1,
+                        style: 2,
+                        labelBackgroundColor: '#131722',
+                        labelVisible: true,
+                    },
+                    horzLine: {
+                        color: '#758696',
+                        width: 1,
+                        style: 2,
+                        labelBackgroundColor: '#131722',
+                        labelVisible: true,
+                    },
                 },
                 rightPriceScale: {
-                    borderColor: '#27272a',
+                    borderColor: '#2b2b2b',
                     scaleMargins: { top: 0.1, bottom: 0.2 },
+                    ticksVisible: true,
+                    borderVisible: true,
                 },
                 timeScale: {
-                    borderColor: '#27272a',
+                    borderColor: '#2b2b2b',
                     timeVisible: true,
                     secondsVisible: false,
+                    ticksVisible: true,
+                    borderVisible: true,
                 },
                 handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-                handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+                handleScale: { axisPressedMouseMove: true, mouseWheel: false, pinch: true },
             });
 
             chartRef.current = chart;
@@ -113,6 +137,75 @@ export function TradingChart({
             // Set chart reference in managers
             chartManager.setChart(chart);
             indicatorManager.setChart(chart);
+
+            // Subscribe to crosshair move for Legend
+            chart.subscribeCrosshairMove((param) => {
+                if (param.time && seriesRef.current) {
+                    const data = param.seriesData.get(seriesRef.current) as OHLC;
+                    if (data) {
+                        setLegendData({
+                            open: data.open,
+                            high: data.high,
+                            low: data.low,
+                            close: data.close,
+                            volume: (data as any).value || (data as any).volume
+                        });
+                    }
+                } else {
+                    const last = historicalCandlesRef.current.length > 0
+                        ? historicalCandlesRef.current[historicalCandlesRef.current.length - 1]
+                        : formingCandleRef.current;
+
+                    if (last) {
+                        setLegendData({
+                            open: last.open,
+                            high: last.high,
+                            low: last.low,
+                            close: last.close,
+                            volume: last.volume
+                        });
+                    }
+                }
+            });
+
+            // Subscribe to clicks for drawing tools
+            chart.subscribeClick((param) => {
+                const activeDrawing = drawingManager.getActiveDrawing();
+
+                if (!param.time || !param.point || !seriesRef.current) {
+                    if (!activeDrawing) {
+                        drawingManager.unselectAll();
+                    }
+                    return;
+                }
+
+                if (activeDrawing) {
+                    const price = seriesRef.current.coordinateToPrice(param.point.y);
+                    if (price !== null) {
+                        if (activeDrawing.type === 'text') {
+                            const text = prompt('Enter annotation text:');
+                            if (text) {
+                                drawingManager.updateActiveDrawing({ text });
+                                drawingManager.addPoint(param.time as number, price);
+                            } else {
+                                drawingManager.cancelDrawing();
+                            }
+                        } else {
+                            drawingManager.addPoint(param.time as number, price);
+                        }
+                    }
+                } else {
+                    // If no active drawing, maybe we clicked to unselect?
+                    // The drawing manager handles clicks on drawings via DOM events,
+                    // but we can unselect if we clicked the background.
+                    // We'll use a timeout to let the drawing click handle it first if any.
+                    setTimeout(() => {
+                        // If no drawing was selected (handled by DOM), unselect all
+                    }, 50);
+                    // For now, simpler:
+                    drawingManager.unselectAll();
+                }
+            });
 
             const handleResize = () => {
                 if (chartContainerRef.current && chartRef.current) {
@@ -123,12 +216,38 @@ export function TradingChart({
                 }
             };
 
-            window.addEventListener('resize', handleResize);
+            const resizeObserver = new ResizeObserver(() => handleResize());
+            resizeObserver.observe(chartContainerRef.current);
+
+            // Initial resize
             handleResize();
             setIsChartReady(true);
 
+            // Get canvas reference for export functionality
+            // Store the canvas ref globally for SavePictureDialog
+            const findCanvas = () => {
+                const canvas = chartContainerRef.current?.querySelector('canvas');
+                if (canvas) {
+                    canvasRef.current = canvas;
+                    // Store globally for access from FileMenu
+                    (window as any).__activeChartCanvas = canvas;
+                    (window as any).__activeChartContainer = chartContainerRef.current;
+                }
+            };
+
+            // Try immediately and then with a delay (canvas may render async)
+            findCanvas();
+            const canvasInterval = setInterval(findCanvas, 100);
+            setTimeout(() => clearInterval(canvasInterval), 2000);
+
+            // Reset disposed flag on mount
+            isDisposedRef.current = false;
+
             return () => {
-                window.removeEventListener('resize', handleResize);
+                // CRITICAL: Set disposed flag FIRST to prevent any pending operations
+                isDisposedRef.current = true;
+
+                resizeObserver.disconnect();
                 setIsChartReady(false);
 
                 // Clear manager references
@@ -136,9 +255,26 @@ export function TradingChart({
                 indicatorManager.setChart(null);
                 drawingManager.setChart(null, null);
 
-                chart.remove();
+                // Clear global refs
+                if ((window as any).__activeChartCanvas === canvasRef.current) {
+                    (window as any).__activeChartCanvas = null;
+                }
+                if ((window as any).__activeChartContainer === chartContainerRef.current) {
+                    (window as any).__activeChartContainer = null;
+                }
+
+                clearInterval(canvasInterval);
+
+                // Remove chart last (after all cleanup)
+                try {
+                    chart.remove();
+                } catch (e) {
+                    // Ignore - chart may already be disposed
+                }
+
                 chartRef.current = null;
                 seriesRef.current = null;
+                canvasRef.current = null;
             };
         } catch (err) {
             console.error('Failed to initialize chart:', err);
@@ -151,6 +287,13 @@ export function TradingChart({
 
         try {
             if (seriesRef.current) {
+                // SCORCHED EARTH: Force-remove price lines BEFORE series removal to prevent leaks
+                activePriceLines.current.forEach(line => {
+                    try { seriesRef.current?.removePriceLine(line); } catch (e) { }
+                });
+                activePriceLines.current.clear();
+                bidLineRef.current = null;
+
                 try { chartRef.current.removeSeries(seriesRef.current); } catch (e) { }
                 seriesRef.current = null;
             }
@@ -158,32 +301,48 @@ export function TradingChart({
             let series: any;
             const chart = chartRef.current;
 
+            const upColor = '#26a69a'; // Teal/Green (Classic)
+            const downColor = '#ef5350'; // Red (Classic)
+
             switch (chartType) {
                 case 'candlestick':
                 case 'heikinAshi':
                     series = chart.addSeries(CandlestickSeries, {
-                        upColor: '#14b8a6', downColor: '#ef4444',
-                        borderUpColor: '#14b8a6', borderDownColor: '#ef4444',
-                        wickUpColor: '#14b8a6', wickDownColor: '#ef4444',
+                        upColor: '#000000', // Black body (Hollow look)
+                        downColor: '#FFFFFF', // White body (Solid)
+                        borderUpColor: '#00FF00', // Green border
+                        borderDownColor: '#FFFFFF', // White border
+                        wickUpColor: '#00FF00', // Green wick
+                        wickDownColor: '#FFFFFF', // White wick
+                        priceFormat: { type: 'price', precision: 5, minMove: 0.00001 },
+                        lastValueVisible: false, priceLineVisible: false
                     });
                     break;
                 case 'bar':
-                    series = chart.addSeries(BarSeries, { upColor: '#14b8a6', downColor: '#ef4444' });
+                    series = chart.addSeries(BarSeries, {
+                        upColor: upColor, downColor: downColor,
+                        lastValueVisible: false, priceLineVisible: false
+                    });
                     break;
                 case 'line':
-                    series = chart.addSeries(LineSeries, { color: '#10b981', lineWidth: 2 });
+                    series = chart.addSeries(LineSeries, {
+                        color: upColor, lineWidth: 2,
+                        lastValueVisible: false, priceLineVisible: false
+                    });
                     break;
                 case 'area':
                     series = chart.addSeries(AreaSeries, {
-                        lineColor: '#10b981', topColor: 'rgba(16, 185, 129, 0.4)',
-                        bottomColor: 'rgba(16, 185, 129, 0.0)', lineWidth: 2,
+                        lineColor: upColor, topColor: 'rgba(38, 166, 154, 0.4)',
+                        bottomColor: 'rgba(38, 166, 154, 0.0)', lineWidth: 2,
+                        lastValueVisible: false, priceLineVisible: false
                     });
                     break;
                 default:
                     series = chart.addSeries(CandlestickSeries, {
-                        upColor: '#14b8a6', downColor: '#ef4444',
-                        borderUpColor: '#14b8a6', borderDownColor: '#ef4444',
-                        wickUpColor: '#14b8a6', wickDownColor: '#ef4444',
+                        upColor: upColor, downColor: downColor,
+                        borderUpColor: upColor, borderDownColor: downColor,
+                        wickUpColor: upColor, wickDownColor: downColor,
+                        lastValueVisible: false, priceLineVisible: false
                     });
             }
 
@@ -194,20 +353,24 @@ export function TradingChart({
                 try { chartRef.current.removeSeries(volumeSeriesRef.current); } catch (e) { }
             }
             const volumeSeries = chart.addSeries(HistogramSeries, {
-                color: '#06b6d4', // Cyan
+                color: '#00FF00', // Match bull candle color
                 priceFormat: {
                     type: 'volume',
                 },
-                priceScaleId: '', // Use default scale
+                priceScaleId: '', // Overlay mode
+                lastValueVisible: false, // Fix: Hide volume labels on Y-axis
+                priceLineVisible: false, // Fix: Hide volume horizontal lines
+            });
+            volumeSeries.priceScale().applyOptions({
                 scaleMargins: {
-                    top: 0.8, // Position at bottom 20%
+                    top: 0.8,
                     bottom: 0,
                 },
             });
             volumeSeriesRef.current = volumeSeries;
 
             // Update drawing manager with new series
-            drawingManager.setChart(chartRef.current, series);
+            drawingManager.setChart(chartRef.current, series, symbol);
 
             // Get combined candles (historical + forming)
             const allCandles = getAllCandles(historicalCandlesRef.current, formingCandleRef.current);
@@ -220,13 +383,23 @@ export function TradingChart({
                     const volumeData = allCandles.map(bar => ({
                         time: bar.time,
                         value: bar.volume || 0,
-                        color: bar.close >= bar.open ? 'rgba(6, 182, 212, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+                        color: bar.close >= bar.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
                     }));
                     volumeSeriesRef.current.setData(volumeData);
                 }
 
                 // Update indicator manager with combined OHLC data
                 indicatorManager.setOHLCData(allCandles);
+
+                // Init Legend with last candle
+                const last = allCandles[allCandles.length - 1];
+                setLegendData({
+                    open: last.open,
+                    high: last.high,
+                    low: last.low,
+                    close: last.close,
+                    volume: last.volume
+                });
             }
         } catch (err) {
             console.error('Error creating chart series:', err);
@@ -237,66 +410,105 @@ export function TradingChart({
     useEffect(() => {
         const fetchHistory = async () => {
             if (!seriesRef.current) return;
+            console.log('[TradingChart] Fetching history for:', symbol, timeframe);
 
             try {
-                // FIXED: Correct port (7999) and endpoint (/api/history/ticks)
-                // Backend server runs on port 7999 (see backend/cmd/server/main.go:1915)
-                // Historical tick data API at /api/history/ticks (see backend/api/history.go)
-                const dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-                const res = await fetch(`http://localhost:7999/api/history/ticks?symbol=${symbol}&date=${dateStr}&limit=5000`);
+                // Fetch pre-aggregated OHLC candles (lightweight)
+                // Use limit=1500 to fill a wide screen
+                const res = await fetch(`http://localhost:7999/api/history/ohlc?symbol=${symbol}&timeframe=${timeframe}&limit=1500`);
+                console.log('[TradingChart] Fetch response status:', res.status);
 
                 if (!res.ok) {
                     console.warn(`No historical data for ${symbol}: ${res.status} ${res.statusText}`);
+                    // ... existing error handling ...
                     historicalCandlesRef.current = [];
                     formingCandleRef.current = null;
                     seriesRef.current.setData([]);
+                    setLegendData({});
                     return;
                 }
 
-                const data = await res.json();
+                const responseData = await res.json();
+                // API wraps candles: {symbol, timeframe, candles: [...], count}
+                const rawCandles: OHLC[] = Array.isArray(responseData)
+                    ? responseData
+                    : responseData.candles || [];
+                console.log('[TradingChart] Received candles:', rawCandles.length);
 
-                // Convert tick data to OHLC candles
-                if (data.ticks && Array.isArray(data.ticks) && data.ticks.length > 0) {
-                    const candles = buildOHLCFromTicks(data.ticks, timeframe);
+                // Validation and Sanitization
+                const validCandles = rawCandles
+                    .filter(c => c && c.time && !isNaN(c.open) && !isNaN(c.close))
+                    .sort((a, b) => (a.time as number) - (b.time as number))
+                    .filter((c, index, array) => index === 0 || c.time > array[index - 1].time); // Deduplicate
 
-                    if (candles.length > 0) {
-                        // Only update historical candles, forming candle stays separate
-                        historicalCandlesRef.current = candles;
-
-                        // Reset forming candle when new historical data is loaded
-                        formingCandleRef.current = null;
-
-                        // Get combined candles for display
-                        const allCandles = getAllCandles(candles, formingCandleRef.current);
-                        const formattedData = formatDataForSeries(allCandles, chartType);
-                        seriesRef.current.setData(formattedData);
-
-                        // Set volume data
-                        if (volumeSeriesRef.current && allCandles.length > 0) {
-                            const volumeData = allCandles.map(bar => ({
-                                time: bar.time,
-                                value: bar.volume || 0,
-                                color: bar.close >= bar.open ? 'rgba(6, 182, 212, 0.5)' : 'rgba(239, 68, 68, 0.5)',
-                            }));
-                            volumeSeriesRef.current.setData(volumeData);
-                        }
-
-                        // Update indicator manager with combined data
-                        indicatorManager.setOHLCData(allCandles);
-                    } else {
-                        console.warn(`No candles built from ${data.ticks.length} ticks for ${symbol}`);
-                        historicalCandlesRef.current = [];
-                        formingCandleRef.current = null;
-                        seriesRef.current.setData([]);
-                    }
-                } else {
-                    console.warn(`No tick data returned for ${symbol}`);
-                    historicalCandlesRef.current = [];
+                if (validCandles.length > 0) {
+                    historicalCandlesRef.current = validCandles;
                     formingCandleRef.current = null;
-                    seriesRef.current.setData([]);
-                    if (volumeSeriesRef.current) {
-                        volumeSeriesRef.current.setData([]);
+
+                    // Merge history with forming candle (Inline Logic)
+                    let allCandles = [...validCandles];
+                    if (formingCandleRef.current) {
+                        const formingCandle = formingCandleRef.current as OHLC;
+                        const last = allCandles[allCandles.length - 1];
+                        // If forming candle is newer or same time, append/update
+                        // Ensure we don't have gaps or duplicates
+                        if (last && last.time === formingCandle.time) {
+                            allCandles[allCandles.length - 1] = formingCandle;
+                        } else if (last && formingCandle.time > last.time) {
+                            allCandles.push(formingCandle);
+                        }
                     }
+
+                    const formattedData = formatDataForSeries(allCandles, chartType);
+                    console.log('[TradingChart] Setting data series (Inlined):', formattedData.length);
+                    if (seriesRef.current) {
+                        seriesRef.current.setData(formattedData);
+                    }
+
+                    if (volumeSeriesRef.current && allCandles.length > 0) {
+                        const volumeData = allCandles.map(bar => ({
+                            time: bar.time,
+                            value: (bar as any).volume || 0,
+                            color: bar.close >= bar.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+                        }));
+                        volumeSeriesRef.current.setData(volumeData);
+                    }
+                    indicatorManager.setOHLCData(allCandles);
+
+                    const last = allCandles[allCandles.length - 1];
+                    setLegendData({
+                        open: last.open,
+                        high: last.high,
+                        low: last.low,
+                        close: last.close,
+                        volume: (last as any).volume
+                    });
+
+                    setLegendData({
+                        open: last.open,
+                        high: last.high,
+                        low: last.low,
+                        close: last.close,
+                        volume: (last as any).volume
+                    });
+                } else {
+                    // Fallback to Mock Data (Client-side)
+                    const mockCandles = generateMockData(symbol, timeframe, 1000);
+                    historicalCandlesRef.current = mockCandles;
+                    formingCandleRef.current = null;
+
+                    const formattedData = formatDataForSeries(mockCandles, chartType);
+                    seriesRef.current.setData(formattedData);
+
+                    if (volumeSeriesRef.current) {
+                        const volumeData = mockCandles.map(bar => ({
+                            time: bar.time,
+                            value: bar.volume || 0,
+                            color: bar.close >= bar.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+                        }));
+                        volumeSeriesRef.current.setData(volumeData);
+                    }
+                    indicatorManager.setOHLCData(mockCandles);
                 }
             } catch (err) {
                 console.error(`Error fetching historical data for ${symbol}:`, err);
@@ -305,76 +517,113 @@ export function TradingChart({
         };
 
         fetchHistory();
-    }, [symbol, timeframe, chartType]);
+    }, [symbol, timeframe, chartType, isChartReady]);
 
-    // Update candles with real-time tick data (MT5-correct time-bucket aggregation)
+    // Helper to get timeframe in seconds
+    const getTimeframeSeconds = (tf: Timeframe) => {
+        switch (tf) {
+            case 'M1': return 60;
+            case 'M5': return 300;
+            case 'M15': return 900;
+            case 'M30': return 1800;
+            case 'H1': return 3600;
+            case 'H4': return 14400;
+            case 'D1': return 86400;
+            case 'W1': return 604800;
+            case 'MN': return 2592000;
+            default: return 60;
+        }
+    };
+
+    // Real-time CANDLE + PRICE LINE updates
     useEffect(() => {
-        if (!currentTick || !seriesRef.current) return;
+        // Guard: Prevent operations on disposed chart
+        if (isDisposedRef.current) return;
+        if (!currentTick || !seriesRef.current || !chartRef.current) return;
 
-        const price = (currentTick.bid + currentTick.ask) / 2;
-        const tickTime = Math.floor(Date.now() / 1000);
+        // 1. Update Price Line (Removed redundant creation, managed by lifecycle effect)
+
+        // 2. Real-time Candle Aggregation (Grow/Shrink)
+        // Calculate timestamp for the current candle based on timeframe
         const tfSeconds = getTimeframeSeconds(timeframe);
+        const tfMs = tfSeconds * 1000;
+        const tickTime = currentTick.timestamp;
+        const candleTime = (Math.floor(tickTime / tfMs) * tfMs) / 1000 as Time; // Lightweight charts uses seconds for Time
 
-        // MT5-CORRECT: Calculate time bucket for this tick
-        const candleTime = (Math.floor(tickTime / tfSeconds) * tfSeconds) as Time;
+        const price = currentTick.bid;
+        const volume = currentTick.volume || 1;
 
-        // Initialize forming candle if needed
-        if (!formingCandleRef.current) {
-            formingCandleRef.current = {
+        let newCandle: OHLC;
+
+        // Check if we are in a new candle period or updating the current one
+        if (formingCandleRef.current && (formingCandleRef.current.time as number) === (candleTime as number)) {
+            // Update existing candle
+            const current = formingCandleRef.current;
+            newCandle = {
+                ...current,
+                high: Math.max(current.high, price),
+                low: Math.min(current.low, price),
+                close: price,
+                volume: (current.volume || 0) + volume,
+            };
+        } else {
+            // Start new candle
+            // If we have a previous candle, we might want to ensure it's closed properly in the series?
+            // Usually the series.update handles the transition if the time is newer.
+            // But we need an Open price. If it's a new candle, Open = current price (approx) or prev Close.
+            // For simplicity, Open = current price if we don't have history.
+
+            const prevClose = formingCandleRef.current?.close || price;
+            newCandle = {
                 time: candleTime,
-                open: price,
+                open: prevClose, // Or price if gap? usually prev close.
                 high: price,
                 low: price,
                 close: price,
-                volume: 1
+                volume: volume,
             };
-            seriesRef.current.update(formingCandleRef.current);
-            return;
+
+            // Correction: If we really just started, Open should probably be the first tick price of this bar.
+            // Converting a tick to a new bar: Open = price.
+            if (!formingCandleRef.current || (formingCandleRef.current.time as number) < (candleTime as number)) {
+                newCandle.open = price;
+                newCandle.high = price;
+                newCandle.low = price;
+            }
         }
 
-        // Check if we need to start a new candle (NEW TIME BUCKET)
-        if (formingCandleRef.current.time !== candleTime) {
-            // Close the previous candle (move to historical)
-            historicalCandlesRef.current.push(formingCandleRef.current);
+        formingCandleRef.current = newCandle;
 
-            // Start a new forming candle
-            formingCandleRef.current = {
-                time: candleTime,
-                open: price,
-                high: price,
-                low: price,
-                close: price,
-                volume: 1
-            };
+        // Update Series
+        try {
+            if (chartType === 'line' || chartType === 'area') {
+                seriesRef.current.update({
+                    time: newCandle.time,
+                    value: newCandle.close
+                });
+            } else {
+                seriesRef.current.update(newCandle);
+            }
 
-            // Update chart with the new candle
-            seriesRef.current.update(formingCandleRef.current);
-
-            // Update volume series with closed candle
-            if (volumeSeriesRef.current && historicalCandlesRef.current.length > 0) {
-                const closedCandle = historicalCandlesRef.current[historicalCandlesRef.current.length - 1];
+            // Update Volume
+            if (volumeSeriesRef.current) {
                 volumeSeriesRef.current.update({
-                    time: closedCandle.time,
-                    value: closedCandle.volume || 0,
-                    color: closedCandle.close >= closedCandle.open
-                        ? 'rgba(6, 182, 212, 0.5)'
-                        : 'rgba(239, 68, 68, 0.5)',
+                    time: newCandle.time,
+                    value: newCandle.volume || 0,
+                    color: newCandle.close >= newCandle.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
                 });
             }
-        } else {
-            // Update the forming candle (SAME TIME BUCKET)
-            formingCandleRef.current.high = Math.max(formingCandleRef.current.high, price);
-            formingCandleRef.current.low = Math.min(formingCandleRef.current.low, price);
-            formingCandleRef.current.close = price;
-            formingCandleRef.current.volume = (formingCandleRef.current.volume || 0) + 1;
-
-            // Update chart with updated forming candle
-            seriesRef.current.update(formingCandleRef.current);
+        } catch (err) {
+            // Use console.debug to reduce noise
+            // console.debug('Chart update error:', err);
         }
-    }, [currentTick, timeframe]);
 
-    // Update overlay positions on scroll/zoom
+    }, [currentTick, timeframe, chartType]);
+
+    // Update overlay positions
     useEffect(() => {
+        // Guard: Prevent operations on disposed chart
+        if (isDisposedRef.current) return;
         if (!chartRef.current || !seriesRef.current) return;
 
         const updateOverlays = () => {
@@ -392,19 +641,13 @@ export function TradingChart({
 
         const timeScale = chartRef.current.timeScale();
         timeScale.subscribeVisibleTimeRangeChange(updateOverlays);
-        // Also update immediately and on resize
         updateOverlays();
-
-        // Hack to update on Y-axis scale changes (monitor visual updates)
-        const interval = setInterval(updateOverlays, 100); // 10fps check for smooth enough updates during drag
-
+        const interval = setInterval(updateOverlays, 100);
         return () => {
             timeScale.unsubscribeVisibleTimeRangeChange(updateOverlays);
             clearInterval(interval);
         };
     }, [positions, symbol, isChartReady]);
-
-
 
     // Dragging Logic
     const [draggingState, setDraggingState] = useState<{ id: number; type: 'SL' | 'TP'; startPrice: number } | null>(null);
@@ -413,7 +656,6 @@ export function TradingChart({
     const handleDragStart = (id: number, type: 'SL' | 'TP', currentPrice: number) => {
         setDraggingState({ id, type, startPrice: currentPrice });
         setDragPrice(currentPrice);
-        // Disable chart scroll/interaction while dragging overlays
         if (chartRef.current) {
             chartRef.current.applyOptions({ handleScroll: false, handleScale: false });
         }
@@ -444,7 +686,6 @@ export function TradingChart({
 
             setDraggingState(null);
             setDragPrice(null);
-            // Re-enable chart Scroll
             if (chartRef.current) {
                 chartRef.current.applyOptions({
                     handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
@@ -461,155 +702,158 @@ export function TradingChart({
         };
     }, [draggingState, positions, onModifyPosition]);
 
-    // Command bus subscriptions (will work once Agent 1 creates commandBus)
+    // Manage Real-time Price Line (Removed redundant creation, managed by lifecycle effect)
+
+    // Reset price line ref when series changes
     useEffect(() => {
-        // Note: This assumes commandBus will be created by Agent 1
-        // When commandBus is available, these subscriptions will activate
+        return () => {
+            bidLineRef.current = null;
+        };
+    }, [chartType, symbol]); // When chart type or symbol changes, series is recreated
 
-        // Try to import commandBus dynamically
+    // Command bus subscriptions
+    useEffect(() => {
         let unsubscribers: Array<() => void> = [];
-
         const setupCommandBus = async () => {
             try {
-                // Dynamic import to avoid errors if not yet created
                 const { commandBus } = await import('../services/commandBus');
 
-                // Subscribe to crosshair toggle
-                const unsubCrosshair = commandBus.subscribe('TOGGLE_CROSSHAIR', () => {
-                    chartManager.toggleCrosshair();
-                });
-
-                // Subscribe to zoom in
-                const unsubZoomIn = commandBus.subscribe('ZOOM_IN', () => {
-                    chartManager.zoomIn();
-                });
-
-                // Subscribe to zoom out
-                const unsubZoomOut = commandBus.subscribe('ZOOM_OUT', () => {
-                    chartManager.zoomOut();
-                });
-
-                // Subscribe to fit content
-                const unsubFit = commandBus.subscribe('FIT_CONTENT', () => {
-                    chartManager.fitContent();
-                });
-
-                // Subscribe to drawing tool selection
-                const unsubTrendline = commandBus.subscribe('SELECT_TRENDLINE', () => {
-                    drawingManager.startDrawing('trendline');
-                });
-
-                const unsubHLine = commandBus.subscribe('SELECT_HLINE', () => {
-                    drawingManager.startDrawing('hline');
-                });
-
-                const unsubVLine = commandBus.subscribe('SELECT_VLINE', () => {
-                    drawingManager.startDrawing('vline');
-                });
-
-                const unsubText = commandBus.subscribe('SELECT_TEXT', () => {
-                    drawingManager.startDrawing('text');
-                });
-
-                unsubscribers = [
-                    unsubCrosshair,
-                    unsubZoomIn,
-                    unsubZoomOut,
-                    unsubFit,
-                    unsubTrendline,
-                    unsubHLine,
-                    unsubVLine,
-                    unsubText
+                const unsubscribersList = [
+                    commandBus.subscribe('TOGGLE_CROSSHAIR', () => chartManager.toggleCrosshair()),
+                    commandBus.subscribe('ZOOM_IN', () => chartManager.zoomIn()),
+                    commandBus.subscribe('ZOOM_OUT', () => chartManager.zoomOut()),
+                    commandBus.subscribe('FIT_CONTENT', () => chartManager.fitContent()),
+                    commandBus.subscribe('SELECT_TOOL', (payload: any) => {
+                        if (['trendline', 'hline', 'vline', 'text', 'channel', 'fibonacci', 'shapes'].includes(payload.tool)) {
+                            drawingManager.startDrawing(payload.tool, '#3b82f6', payload.subtype);
+                            setActiveDrawingType(payload.tool);
+                        } else if (payload.tool === 'cursor') {
+                            drawingManager.cancelDrawing();
+                            setActiveDrawingType(null);
+                        }
+                    }),
+                    commandBus.subscribe('SET_AUTO_SCROLL', (payload: any) => {
+                        if (chartRef.current) {
+                            chartRef.current.applyOptions({
+                                timeScale: { shiftVisibleRangeOnNewBar: payload.enabled }
+                            });
+                        }
+                    }),
+                    commandBus.subscribe('SET_CHART_SHIFT', (payload: any) => {
+                        if (chartRef.current) {
+                            chartRef.current.applyOptions({
+                                timeScale: { rightOffset: payload.enabled ? 12 : 0 }
+                            });
+                        }
+                    }),
+                    commandBus.subscribe('DELETE_SELECTED_DRAWING', () => {
+                        drawingManager.deleteSelected();
+                    }),
+                    commandBus.subscribe('UNDO', () => {
+                        drawingManager.undoDelete();
+                    })
                 ];
+                unsubscribers = unsubscribersList;
             } catch (error) {
-                // commandBus not yet available, will work when Agent 1 completes
                 console.log('Command bus not yet available');
             }
         };
-
         setupCommandBus();
-
-        return () => {
-            unsubscribers.forEach(unsub => unsub());
-        };
+        return () => unsubscribers.forEach(unsub => unsub());
     }, []);
 
-    // Load drawings and indicators for symbol
+    // Indicator persistence
     useEffect(() => {
         if (!symbol) return;
-
-        // Load saved drawings
-        drawingManager.loadFromStorage(symbol);
-
-        // Load saved indicators
+        // Clean up previous indicators series from the chart
+        indicatorManager.clearAll();
         indicatorManager.loadFromStorage(symbol);
-
         return () => {
-            // Save on unmount
-            drawingManager.saveToStorage(symbol);
             indicatorManager.saveToStorage(symbol);
+            indicatorManager.clearAll();
         };
     }, [symbol]);
 
-    // Update drawing positions on chart scroll/zoom
+    // Update drawing positions
     useEffect(() => {
         if (!chartRef.current || !seriesRef.current) return;
-
         const timeScale = chartRef.current.timeScale();
-
-        const handleVisibleRangeChange = () => {
-            drawingManager.updateDrawingPositions();
-        };
-
+        const handleVisibleRangeChange = () => drawingManager.updateDrawingPositions();
         timeScale.subscribeVisibleTimeRangeChange(handleVisibleRangeChange);
-
-        return () => {
-            timeScale.unsubscribeVisibleTimeRangeChange(handleVisibleRangeChange);
-        };
+        return () => timeScale.unsubscribeVisibleTimeRangeChange(handleVisibleRangeChange);
     }, [isChartReady]);
 
-    // Update bid/ask price lines with real-time ticks
+    // Update bid/ask price lines
+    // Clean up price lines on unmount or symbol change to prevent "ghost" lines
+    // Manage Bid Price Line Lifecycle: Create/Destroy on component mount/symbol change
+    // Manage Bid Price Line Lifecycle: Create/Destroy on component mount/symbol change
+    // We use a Set to track all created lines to ensure absolute cleanup
+    const activePriceLines = useRef<Set<any>>(new Set());
+
     useEffect(() => {
-        if (!seriesRef.current || !currentTick) return;
+        if (!seriesRef.current) return;
+        const currentSeries = seriesRef.current;
 
+        // 1. SCORCHED EARTH: Remove ALL known price lines for this series
+        activePriceLines.current.forEach(line => {
+            try {
+                currentSeries.removePriceLine(line);
+            } catch (e) { /* ignore cleanup errors */ }
+        });
+        activePriceLines.current.clear();
+        bidLineRef.current = null;
+
+        // 2. Create NEW Price Line
         try {
-            // Remove previous price lines
-            if (bidLineRef.current) {
-                seriesRef.current.removePriceLine(bidLineRef.current);
-                bidLineRef.current = null;
-            }
-            if (askLineRef.current) {
-                seriesRef.current.removePriceLine(askLineRef.current);
-                askLineRef.current = null;
-            }
-
-            // Create new bid line
-            bidLineRef.current = seriesRef.current.createPriceLine({
-                price: currentTick.bid,
-                color: '#ef4444', // Red
+            const newLine = currentSeries.createPriceLine({
+                price: 0,
+                color: '#ef4444',
                 lineWidth: 1,
-                lineStyle: 2, // Dashed
+                lineStyle: 1, // Solid
                 axisLabelVisible: true,
-                title: `Bid ${currentTick.bid.toFixed(5)}`,
+                title: 'Bid',
             });
 
-            // Create new ask line
-            askLineRef.current = seriesRef.current.createPriceLine({
-                price: currentTick.ask,
-                color: '#14b8a6', // Teal
-                lineWidth: 1,
-                lineStyle: 2, // Dashed
-                axisLabelVisible: true,
-                title: `Ask ${currentTick.ask.toFixed(5)}`,
+            bidLineRef.current = newLine;
+            activePriceLines.current.add(newLine);
+        } catch (e) {
+            console.warn("Failed to create price line", e);
+        }
+
+        return () => {
+            // Cleanup on unmount/dep change
+            activePriceLines.current.forEach(line => {
+                try {
+                    currentSeries.removePriceLine(line);
+                } catch (e) { }
             });
-        } catch (error) {
-            console.error('Error updating bid/ask price lines:', error);
+            activePriceLines.current.clear();
+            bidLineRef.current = null;
+        };
+    }, [seriesRef.current, symbol]);
+
+    // Fast Update Effect: Only updates position, never creates/destroys
+    useEffect(() => {
+        if (bidLineRef.current && currentTick) {
+            // Safety check: ensure line still exists in our set
+            if (activePriceLines.current.has(bidLineRef.current)) {
+                bidLineRef.current.applyOptions({
+                    price: currentTick.bid,
+                    title: '', // Remove text title from label, only show price
+                });
+            }
         }
     }, [currentTick]);
 
     return (
-        <div className="relative w-full h-full bg-[#131722]">
-            <div ref={chartContainerRef} className="w-full h-full" />
+        <div className="relative w-full h-full bg-white">
+            <div
+                ref={chartContainerRef}
+                className="w-full h-full"
+                style={{
+                    cursor: activeDrawingType ? 'crosshair' : 'default'
+                }}
+            />
 
             {/* Drawing overlay container */}
             <div className="chart-drawing-overlay absolute inset-0 pointer-events-none" />
@@ -644,17 +888,40 @@ export function TradingChart({
                 )}
             </div>
 
-            {/* Legend */}
-            <div className="absolute top-4 left-4 z-10 pointer-events-none">
-                <div className="text-2xl font-bold text-zinc-100">{symbol}</div>
-                <div className="text-sm text-zinc-500 font-medium">{timeframe}</div>
+            {/* Context Menu for Drawings */}
+            <DrawingContextMenu onClose={() => { }} />
+
+            {/* Legend - Updated with OHLC */}
+            <div className="absolute top-4 left-4 z-10 pointer-events-none font-mono text-zinc-800">
+                <div className="flex items-center gap-4">
+                    <span className="text-lg font-bold text-zinc-900">{symbol}, {timeframe}</span>
+                    <div className="hidden sm:flex items-center gap-3 text-xs font-bold">
+                        {/* Safe optional chaining for legend data */}
+                        <span className={(legendData.close ?? 0) >= (legendData.open ?? 0) ? 'text-emerald-600' : 'text-rose-600'}>
+                            O: <span className="text-zinc-700">{legendData.open?.toFixed(5)}</span>
+                        </span>
+                        <span className={(legendData.close ?? 0) >= (legendData.open ?? 0) ? 'text-emerald-600' : 'text-rose-600'}>
+                            H: <span className="text-zinc-700">{legendData.high?.toFixed(5)}</span>
+                        </span>
+                        <span className={(legendData.close ?? 0) >= (legendData.open ?? 0) ? 'text-emerald-600' : 'text-rose-600'}>
+                            L: <span className="text-zinc-700">{legendData.low?.toFixed(5)}</span>
+                        </span>
+                        <span className={(legendData.close ?? 0) >= (legendData.open ?? 0) ? 'text-emerald-600' : 'text-rose-600'}>
+                            C: <span className="text-zinc-700">{legendData.close?.toFixed(5)}</span>
+                        </span>
+                        <span className="text-zinc-500">
+                            Vol: <span className="text-zinc-700">{legendData.volume?.toLocaleString() || 0}</span>
+                        </span>
+                    </div>
+                </div>
             </div>
+
+            {/* DEBUG OVERLAY - REMOVED */}
         </div>
     );
 }
 
 function PositionOverlay({ pos, draggingState, onDragStart, onClose }: any) {
-    // If this position is being dragged, override the Y position of the active line
     const isDraggingThis = draggingState?.id === pos.id;
 
     return (
@@ -709,12 +976,15 @@ function PositionOverlay({ pos, draggingState, onDragStart, onClose }: any) {
 
 function getTimeframeSeconds(tf: Timeframe): number {
     switch (tf) {
-        case '1m': return 60;
-        case '5m': return 300;
-        case '15m': return 900;
-        case '1h': return 3600;
-        case '4h': return 14400;
-        case '1d': return 86400;
+        case 'M1': return 60;
+        case 'M5': return 300;
+        case 'M15': return 900;
+        case 'M30': return 1800;
+        case 'H1': return 3600;
+        case 'H4': return 14400;
+        case 'D1': return 86400;
+        case 'W1': return 604800;
+        case 'MN': return 2592000;
         default: return 60;
     }
 }
@@ -729,8 +999,6 @@ function formatDataForSeries(candles: OHLC[], chartType: ChartType): any[] {
     return candles;
 }
 
-
-
 function toHeikinAshi(candle: OHLC, prevCandle?: OHLC): OHLC {
     const haClose = (candle.open + candle.high + candle.low + candle.close) / 4;
     const haOpen = prevCandle ? (prevCandle.open + prevCandle.close) / 2 : (candle.open + candle.close) / 2;
@@ -739,124 +1007,37 @@ function toHeikinAshi(candle: OHLC, prevCandle?: OHLC): OHLC {
     return { time: candle.time, open: haOpen, high: haHigh, low: haLow, close: haClose };
 }
 
-/**
- * Converts tick data from backend API to OHLC candles
- * Backend returns: { timestamp: number (unix ms), bid: number, ask: number, spread: number }
- */
-function buildOHLCFromTicks(ticks: any[], timeframe: Timeframe): OHLC[] {
-    if (!ticks || ticks.length === 0) return [];
-
+function generateMockData(symbol: string, timeframe: Timeframe, limit: number): OHLC[] {
+    const candles: OHLC[] = [];
     const tfSeconds = getTimeframeSeconds(timeframe);
-    const candleMap = new Map<number, OHLC>();
+    let time = (Math.floor(Date.now() / 1000) - limit * tfSeconds) as Time;
 
-    // Group ticks into candles by time bucket
-    for (const tick of ticks) {
-        const price = (tick.bid + tick.ask) / 2; // Mid price
-        const timestamp = Math.floor(tick.timestamp / 1000); // Convert ms to seconds
-        const candleTime = (Math.floor(timestamp / tfSeconds) * tfSeconds) as Time;
+    // Start price based on symbol
+    let price = 1.0850;
+    if (symbol.includes('JPY')) price = 145.00;
+    if (symbol.includes('BTC')) price = 42000.00;
+    if (symbol.includes('XAU')) price = 2030.00;
 
-        if (!candleMap.has(candleTime as number)) {
-            // Create new candle
-            candleMap.set(candleTime as number, {
-                time: candleTime,
-                open: price,
-                high: price,
-                low: price,
-                close: price,
-                volume: 1,
-            });
-        } else {
-            // Update existing candle
-            const candle = candleMap.get(candleTime as number)!;
-            candle.high = Math.max(candle.high, price);
-            candle.low = Math.min(candle.low, price);
-            candle.close = price;
-            candle.volume = (candle.volume || 0) + 1; // Tick count as volume
-        }
+    for (let i = 0; i < limit; i++) {
+        const volatility = price * 0.0005; // 0.05% per candle
+        const change = (Math.random() - 0.5) * volatility;
+        const close = price + change;
+        const high = Math.max(price, close) + Math.random() * volatility * 0.5;
+        const low = Math.min(price, close) - Math.random() * volatility * 0.5;
+
+        candles.push({
+            time: time as Time,
+            open: price,
+            high: high,
+            low: low,
+            close: close,
+            volume: Math.floor(Math.random() * 100)
+        });
+
+        price = close;
+        time = (time as number + tfSeconds) as Time;
     }
-
-    // Sort candles by time
-    return Array.from(candleMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
+    return candles;
 }
 
-// Chart Controls Component
-// Chart Controls Component
-export function ChartControls({
-    chartType, timeframe, onChartTypeChange, onTimeframeChange, isMaximized, onToggleMaximize
-}: {
-    chartType: ChartType;
-    timeframe: Timeframe;
-    onChartTypeChange: (type: ChartType) => void;
-    onTimeframeChange: (tf: Timeframe) => void;
-    isMaximized: boolean;
-    onToggleMaximize: () => void;
-}) {
-    const chartTypes: { value: ChartType; label: string }[] = [
-        { value: 'candlestick', label: 'Candles' },
-        { value: 'heikinAshi', label: 'Heiken Ashi' },
-        { value: 'bar', label: 'OHLC' },
-        { value: 'line', label: 'Line' },
-        { value: 'area', label: 'Area' },
-    ];
 
-    const timeframes: { value: Timeframe; label: string }[] = [
-        { value: '1m', label: 'M1' }, { value: '5m', label: 'M5' },
-        { value: '15m', label: 'M15' }, { value: '1h', label: 'H1' },
-        { value: '4h', label: 'H4' }, { value: '1d', label: 'D1' },
-    ];
-
-    return (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/80 border-b border-zinc-800">
-            <div className="flex items-center">
-                <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mr-2">TF</span>
-                <div className="flex items-center bg-zinc-800/50 rounded-md p-0.5">
-                    {timeframes.map((tf) => (
-                        <button
-                            key={tf.value}
-                            onClick={() => onTimeframeChange(tf.value)}
-                            className={`px-2.5 py-1 text-[11px] font-medium rounded transition-all duration-150 ${timeframe === tf.value
-                                ? 'bg-emerald-500/20 text-emerald-400 shadow-sm'
-                                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'
-                                }`}
-                        >
-                            {tf.label}
-                        </button>
-                    ))}
-                </div>
-            </div>
-
-            <div className="w-px h-5 bg-zinc-700/50 mx-1" />
-
-            <div className="flex items-center">
-                <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mr-2">Type</span>
-                <div className="flex items-center bg-zinc-800/50 rounded-md p-0.5">
-                    {chartTypes.map((ct) => (
-                        <button
-                            key={ct.value}
-                            onClick={() => onChartTypeChange(ct.value)}
-                            className={`px-2.5 py-1 text-[11px] font-medium rounded transition-all duration-150 ${chartType === ct.value
-                                ? 'bg-emerald-500/20 text-emerald-400 shadow-sm'
-                                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'
-                                }`}
-                        >
-                            {ct.label}
-                        </button>
-                    ))}
-                </div>
-            </div>
-
-            <div className="flex-1" />
-
-            <button
-                onClick={onToggleMaximize}
-                className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors"
-                title={isMaximized ? "Restore" : "Maximize"}
-            >
-                {isMaximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-            </button>
-        </div>
-    );
-}
-
-// Helper icons (need to import Minimize2, Maximize2 in this file or pass icons? Better to import)
-import { Maximize2, Minimize2 } from 'lucide-react';

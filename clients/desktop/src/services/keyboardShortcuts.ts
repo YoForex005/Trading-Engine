@@ -1,8 +1,4 @@
-// Type placeholder for command bus - will be replaced when Agent 1 completes
-type Command = {
-  type: string;
-  payload: any;
-};
+import type { Command } from '../types/commands';
 
 export function registerKeyboardShortcuts(dispatch: (cmd: Command) => void) {
   const handleKeyDown = (e: KeyboardEvent) => {

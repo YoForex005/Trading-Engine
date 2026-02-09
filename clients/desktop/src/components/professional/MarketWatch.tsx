@@ -13,6 +13,9 @@ import {
   MoreVertical,
   Plus,
   BarChart3,
+  CheckCircle,
+  AlertTriangle,
+  Filter,
 } from 'lucide-react';
 import type { MarketWatchItem, SortConfig, ContextMenuItem, ContextMenuPosition } from '../../types/trading';
 import { useAppStore } from '../../store/useAppStore';
@@ -26,6 +29,10 @@ export const MarketWatch = () => {
   const [sortConfig, setSortConfig] = useState<SortConfig>({ column: 'symbol', direction: 'asc' });
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
+  const [showOnlyRealData, setShowOnlyRealData] = useState(() => {
+    const saved = localStorage.getItem('rtx5_marketwatch_lp_filter');
+    return saved ? JSON.parse(saved) : false;
+  });
   const [contextMenu, setContextMenu] = useState<{ symbol: string; position: ContextMenuPosition } | null>(null);
 
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -44,9 +51,9 @@ export const MarketWatch = () => {
         last: mid,
         change,
         changePercent,
-        volume: 0, // Would come from backend
-        high24h: tick.bid, // Mock data
-        low24h: tick.bid, // Mock data
+        volume: tick.volume || 0,
+        high24h: tick.high || 0,
+        low24h: tick.low || 0,
         timestamp: tick.timestamp,
         direction: change > 0 ? 'up' : change < 0 ? 'down' : 'neutral',
       };
@@ -69,6 +76,14 @@ export const MarketWatch = () => {
       filtered = filtered.filter((item) => favorites.has(item.symbol));
     }
 
+    // Apply LP filter (show only real data)
+    if (showOnlyRealData) {
+      filtered = filtered.filter((item) => {
+        const tick = ticks[item.symbol];
+        return tick && tick.lp === 'YOFX';
+      });
+    }
+
     // Apply sorting
     filtered.sort((a, b) => {
       const aValue = a[sortConfig.column as keyof MarketWatchItem];
@@ -88,7 +103,7 @@ export const MarketWatch = () => {
     });
 
     return filtered;
-  }, [marketItems, searchTerm, sortConfig, showOnlyFavorites, favorites]);
+  }, [marketItems, searchTerm, sortConfig, showOnlyFavorites, favorites, showOnlyRealData, ticks]);
 
   // Handle column sort
   const handleSort = (column: MarketWatchColumn) => {
@@ -133,6 +148,11 @@ export const MarketWatch = () => {
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [contextMenu]);
+
+  // Persist LP filter
+  useEffect(() => {
+    localStorage.setItem('rtx5_marketwatch_lp_filter', JSON.stringify(showOnlyRealData));
+  }, [showOnlyRealData]);
 
   // Context menu items
   const getContextMenuItems = (symbol: string): ContextMenuItem[] => [
@@ -180,15 +200,26 @@ export const MarketWatch = () => {
           <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wide">Market Watch</h3>
           <span className="text-xs text-emerald-400 font-medium">{displayItems.length}</span>
         </div>
-        <button
-          onClick={() => setShowOnlyFavorites(!showOnlyFavorites)}
-          className={`p-1.5 rounded transition-colors ${
-            showOnlyFavorites ? 'bg-yellow-500/20 text-yellow-400' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
-          }`}
-          title="Show favorites only"
-        >
-          <Star size={14} className={showOnlyFavorites ? 'fill-yellow-400' : ''} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowOnlyRealData(!showOnlyRealData)}
+            className={`p-1.5 rounded transition-colors ${
+              showOnlyRealData ? 'bg-emerald-500/20 text-emerald-400' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+            }`}
+            title={showOnlyRealData ? 'Showing only real data (YOFX)' : 'Showing all data (Real + Simulated)'}
+          >
+            <Filter size={14} className={showOnlyRealData ? 'fill-emerald-400' : ''} />
+          </button>
+          <button
+            onClick={() => setShowOnlyFavorites(!showOnlyFavorites)}
+            className={`p-1.5 rounded transition-colors ${
+              showOnlyFavorites ? 'bg-yellow-500/20 text-yellow-400' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
+            }`}
+            title="Show favorites only"
+          >
+            <Star size={14} className={showOnlyFavorites ? 'fill-yellow-400' : ''} />
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -206,9 +237,10 @@ export const MarketWatch = () => {
       </div>
 
       {/* Column Headers */}
-      <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-1 px-2 py-1.5 border-b border-zinc-800 bg-zinc-900/30 text-[10px] font-medium text-zinc-500 uppercase tracking-wide sticky top-0 z-10">
+      <div className="grid grid-cols-[auto_1fr_auto_1fr_1fr] gap-1 px-2 py-1.5 border-b border-zinc-800 bg-zinc-900/30 text-[10px] font-medium text-zinc-500 uppercase tracking-wide sticky top-0 z-10">
         <div className="w-8"></div>
         <SortableHeader column="symbol" label="Symbol" sortConfig={sortConfig} onSort={handleSort} />
+        <div className="w-14 text-center">Source</div>
         <SortableHeader column="bid" label="Bid" sortConfig={sortConfig} onSort={handleSort} align="right" />
         <SortableHeader column="changePercent" label="Change" sortConfig={sortConfig} onSort={handleSort} align="right" />
       </div>
@@ -298,6 +330,11 @@ const MarketWatchRow = ({
   onToggleFavorite: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) => {
+  const { ticks } = useAppStore();
+  const tick = ticks[item.symbol];
+  const lpValue = tick?.lp || 'SIM';
+  const isReal = lpValue === 'YOFX';
+
   const changeColor = item.change > 0 ? 'text-emerald-400' : item.change < 0 ? 'text-red-400' : 'text-zinc-500';
   const bgColor = isSelected ? 'bg-emerald-500/10 border-l-2 border-emerald-500' : 'hover:bg-zinc-800/50 border-l-2 border-transparent';
 
@@ -311,7 +348,7 @@ const MarketWatchRow = ({
     <div
       onClick={onSelect}
       onContextMenu={onContextMenu}
-      className={`grid grid-cols-[auto_1fr_1fr_1fr] gap-1 px-2 py-1.5 cursor-pointer transition-all text-xs ${bgColor}`}
+      className={`grid grid-cols-[auto_1fr_auto_1fr_1fr] gap-1 px-2 py-1.5 cursor-pointer transition-all text-xs ${bgColor}`}
     >
       <div className="flex items-center justify-center w-8">
         <button
@@ -328,6 +365,18 @@ const MarketWatchRow = ({
       <div className="flex items-center gap-1 font-medium text-white">
         {directionIcon}
         <span className="truncate">{item.symbol}</span>
+      </div>
+
+      <div
+        className={`flex items-center justify-center gap-1 w-14 ${isReal ? 'text-emerald-400' : 'text-red-400'}`}
+        title={isReal ? '✓ Real market data from YOFX broker' : '⚠️ Simulated data - not real market prices'}
+      >
+        {isReal ? (
+          <CheckCircle className="w-3 h-3" />
+        ) : (
+          <AlertTriangle className="w-3 h-3" />
+        )}
+        <span className="text-[9px] font-bold uppercase">{lpValue}</span>
       </div>
 
       <div className="text-right font-mono text-zinc-300">

@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Clock, TrendingUp, TrendingDown, Activity, Filter } from 'lucide-react';
+import { Clock, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import type { TimeSalesEntry } from '../../types/trading';
 
 type TimeSalesProps = {
@@ -31,7 +31,7 @@ export const TimeSales = ({ symbol, maxEntries = 100 }: TimeSalesProps) => {
     if (!symbol) return;
 
     const connectWS = () => {
-      const ws = new WebSocket(`ws://localhost:8080/ws/timesales?symbol=${symbol}`);
+      const ws = new WebSocket(`ws://localhost:7999/ws/timesales?symbol=${symbol}`);
       wsRef.current = ws;
 
       ws.onmessage = (event) => {
@@ -112,11 +112,10 @@ export const TimeSales = ({ symbol, maxEntries = 100 }: TimeSalesProps) => {
           </div>
           <button
             onClick={() => setIsPaused(!isPaused)}
-            className={`px-2 py-1 text-[10px] font-medium rounded transition-colors ${
-              isPaused
-                ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-                : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
-            }`}
+            className={`px-2 py-1 text-[10px] font-medium rounded transition-colors ${isPaused
+              ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+              }`}
           >
             {isPaused ? 'PAUSED' : 'LIVE'}
           </button>
@@ -128,11 +127,10 @@ export const TimeSales = ({ symbol, maxEntries = 100 }: TimeSalesProps) => {
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors ${
-                filter === f
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                  : 'bg-zinc-800/50 text-zinc-500 hover:text-zinc-300'
-              }`}
+              className={`flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors ${filter === f
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                : 'bg-zinc-800/50 text-zinc-500 hover:text-zinc-300'
+                }`}
             >
               {f}
             </button>

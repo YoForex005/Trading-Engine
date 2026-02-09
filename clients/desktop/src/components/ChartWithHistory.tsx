@@ -46,7 +46,6 @@ export const ChartWithHistory: React.FC<ChartWithHistoryProps> = ({
 
   // Use historical data hook
   const {
-    data: historicalData,
     isLoading,
     error,
     symbolInfo,
@@ -61,7 +60,7 @@ export const ChartWithHistory: React.FC<ChartWithHistoryProps> = ({
   // Check if historical data is missing
   useEffect(() => {
     if (enableHistoricalData && symbolInfo) {
-      const hasAllData = symbolInfo.downloadedDates.length === symbolInfo.availableDates.length;
+      const hasAllData = symbolInfo.downloadedDates.length === (symbolInfo.availableDates?.length || 0);
       if (!hasAllData && !isLoading) {
         setShowHistoricalPrompt(true);
       }
@@ -73,12 +72,7 @@ export const ChartWithHistory: React.FC<ChartWithHistoryProps> = ({
     await downloadIfMissing();
   };
 
-  // Merge historical data with live data
-  const chartData = useMemo(() => {
-    // For now, we'll use historical data if available
-    // In production, you'd merge this with live WebSocket data
-    return historicalData;
-  }, [historicalData]);
+
 
   return (
     <div className="relative w-full h-full">
@@ -151,9 +145,9 @@ export const ChartWithHistory: React.FC<ChartWithHistoryProps> = ({
         <div className="absolute bottom-4 left-4 z-10 bg-gray-900/70 backdrop-blur-sm border border-gray-700 rounded px-3 py-1.5 text-xs">
           <div className="flex items-center gap-4">
             <span className="text-gray-400">
-              Historical Data: {symbolInfo.downloadedDates.length} / {symbolInfo.availableDates.length} days
+              Historical Data: {symbolInfo.downloadedDates.length} / {symbolInfo.availableDates?.length || 0} days
             </span>
-            {symbolInfo.downloadedDates.length > 0 && (
+            {symbolInfo.downloadedDates.length > 0 && symbolInfo.downloadedDates.length === (symbolInfo.availableDates?.length || 0) && (
               <span className="text-gray-400">
                 {symbolInfo.firstDate} - {symbolInfo.lastDate}
               </span>

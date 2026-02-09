@@ -3,18 +3,16 @@
  * Real-time LP performance comparison with interactive charts and ranking
  */
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   createChart,
   ColorType,
-  LineStyle,
   CrosshairMode,
 } from 'lightweight-charts';
 import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts';
 import {
   TrendingUp,
   TrendingDown,
-  Activity,
   Clock,
   Target,
   Zap,
@@ -86,7 +84,7 @@ const getLPColor = (lpName: string): string => {
 // API Configuration
 // ============================================
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:7999';
 
 // ============================================
 // Main Component
@@ -162,7 +160,7 @@ export const LPComparisonDashboard = () => {
     const connect = () => {
       if (isUnmounting) return;
 
-      const wsUrl = `ws://localhost:8080/ws/analytics`;
+      const wsUrl = `ws://localhost:7999/ws/analytics`;
       console.log('[LP Dashboard] Connecting to WebSocket:', wsUrl);
 
       ws = new WebSocket(wsUrl);
@@ -257,19 +255,6 @@ export const LPComparisonDashboard = () => {
         return metrics.slippage.avg;
       default:
         return 0;
-    }
-  };
-
-  const formatMetricValue = (value: number, type: MetricType): string => {
-    switch (type) {
-      case 'latency':
-        return `${value.toFixed(2)}ms`;
-      case 'fillRate':
-        return `${(value * 100).toFixed(2)}%`;
-      case 'slippage':
-        return `${value.toFixed(2)} pips`;
-      default:
-        return value.toFixed(2);
     }
   };
 
@@ -419,7 +404,6 @@ export const LPComparisonDashboard = () => {
         metrics={sortedMetrics}
         sortConfig={sortConfig}
         onSort={handleSort}
-        selectedMetric={selectedMetric}
       />
 
       {/* Rankings */}
@@ -445,11 +429,10 @@ const MetricButton = ({
 }) => (
   <button
     onClick={onClick}
-    className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-      active
-        ? 'bg-emerald-500 text-black'
-        : 'text-zinc-400 hover:text-white hover:bg-zinc-700'
-    }`}
+    className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors ${active
+      ? 'bg-emerald-500 text-black'
+      : 'text-zinc-400 hover:text-white hover:bg-zinc-700'
+      }`}
   >
     {icon}
     <span>{label}</span>
@@ -527,7 +510,7 @@ const PerformanceChart = ({
 
     // Create series for each LP
     data.forEach(lpData => {
-      const series = chartRef.current!.addSeries({ type: 'Line',
+      const series = (chartRef.current! as any).addLineSeries({
         color: getLPColor(lpData.lpName),
         lineWidth: 2,
         title: lpData.lpName,
@@ -584,12 +567,10 @@ const ComparisonTable = ({
   metrics,
   sortConfig,
   onSort,
-  selectedMetric,
 }: {
   metrics: LPMetrics[];
   sortConfig: SortConfig;
   onSort: (key: string) => void;
-  selectedMetric: MetricType;
 }) => {
   const SortIcon = ({ column }: { column: string }) => {
     if (sortConfig.key !== column) {
@@ -633,9 +614,8 @@ const ComparisonTable = ({
           {metrics.map((lp, index) => (
             <tr
               key={lp.lpName}
-              className={`hover:bg-zinc-800/50 transition-colors ${
-                index === 0 ? 'bg-emerald-900/10' : ''
-              }`}
+              className={`hover:bg-zinc-800/50 transition-colors ${index === 0 ? 'bg-emerald-900/10' : ''
+                }`}
             >
               <td className="px-4 py-3">
                 <div className="flex items-center gap-2">
@@ -706,15 +686,14 @@ const RankingView = ({ rankings }: { rankings: Array<LPMetrics & { score: number
             className="flex items-center gap-3 p-3 bg-zinc-900/50 rounded-lg"
           >
             <div
-              className={`flex items-center justify-center w-8 h-8 rounded-full font-bold ${
-                index === 0
-                  ? 'bg-yellow-500/20 text-yellow-400'
-                  : index === 1
+              className={`flex items-center justify-center w-8 h-8 rounded-full font-bold ${index === 0
+                ? 'bg-yellow-500/20 text-yellow-400'
+                : index === 1
                   ? 'bg-zinc-400/20 text-zinc-400'
                   : index === 2
-                  ? 'bg-orange-700/20 text-orange-400'
-                  : 'bg-zinc-700/20 text-zinc-500'
-              }`}
+                    ? 'bg-orange-700/20 text-orange-400'
+                    : 'bg-zinc-700/20 text-zinc-500'
+                }`}
             >
               {index + 1}
             </div>

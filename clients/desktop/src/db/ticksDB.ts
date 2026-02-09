@@ -76,6 +76,7 @@ export class TicksDB {
       ticks.forEach((tick) => {
         const record = {
           ...tick,
+          symbol, // Ensure symbol is part of the composite key
           date,
           // Store compressed data if needed
           compressed: this.shouldCompress(ticks.length)

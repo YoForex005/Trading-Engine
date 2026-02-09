@@ -1,4 +1,4 @@
-package message
+package fix
 
 import (
 	"bytes"
@@ -13,8 +13,8 @@ const (
 )
 
 var (
-	ErrInvalidMessage    = errors.New("invalid FIX message")
-	ErrInvalidChecksum   = errors.New("invalid checksum")
+	ErrInvalidMessage     = errors.New("invalid FIX message")
+	ErrInvalidChecksum    = errors.New("invalid checksum")
 	ErrMissingBeginString = errors.New("missing BeginString (8)")
 	ErrMissingBodyLength  = errors.New("missing BodyLength (9)")
 	ErrMissingMsgType     = errors.New("missing MsgType (35)")

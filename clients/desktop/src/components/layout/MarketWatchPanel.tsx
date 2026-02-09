@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, Check, ChevronRight, Clock, Plus } from 'lucide-react';
-import { ContextMenu, type ContextMenuItemConfig, MenuSectionHeader, MenuDivider } from '../ui/ContextMenu';
+import { createPortal } from 'react-dom';
+import { Plus, Clock } from 'lucide-react';
+import { ContextMenu, type ContextMenuItemConfig } from '../ui/ContextMenu';
 import { useContextMenu, useKeyboardShortcuts } from '../../hooks';
 import { useAppStore } from '../../store/useAppStore';
 
@@ -16,21 +17,6 @@ interface AvailableSymbol {
     subscribed?: boolean;
 }
 
-interface Tick {
-    symbol: string;
-    bid: number;
-    ask: number;
-    spread: number; // Always present - calculated as ask - bid
-    prevBid?: number;
-    dailyChange?: number;
-    high?: number;
-    low?: number;
-    volume?: number;
-    last?: number;
-    open?: number;
-    close?: number; // Previous close
-    tickHistory?: number[]; // For tick chart
-}
 
 interface MarketWatchPanelProps {
     allSymbols: any[];
@@ -39,7 +25,7 @@ interface MarketWatchPanelProps {
     className?: string;
 }
 
-type ColumnId = 'symbol' | 'bid' | 'ask' | 'spread' | 'dailyChange' | 'last' | 'high' | 'low' | 'volume' | 'time';
+type ColumnId = 'symbol' | 'lp' | 'bid' | 'ask' | 'spread' | 'dailyChange' | 'last' | 'high' | 'low' | 'volume' | 'time';
 type TabId = 'symbols' | 'details' | 'trading' | 'ticks';
 
 interface ColumnConfig {
@@ -52,10 +38,11 @@ interface ColumnConfig {
 
 const ALL_COLUMNS: ColumnConfig[] = [
     { id: 'symbol', label: 'Symbol', width: 'flex-1', align: 'left', locked: true },
+    { id: 'lp', label: 'Source', width: 'w-16', align: 'center', locked: true },
     { id: 'bid', label: 'Bid', width: 'w-16', align: 'right', locked: true },
     { id: 'ask', label: 'Ask', width: 'w-16', align: 'right', locked: true },
-    { id: 'spread', label: '!', width: 'w-8', align: 'center', locked: true },
-    { id: 'dailyChange', label: 'Daily %', width: 'w-14', align: 'right' },
+    { id: 'spread', label: 'Spread', width: 'w-10', align: 'center', locked: true },
+    { id: 'dailyChange', label: 'Daily', width: 'w-12', align: 'right' },
     { id: 'last', label: 'Last', width: 'w-16', align: 'right' },
     { id: 'high', label: 'High', width: 'w-16', align: 'right' },
     { id: 'low', label: 'Low', width: 'w-16', align: 'right' },
@@ -63,8 +50,8 @@ const ALL_COLUMNS: ColumnConfig[] = [
     { id: 'time', label: 'Time', width: 'w-16', align: 'right' },
 ];
 
-// Default strict columns: Symbol, Bid, Ask, Spread
-const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['symbol', 'bid', 'ask', 'spread'];
+// Default strict columns: Symbol, LP, Bid, Ask, Spread, Daily Change
+const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = ['symbol', 'lp', 'bid', 'ask', 'spread', 'dailyChange'];
 
 export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
     allSymbols,
@@ -72,8 +59,8 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
     onSymbolSelect,
     className
 }) => {
-    // Get ticks from Zustand store (single source of truth)
-    const ticks = useAppStore(state => state.ticks);
+    // PERFORMANCE FIX: Removed global ticks subscription to prevent massive re-renders
+    // Each row now subscribes to its own symbol updates via useTick()
 
     const [searchTerm, setSearchTerm] = useState('');
     const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(() => {
@@ -98,6 +85,30 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
 
     // Keyboard navigation state (Agent 1 - MT5 parity)
     const [selectedDropdownIndex, setSelectedDropdownIndex] = useState<number>(0);
+    const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+    // Update dropdown position
+    useEffect(() => {
+        if (showSearchDropdown && inputRef.current) {
+            const updatePos = () => {
+                if (inputRef.current) {
+                    const rect = inputRef.current.getBoundingClientRect();
+                    setDropdownPos({
+                        top: rect.bottom + 5, // Render below the input
+                        left: rect.left,
+                        width: rect.width
+                    });
+                }
+            };
+            updatePos();
+            window.addEventListener('resize', updatePos);
+            window.addEventListener('scroll', updatePos, true); // Capture scroll
+            return () => {
+                window.removeEventListener('resize', updatePos);
+                window.removeEventListener('scroll', updatePos, true);
+            };
+        }
+    }, [showSearchDropdown]);
 
     // Hidden symbols state (for Show All / Hide to work reactively)
     const [hiddenSymbols, setHiddenSymbols] = useState<string[]>(() => {
@@ -117,10 +128,21 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         };
     });
 
+    // LP Filter State (persisted to localStorage)
+    const [showOnlyRealData, setShowOnlyRealData] = useState(() => {
+        const saved = localStorage.getItem('rtx5_marketwatch_lp_filter');
+        return saved ? JSON.parse(saved) : false;
+    });
+
     // Persist system options
     useEffect(() => {
         localStorage.setItem('rtx5_marketwatch_options', JSON.stringify(systemOptions));
     }, [systemOptions]);
+
+    // Persist LP filter
+    useEffect(() => {
+        localStorage.setItem('rtx5_marketwatch_lp_filter', JSON.stringify(showOnlyRealData));
+    }, [showOnlyRealData]);
 
     const toggleSystemOption = (key: string) => {
         setSystemOptions((prev: Record<string, boolean>) => ({ ...prev, [key]: !prev[key] }));
@@ -134,6 +156,15 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                 if (response.ok) {
                     const data = await response.json();
                     setAvailableSymbols(data);
+
+                    // Check if we need to auto-populate deeply (Agent 4)
+                    const saved = localStorage.getItem('rtx5_subscribed_symbols');
+                    if (!saved || JSON.parse(saved).length === 0) {
+                        // If no saved symbols (or empty list), subscribe to ALL available symbols to ensure full list
+                        const allSymbols = data.map((s: any) => s.symbol);
+                        setSubscribedSymbols(allSymbols);
+                        console.log('[MarketWatch] Auto-subscribed to all available symbols:', allSymbols.length);
+                    }
                 }
             } catch (error) {
                 console.error('Failed to fetch available symbols:', error);
@@ -148,8 +179,10 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         if (saved) {
             try {
                 const symbols = JSON.parse(saved);
-                setSubscribedSymbols(symbols);
-                console.log('[MarketWatch] Loaded subscribed symbols from localStorage:', symbols);
+                if (symbols && symbols.length > 0) {
+                    setSubscribedSymbols(symbols);
+                    console.log('[MarketWatch] Loaded subscribed symbols from localStorage:', symbols);
+                }
             } catch (e) {
                 console.error('[MarketWatch] Failed to load subscribed symbols:', e);
             }
@@ -226,35 +259,7 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         }
     }, [onSymbolSelect]);
 
-    // Unsubscribe from a symbol (MT5 parity - remove from market watch)
-    const unsubscribeFromSymbol = useCallback(async (symbol: string) => {
-        // Optimistically remove
-        setSubscribedSymbols(prev => prev.filter(s => s !== symbol));
-        setHiddenSymbols(prev => [...prev, symbol]); // Hide from view
 
-        try {
-            const response = await fetch(`${API_BASE}/api/symbols/unsubscribe`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ symbol })
-            });
-            const result = await response.json();
-
-            if (!result.success) {
-                console.error('Unsubscribe failed:', result.error);
-                // Rollback
-                setSubscribedSymbols(prev => [...new Set([...prev, symbol])]);
-                setHiddenSymbols(prev => prev.filter(s => s !== symbol));
-            } else {
-                console.log(`[MarketWatch] Successfully unsubscribed from ${symbol}`);
-            }
-        } catch (error) {
-            console.error('Unsubscribe error:', error);
-            // Rollback
-            setSubscribedSymbols(prev => [...new Set([...prev, symbol])]);
-            setHiddenSymbols(prev => prev.filter(s => s !== symbol));
-        }
-    }, []);
 
     // Close search dropdown on click outside
     useEffect(() => {
@@ -296,7 +301,8 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                 e.preventDefault();
                 if (filteredAvailableSymbols[selectedDropdownIndex]) {
                     const selectedSymbol = filteredAvailableSymbols[selectedDropdownIndex];
-                    const isSubscribed = subscribedSymbols.includes(selectedSymbol.symbol) || Object.keys(ticks).includes(selectedSymbol.symbol);
+                    const currentTicks = useAppStore.getState().ticks;
+                    const isSubscribed = subscribedSymbols.includes(selectedSymbol.symbol) || Object.keys(currentTicks).includes(selectedSymbol.symbol);
                     if (!isSubscribed) {
                         subscribeToSymbol(selectedSymbol.symbol);
                     } else {
@@ -304,6 +310,10 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                         setShowSearchDropdown(false);
                         setSearchTerm('');
                     }
+                } else if (searchTerm.trim().length > 0) {
+                    // Agent 4: Allow forcing subscription to a symbol even if not in the Available list
+                    // This handles cases where backend supports dynamic symbol creation or the list is stale
+                    subscribeToSymbol(searchTerm.trim().toUpperCase());
                 }
                 break;
             case 'Escape':
@@ -313,7 +323,7 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                 inputRef.current?.blur();
                 break;
         }
-    }, [showSearchDropdown, filteredAvailableSymbols, selectedDropdownIndex, subscribedSymbols, ticks, subscribeToSymbol, onSymbolSelect]);
+    }, [showSearchDropdown, filteredAvailableSymbols, selectedDropdownIndex, subscribedSymbols, subscribeToSymbol, onSymbolSelect]);
 
     // Reset selected index when filtered list changes
     useEffect(() => {
@@ -354,7 +364,8 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
 
     const handleQuickBuy = useCallback(async () => {
         const symbol = contextMenu.state.data || selectedSymbol;
-        const tick = ticks[symbol];
+        const currentTicks = useAppStore.getState().ticks;
+        const tick = currentTicks[symbol];
         if (!symbol || !tick) {
             alert('Please select a symbol first');
             contextMenu.close();
@@ -379,11 +390,12 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
             console.error('Quick buy error:', error);
         }
         contextMenu.close();
-    }, [contextMenu, selectedSymbol, ticks]);
+    }, [contextMenu, selectedSymbol]);
 
     const handleQuickSell = useCallback(async () => {
         const symbol = contextMenu.state.data || selectedSymbol;
-        const tick = ticks[symbol];
+        const currentTicks = useAppStore.getState().ticks;
+        const tick = currentTicks[symbol];
         if (!symbol || !tick) {
             alert('Please select a symbol first');
             contextMenu.close();
@@ -408,7 +420,7 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
             console.error('Quick sell error:', error);
         }
         contextMenu.close();
-    }, [contextMenu, selectedSymbol, ticks]);
+    }, [contextMenu, selectedSymbol]);
 
     const handleChartWindow = useCallback(() => {
         const symbol = contextMenu.state.data || selectedSymbol;
@@ -443,9 +455,10 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
 
     // Export symbols as CSV
     const handleExport = useCallback(() => {
+        const currentTicks = useAppStore.getState().ticks;
         const headers = ['Symbol', 'Bid', 'Ask', 'Spread (pips)', 'Daily Change %'];
-        const rows = Object.keys(ticks).map(sym => {
-            const t = ticks[sym];
+        const rows = Object.keys(currentTicks).map(sym => {
+            const t = currentTicks[sym];
             const spreadInPips = Math.round((t.spread || (t.ask - t.bid)) * 10000);
             return [sym, t.bid, t.ask, spreadInPips, t.dailyChange || 0].join(',');
         });
@@ -458,7 +471,7 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         a.click();
         URL.revokeObjectURL(url);
         contextMenu.close();
-    }, [ticks, contextMenu]);
+    }, [contextMenu]);
 
     // Open Depth of Market modal
     const handleDepthOfMarket = useCallback(() => {
@@ -491,32 +504,70 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
     });
 
     // Convert to useMemo for reactivity (Agent 3 fix - eliminates state sync race condition)
-    const uniqueSymbols = useMemo(() => {
-        return Array.from(new Set([
-            ...allSymbols.map(s => s.symbol || s),
-            ...Object.keys(ticks),
-            ...subscribedSymbols  // Include manually subscribed symbols
+    const processedSymbols = useMemo(() => {
+        const currentTicks = useAppStore.getState().ticks;
+        // Combine all potential symbol sources
+        const uniqueSymbols = Array.from(new Set([
+            // Agent 4 Fix: removed ...allSymbols from here to preventing showing unsubscribed 'ghost' rows
+            ...Object.keys(currentTicks),
+            ...subscribedSymbols
         ]));
-    }, [allSymbols, ticks, subscribedSymbols]);
 
-    let processedSymbols = uniqueSymbols.filter(s =>
-        (s || '').toLowerCase().includes(searchTerm.toLowerCase()) &&
-        !hiddenSymbols.includes(s)
-    );
+        let result = uniqueSymbols.filter(s => {
+            if (!s || s.trim().length === 0) return false;
+            if (s.startsWith('-')) return false; // Filter out spacer rows
+            if (hiddenSymbols.includes(s)) return false;
 
-    // Sorting Logic
-    if (sortBy === 'symbol') {
-        processedSymbols.sort((a, b) => a.localeCompare(b));
-    } else if (sortBy === 'gainers') {
-        processedSymbols.sort((a, b) => (ticks[b]?.dailyChange || 0) - (ticks[a]?.dailyChange || 0));
-    } else if (sortBy === 'losers') {
-        processedSymbols.sort((a, b) => (ticks[a]?.dailyChange || 0) - (ticks[b]?.dailyChange || 0));
-    } else if (sortBy === 'volume') {
-        processedSymbols.sort((a, b) => (ticks[b]?.volume || 0) - (ticks[a]?.volume || 0));
-    } else {
-        // Default sort (usually alphabetical or by adding order)
-        processedSymbols.sort();
-    }
+            // LP Filter: Show only real data (YOFX) if enabled
+            if (showOnlyRealData) {
+                const tick = currentTicks[s];
+                if (tick && tick.lp !== 'YOFX') return false;
+            }
+
+            // CRITICAL: Filter out FIX variant symbols with suffixes and numbers
+            // Reject: USDCAD1, USDCHF.H, USDCHF.h, USDCHF.c, AUDCHF!, BTCUSD.H, etc.
+            // Allow: EURUSD, XAUUSD, BTCUSD, US30, JP225, GOLD.APL2025, SILVER.DEC2024
+
+            // Pattern: Reject if symbol ends with:
+            // - Digit followed by nothing (e.g., USDCAD1)
+            // - Dot followed by single letter (e.g., .H, .h, .c) UNLESS it's a known futures contract
+            // - Exclamation mark (e.g., AUDCHF!)
+
+            const isFuturesContract = /\.(APL|DEC|MAR|JUN|SEP)\d{4}$/.test(s); // GOLD.APL2025, SILVER.DEC2024
+            if (isFuturesContract) return true; // Allow futures contracts
+
+            const hasInvalidSuffix = /[!]$/.test(s); // Ends with !
+            const hasSingleLetterSuffix = /\.[a-zA-Z]$/.test(s); // Ends with .H, .h, .c
+            const hasSlash = s.includes('/'); // Reject AUD/CHF, BTC/USD
+
+            // Reject symbols ending with digits like '1', '2' etc ONLY if they follow a 6-character forex-like string
+            // Allow: AU200, US30, JP225, GER40, etc.
+            // Reject: USDCAD1, AUDCHF.H1, etc.
+            const hasVariantNumberSuffix = /[A-Z]{6}\d+$/.test(s) || /[A-Z]{3,}\.[a-zA-Z]\d+$/.test(s);
+
+            if (hasInvalidSuffix || hasSingleLetterSuffix || hasSlash || hasVariantNumberSuffix) {
+                return false; // Reject variants
+            }
+
+            return true;
+        });
+
+        // Sorting Logic
+        if (sortBy === 'symbol') {
+            result.sort((a, b) => a.localeCompare(b));
+        } else if (sortBy === 'gainers') {
+            result.sort((a, b) => (currentTicks[b]?.dailyChange || 0) - (currentTicks[a]?.dailyChange || 0));
+        } else if (sortBy === 'losers') {
+            result.sort((a, b) => (currentTicks[a]?.dailyChange || 0) - (currentTicks[b]?.dailyChange || 0));
+        } else if (sortBy === 'volume') {
+            result.sort((a, b) => (currentTicks[b]?.volume || 0) - (currentTicks[a]?.volume || 0));
+        } else {
+            // Default sort
+            result.sort();
+        }
+
+        return result;
+    }, [allSymbols, subscribedSymbols, hiddenSymbols, sortBy, showOnlyRealData]);
 
     // Build context menu items configuration
     const menuItems: ContextMenuItemConfig[] = useMemo(() => [
@@ -528,11 +579,11 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
         { label: 'Tick Chart', action: () => { setActiveTab('ticks'); contextMenu.close(); } },
         { label: 'Depth of Market', shortcut: 'Alt+B', action: handleDepthOfMarket },
         { label: 'Popup Prices', shortcut: 'F10', action: handlePopupPrices },
-        { divider: true },
+        { label: 'Separator 1', divider: true },
         { label: 'Visibility', divider: true },
         { label: 'Hide', shortcut: 'Delete', action: handleHideSymbol },
         { label: 'Show All', action: handleShowAll },
-        { divider: true },
+        { label: 'Separator 2', divider: true },
         { label: 'Configuration', divider: true },
         { label: 'Symbols', shortcut: 'Ctrl+U', action: handleOpenSymbols },
         {
@@ -541,7 +592,7 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                 { label: 'forex.all', action: () => contextMenu.close() },
                 { label: 'forex.major', action: () => contextMenu.close() },
                 { label: 'forex.crosses', action: () => contextMenu.close() },
-                { divider: true },
+                { label: 'Separator Sets', divider: true },
                 { label: 'Save as...', icon: <Clock size={12} />, action: () => contextMenu.close() },
                 { label: 'Remove', submenu: [] }
             ]
@@ -553,19 +604,19 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                 { label: 'Gainers', checked: sortBy === 'gainers', action: () => setSortBy('gainers') },
                 { label: 'Losers', checked: sortBy === 'losers', action: () => setSortBy('losers') },
                 { label: 'Volume', checked: sortBy === 'volume', action: () => setSortBy('volume') },
-                { divider: true },
+                { label: 'Separator Sort', divider: true },
                 { label: 'Reset', action: () => setSortBy(null) }
             ]
         },
         { label: 'Export', action: handleExport },
-        { divider: true },
+        { label: 'Separator 3', divider: true },
         { label: 'System Options', divider: true },
         { label: 'Use System Colors', checked: systemOptions.useSystemColors, action: () => toggleSystemOption('useSystemColors') },
         { label: 'Show Milliseconds', checked: systemOptions.showMilliseconds, action: () => toggleSystemOption('showMilliseconds') },
         { label: 'Auto Remove Expired', checked: systemOptions.autoRemoveExpired, action: () => toggleSystemOption('autoRemoveExpired') },
         { label: 'Auto Arrange', checked: systemOptions.autoArrange, action: () => toggleSystemOption('autoArrange') },
         { label: 'Grid', checked: systemOptions.showGrid, action: () => toggleSystemOption('showGrid') },
-        { divider: true },
+        { label: 'Separator 4', divider: true },
         {
             label: 'Columns',
             submenu: ALL_COLUMNS
@@ -599,118 +650,23 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
             {/* Header Bar */}
             <div className="px-2 py-1 bg-[#2d3436] border-b border-zinc-700 text-xs font-bold text-zinc-400 uppercase tracking-wider flex justify-between items-center">
                 <span>Market Watch: {new Date().toLocaleTimeString()}</span>
+                <button
+                    onClick={() => setShowOnlyRealData(!showOnlyRealData)}
+                    className={`px-2 py-0.5 text-[10px] rounded transition-colors ${showOnlyRealData
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
+                        : 'text-zinc-500 hover:text-zinc-300 border border-zinc-700 hover:border-zinc-600'
+                        }`}
+                    title={showOnlyRealData ? 'Showing only real data (YOFX)' : 'Showing all data (Real + Simulated)'}
+                >
+                    {showOnlyRealData ? '✓ Real Only' : 'All Data'}
+                </button>
             </div>
 
-            {/* Search (Only in Symbols view) */}
-            {activeTab === 'symbols' && (
-                <div className="p-1 border-b border-zinc-700 bg-[#1e1e1e]" ref={searchRef}>
-                    <div className="relative">
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            placeholder="Click to add symbol..."
-                            value={searchTerm}
-                            onChange={(e) => {
-                                setSearchTerm(e.target.value);
-                                setShowSearchDropdown(true);
-                            }}
-                            onFocus={() => setShowSearchDropdown(true)}
-                            onKeyDown={handleSearchKeyDown}
-                            className="w-full bg-[#2d3436] border border-zinc-600 rounded-sm px-2 py-0.5 text-xs text-zinc-300 focus:outline-none focus:border-yellow-500 placeholder:text-zinc-500"
-                        />
-                        <Search size={10} className="absolute right-2 top-1.5 text-zinc-500" />
-
-                        {/* Symbol Search Dropdown */}
-                        {showSearchDropdown && (
-                            <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-[#1e1e1e] border border-zinc-600 rounded shadow-xl max-h-64 overflow-y-auto">
-                                {/* Dynamic categories from API response */}
-                                {(() => {
-                                    // Get unique categories from available symbols (dynamic, not hardcoded)
-                                    const uniqueCategories = [...new Set(filteredAvailableSymbols.map(s => s.category))];
-                                    let globalIndex = 0; // Track global index across categories for keyboard nav
-
-                                    return uniqueCategories.map(category => {
-                                        const categorySymbols = filteredAvailableSymbols.filter(s => s.category === category);
-                                        if (categorySymbols.length === 0) return null;
-
-                                        // Format category label (e.g., "forex.major" -> "Forex Major")
-                                        const categoryLabel = category
-                                            .split('.')
-                                            .map(s => s.charAt(0).toUpperCase() + s.slice(1))
-                                            .join(' ');
-
-                                        return (
-                                            <div key={category}>
-                                                <div className="px-2 py-1 text-[9px] font-bold text-zinc-500 uppercase tracking-wider bg-[#2d3436] sticky top-0">
-                                                    {categoryLabel}
-                                                </div>
-                                                {categorySymbols.map(sym => {
-                                                    const isSubscribed = subscribedSymbols.includes(sym.symbol) || Object.keys(ticks).includes(sym.symbol);
-                                                    const isLoading = isSubscribing === sym.symbol;
-                                                    const isKeyboardSelected = globalIndex === selectedDropdownIndex;
-                                                    const currentIndex = globalIndex++;
-
-                                                    return (
-                                                        <div
-                                                            key={sym.symbol}
-                                                            className={`flex items-center justify-between px-2 py-1.5 hover:bg-[#3b82f6] hover:text-white cursor-pointer text-xs group ${isSubscribed ? 'bg-emerald-900/20' : ''} ${isKeyboardSelected ? 'bg-yellow-900/30 border-l-2 border-yellow-500' : ''}`}
-                                                            onClick={() => {
-                                                                if (!isSubscribed && !isLoading) {
-                                                                    subscribeToSymbol(sym.symbol);
-                                                                } else if (isSubscribed) {
-                                                                    onSymbolSelect(sym.symbol);
-                                                                    setShowSearchDropdown(false);
-                                                                    setSearchTerm('');
-                                                                }
-                                                            }}
-                                                        >
-                                                            <div className="flex flex-col">
-                                                                <span className="font-medium text-zinc-200">{sym.symbol}</span>
-                                                                <span className="text-[9px] text-zinc-500">{sym.name}</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-1">
-                                                                {isLoading ? (
-                                                                    <span className="text-[9px] text-yellow-400 animate-pulse">Adding...</span>
-                                                                ) : isSubscribed ? (
-                                                                    ticks[sym.symbol] ? (
-                                                                        <span className="text-[9px] text-emerald-400 flex items-center gap-0.5">
-                                                                            <Check size={10} /> Active
-                                                                        </span>
-                                                                    ) : (
-                                                                        <span className="text-[9px] text-yellow-600 flex items-center gap-0.5" title="Subscribed but no market data yet">
-                                                                            <Clock size={10} /> Waiting
-                                                                        </span>
-                                                                    )
-                                                                ) : (
-                                                                    <span className="text-[9px] text-blue-400 flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
-                                                                        <Plus size={10} /> Add
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        );
-                                    });
-                                })()}
-                                {filteredAvailableSymbols.length === 0 && (
-                                    <div className="px-3 py-4 text-center text-zinc-500 text-xs">
-                                        No symbols found matching "{searchTerm}"
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
             {/* Content Area Based on Tab */}
-            <div className="flex-1 overflow-hidden flex flex-col relative">
-
+            <div className="flex-1 overflow-hidden flex flex-col relative min-h-0">
                 {/* 1. SYMBOLS TAB */}
                 {activeTab === 'symbols' && (
-                    <div className="flex-1 flex flex-col">
+                    <div className="flex-1 flex flex-col h-full">
                         {/* Column Headers */}
                         <div className="flex px-2 py-1 bg-[#2d3436] text-[10px] font-bold text-zinc-500 border-b border-zinc-700">
                             {ALL_COLUMNS.filter(c => visibleColumns.includes(c.id)).map(col => (
@@ -719,12 +675,81 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
                                 </span>
                             ))}
                         </div>
-                        <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-zinc-700">
+
+                        {/* Scrollable Container */}
+                        <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-zinc-500 relative">
+                            {/* Click to add row - Sticky at Top (Inside Scroll Container) */}
+                            <div className="sticky top-0 z-20 px-2 py-1 border-b border-zinc-700/50 bg-[#252526] hover:bg-[#2d2d2d] transition-colors min-h-[32px] flex items-center shadow-md box-border" ref={searchRef}>
+                                {showSearchDropdown ? (
+                                    <div className="relative w-full">
+                                        <input
+                                            ref={inputRef}
+                                            autoFocus
+                                            type="text"
+                                            className="w-full bg-[#1e1e1e] border border-blue-500 text-xs text-white px-1 outline-none h-5"
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            onKeyDown={handleSearchKeyDown}
+                                            disabled={!!isSubscribing}
+                                            onBlur={() => {
+                                                // Optional: delay close to allow click
+                                            }}
+                                        />
+                                        {/* Dropdown via Portal */}
+                                        {dropdownPos && createPortal(
+                                            <div
+                                                className="fixed z-[9999] bg-[#1e1e1e] border border-zinc-600 rounded shadow-xl overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-500 scrollbar-track-zinc-800"
+                                                style={{
+                                                    top: dropdownPos.top,
+                                                    left: dropdownPos.left,
+                                                    width: dropdownPos.width,
+                                                    maxHeight: '256px'
+                                                }}
+                                            >
+                                                {filteredAvailableSymbols.map((sym, idx) => (
+                                                    <div
+                                                        key={sym.symbol}
+                                                        className={`px-2 py-1 hover:bg-[#3b82f6] hover:text-white cursor-pointer text-xs flex justify-between ${idx === selectedDropdownIndex ? 'bg-blue-900/40' : ''}`}
+                                                        onClick={() => {
+                                                            subscribeToSymbol(sym.symbol);
+                                                            setSearchTerm('');
+                                                        }}
+                                                    >
+                                                        <span>{sym.symbol}</span>
+                                                        <span className="text-[10px] text-zinc-500">{sym.name}</span>
+                                                    </div>
+                                                ))}
+                                                {filteredAvailableSymbols.length === 0 && (
+                                                    <div className="px-2 py-1 text-zinc-500 text-xs italic">No symbols found</div>
+                                                )}
+                                            </div>,
+                                            document.body
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div
+                                        className="flex items-center justify-between w-full cursor-text opacity-70 hover:opacity-100 transition-opacity"
+                                        onClick={() => {
+                                            setShowSearchDropdown(true);
+                                            setSearchTerm('');
+                                        }}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <Plus size={14} className="text-green-500" />
+                                            <span className="text-xs text-zinc-400 font-mono italic">click to add...</span>
+                                        </div>
+                                        <span className="text-xs text-zinc-500 font-mono">
+                                            {subscribedSymbols.length} / {availableSymbols.length || 80}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Symbol List */}
                             {processedSymbols.map((symbol, idx) => (
                                 <MarketWatchRow
                                     key={symbol}
                                     symbol={symbol}
-                                    tick={ticks[symbol]}
                                     selected={symbol === selectedSymbol}
                                     onClick={() => onSymbolSelect(symbol)}
                                     index={idx}
@@ -739,24 +764,22 @@ export const MarketWatchPanel: React.FC<MarketWatchPanelProps> = ({
 
                 {/* 2. DETAILS TAB */}
                 {activeTab === 'details' && (
-                    <DetailsView symbol={selectedSymbol} tick={ticks[selectedSymbol]} />
+                    <DetailsView symbol={selectedSymbol} />
                 )}
 
                 {/* 3. TRADING TAB */}
                 {activeTab === 'trading' && (
                     <div className="flex-1 overflow-y-auto p-1 scrollbar-thin scrollbar-thumb-zinc-700 grid grid-cols-1 gap-1">
-                        {/* Display mini trading panels for visible symbols (limited to 10 for performance if list is long) */}
                         {processedSymbols.slice(0, 20).map(symbol => (
-                            <TradingPanelRow key={symbol} symbol={symbol} tick={ticks[symbol]} />
+                            <TradingPanelRow key={symbol} symbol={symbol} />
                         ))}
                     </div>
                 )}
 
                 {/* 4. TICKS TAB */}
                 {activeTab === 'ticks' && (
-                    <TicksView symbol={selectedSymbol} tick={ticks[selectedSymbol]} />
+                    <TicksView symbol={selectedSymbol} />
                 )}
-
             </div>
 
             {/* Bottom Tabs */}
@@ -784,8 +807,107 @@ const TabButton = ({ label, active, onClick }: { label: string, active: boolean,
     </div>
 );
 
-const DetailsView = ({ symbol, tick }: { symbol: string, tick?: Tick }) => {
-    if (!tick) return <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs">select a symbol</div>;
+// Fallback symbol specifications when API is unavailable
+const FALLBACK_SYMBOL_SPECS: Record<string, {
+    description: string;
+    contractSize: number;
+    pipValue: number;
+    pipPosition: number;
+    minLot: number;
+    maxLot: number;
+    lotStep: number;
+    marginRate: number;
+    swapLong: number;
+    swapShort: number;
+    commission: number;
+    baseCurrency: string;
+    quoteCurrency: string;
+}> = {
+    EURUSD: { description: 'Euro vs US Dollar', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.5, swapShort: 0.2, commission: 0.0, baseCurrency: 'EUR', quoteCurrency: 'USD' },
+    GBPUSD: { description: 'British Pound vs US Dollar', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.8, swapShort: 0.3, commission: 0.0, baseCurrency: 'GBP', quoteCurrency: 'USD' },
+    USDJPY: { description: 'US Dollar vs Japanese Yen', contractSize: 100000, pipValue: 1000.0, pipPosition: 3, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.3, swapShort: 0.1, commission: 0.0, baseCurrency: 'USD', quoteCurrency: 'JPY' },
+    USDCHF: { description: 'US Dollar vs Swiss Franc', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.4, swapShort: 0.15, commission: 0.0, baseCurrency: 'USD', quoteCurrency: 'CHF' },
+    USDCAD: { description: 'US Dollar vs Canadian Dollar', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.35, swapShort: 0.12, commission: 0.0, baseCurrency: 'USD', quoteCurrency: 'CAD' },
+    AUDUSD: { description: 'Australian Dollar vs US Dollar', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.6, swapShort: 0.25, commission: 0.0, baseCurrency: 'AUD', quoteCurrency: 'USD' },
+    NZDUSD: { description: 'New Zealand Dollar vs US Dollar', contractSize: 100000, pipValue: 10.0, pipPosition: 5, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.01, swapLong: -0.55, swapShort: 0.2, commission: 0.0, baseCurrency: 'NZD', quoteCurrency: 'USD' },
+    XAUUSD: { description: 'Gold vs US Dollar', contractSize: 100, pipValue: 1.0, pipPosition: 2, minLot: 0.01, maxLot: 50.0, lotStep: 0.01, marginRate: 0.02, swapLong: -2.5, swapShort: 0.5, commission: 0.0, baseCurrency: 'XAU', quoteCurrency: 'USD' },
+    XAGUSD: { description: 'Silver vs US Dollar', contractSize: 5000, pipValue: 5.0, pipPosition: 3, minLot: 0.01, maxLot: 50.0, lotStep: 0.01, marginRate: 0.02, swapLong: -1.5, swapShort: 0.3, commission: 0.0, baseCurrency: 'XAG', quoteCurrency: 'USD' },
+    BTCUSD: { description: 'Bitcoin vs US Dollar', contractSize: 1, pipValue: 1.0, pipPosition: 2, minLot: 0.01, maxLot: 10.0, lotStep: 0.01, marginRate: 0.1, swapLong: -5.0, swapShort: -5.0, commission: 0.1, baseCurrency: 'BTC', quoteCurrency: 'USD' },
+    ETHUSD: { description: 'Ethereum vs US Dollar', contractSize: 1, pipValue: 1.0, pipPosition: 2, minLot: 0.01, maxLot: 100.0, lotStep: 0.01, marginRate: 0.1, swapLong: -5.0, swapShort: -5.0, commission: 0.1, baseCurrency: 'ETH', quoteCurrency: 'USD' },
+};
+
+const DEFAULT_SPEC = {
+    description: 'Currency Pair',
+    contractSize: 100000,
+    pipValue: 10.0,
+    pipPosition: 5,
+    minLot: 0.01,
+    maxLot: 100.0,
+    lotStep: 0.01,
+    marginRate: 0.01,
+    swapLong: -0.5,
+    swapShort: 0.2,
+    commission: 0.0,
+    baseCurrency: 'XXX',
+    quoteCurrency: 'USD',
+};
+
+interface SymbolSpec {
+    symbol: string;
+    description: string;
+    contractSize: number;
+    pipValue: number;
+    pipPosition: number;
+    minLot: number;
+    maxLot: number;
+    lotStep: number;
+    marginRate: number;
+    swapLong: number;
+    swapShort: number;
+    commission: number;
+    baseCurrency: string;
+    quoteCurrency: string;
+}
+
+const DetailsView = ({ symbol }: { symbol: string }) => {
+    const tick = useTick(symbol);
+    const [spec, setSpec] = useState<SymbolSpec | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [dataSource, setDataSource] = useState<'api' | 'fallback'>('fallback');
+
+    // Fetch symbol spec from API with fallback
+    useEffect(() => {
+        if (!symbol) return;
+
+        const fetchSpec = async () => {
+            setIsLoading(true);
+            try {
+                const response = await fetch(`${API_BASE}/api/symbols/${symbol}/spec`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setSpec(data);
+                    setDataSource('api');
+                    console.log(`[DetailsView] Loaded spec for ${symbol} from API`);
+                } else {
+                    throw new Error('API returned non-OK status');
+                }
+            } catch (error) {
+                console.log(`[DetailsView] API failed for ${symbol}, using fallback data`);
+                // Use fallback data
+                const fallback = FALLBACK_SYMBOL_SPECS[symbol] || DEFAULT_SPEC;
+                setSpec({
+                    symbol,
+                    ...fallback
+                });
+                setDataSource('fallback');
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        fetchSpec();
+    }, [symbol]);
+
+    if (!symbol) return <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs">select a symbol</div>;
 
     const Row = ({ label, value, color }: { label: string, value: string, color?: string }) => (
         <div className="flex justify-between items-center py-1 border-b border-zinc-800/50 text-xs">
@@ -794,33 +916,155 @@ const DetailsView = ({ symbol, tick }: { symbol: string, tick?: Tick }) => {
         </div>
     );
 
-    return (
-        <div className="flex-1 p-3 overflow-y-auto">
-            <div className="text-sm font-bold text-white mb-1">{symbol}</div>
-            <div className="text-[10px] text-zinc-400 mb-4">{/* Description placeholder */}Generic Stock/Forex Pair</div>
+    const SectionHeader = ({ title }: { title: string }) => (
+        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mt-3 mb-1 border-b border-zinc-700 pb-1">{title}</div>
+    );
 
+    return (
+        <div className="flex-1 p-3 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-600">
+            {/* Header */}
+            <div className="flex justify-between items-start mb-2">
+                <div>
+                    <div className="text-sm font-bold text-white">{symbol}</div>
+                    <div className="text-[10px] text-zinc-400">{spec?.description || 'Loading...'}</div>
+                </div>
+                <div className={`text-[9px] px-1.5 py-0.5 rounded ${dataSource === 'api' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                    {isLoading ? '...' : dataSource === 'api' ? '● Live' : '○ Fallback'}
+                </div>
+            </div>
+
+            {/* Market Data Section */}
+            <SectionHeader title="Market Data" />
             <div className="space-y-0.5">
-                <Row label="Bid" value={tick.bid.toFixed(5)} color="text-[#f87171]" />
-                <Row label="Bid High" value={(tick.high || tick.bid).toFixed(5)} color="text-[#4ade80]" />
-                <Row label="Bid Low" value={(tick.low || tick.bid).toFixed(5)} color="text-[#f87171]" />
-                <div className="h-2"></div>
-                <Row label="Ask" value={tick.ask.toFixed(5)} color="text-[#4ade80]" />
-                <Row label="Ask High" value={(tick.high || tick.ask).toFixed(5)} color="text-[#4ade80]" />
-                <Row label="Ask Low" value={(tick.low || tick.ask).toFixed(5)} color="text-[#f87171]" />
-                <div className="h-2"></div>
-                <Row label="Open Price" value={(tick.open || tick.bid).toFixed(5)} />
-                <Row label="Close Price" value={(tick.close || tick.bid).toFixed(5)} />
-                <div className="h-2"></div>
-                <Row label="Daily Change" value={`${(tick.dailyChange || 0) >= 0 ? '+' : ''}${(tick.dailyChange || 0).toFixed(2)}%`} color={(tick.dailyChange || 0) >= 0 ? "text-[#4ade80]" : "text-[#f87171]"} />
+                <Row label="Bid" value={tick?.bid?.toFixed(spec?.pipPosition || 5) || 'Waiting...'} color="text-[#f87171]" />
+                <Row label="Ask" value={tick?.ask?.toFixed(spec?.pipPosition || 5) || 'Waiting...'} color="text-[#4ade80]" />
+                <Row label="Spread" value={tick ? `${((tick.ask - tick.bid) * Math.pow(10, spec?.pipPosition || 5 - 1)).toFixed(1)} pips` : '-'} />
+                <Row label="Daily Change" value={tick ? `${(tick.dailyChange || 0) >= 0 ? '+' : ''}${(tick.dailyChange || 0).toFixed(2)}%` : '-'} color={(tick?.dailyChange || 0) >= 0 ? "text-[#4ade80]" : "text-[#f87171]"} />
+            </div>
+
+            {/* Price Levels Section */}
+            <SectionHeader title="Price Levels" />
+            <div className="space-y-0.5">
+                <Row label="High" value={tick?.high?.toFixed(spec?.pipPosition || 5) || '-'} color="text-[#4ade80]" />
+                <Row label="Low" value={tick?.low?.toFixed(spec?.pipPosition || 5) || '-'} color="text-[#f87171]" />
+                <Row label="Open" value={tick?.open?.toFixed(spec?.pipPosition || 5) || '-'} />
+                <Row label="Close" value={tick?.close?.toFixed(spec?.pipPosition || 5) || '-'} />
+            </div>
+
+            {/* Contract Specifications Section */}
+            <SectionHeader title="Contract Specifications" />
+            <div className="space-y-0.5">
+                <Row label="Contract Size" value={spec ? spec.contractSize.toLocaleString() : '-'} />
+                <Row label="Pip Value" value={spec ? `$${spec.pipValue.toFixed(2)}` : '-'} />
+                <Row label="Min Lot" value={spec?.minLot?.toString() || '-'} />
+                <Row label="Max Lot" value={spec?.maxLot?.toString() || '-'} />
+                <Row label="Lot Step" value={spec?.lotStep?.toString() || '-'} />
+            </div>
+
+            {/* Trading Conditions Section */}
+            <SectionHeader title="Trading Conditions" />
+            <div className="space-y-0.5">
+                <Row label="Margin Rate" value={spec ? `${(spec.marginRate * 100).toFixed(1)}%` : '-'} />
+                <Row label="Swap Long" value={spec ? `${spec.swapLong.toFixed(2)}` : '-'} color={spec && spec.swapLong < 0 ? 'text-[#f87171]' : 'text-[#4ade80]'} />
+                <Row label="Swap Short" value={spec ? `${spec.swapShort.toFixed(2)}` : '-'} color={spec && spec.swapShort < 0 ? 'text-[#f87171]' : 'text-[#4ade80]'} />
+                <Row label="Commission" value={spec ? `$${spec.commission.toFixed(2)}` : '-'} />
+            </div>
+
+            {/* Currency Info Section */}
+            <SectionHeader title="Currency Info" />
+            <div className="space-y-0.5">
+                <Row label="Base Currency" value={spec?.baseCurrency || '-'} />
+                <Row label="Quote Currency" value={spec?.quoteCurrency || '-'} />
             </div>
         </div>
     );
 };
 
-const TradingPanelRow = ({ symbol, tick }: { symbol: string, tick?: Tick }) => {
-    if (!tick) return null;
+const TradingPanelRow = ({ symbol }: { symbol: string }) => {
+    const tick = useTick(symbol);
+    const [volume, setVolume] = useState('0.10');
+    const [isOrdering, setIsOrdering] = useState<'BUY' | 'SELL' | null>(null);
+    const [orderResult, setOrderResult] = useState<{ success: boolean; message: string } | null>(null);
+
+    // Place market order via API
+    const placeOrder = async (side: 'BUY' | 'SELL') => {
+        if (!tick) return;
+
+        const volumeNum = parseFloat(volume);
+        if (isNaN(volumeNum) || volumeNum <= 0) {
+            setOrderResult({ success: false, message: 'Invalid volume' });
+            setTimeout(() => setOrderResult(null), 2000);
+            return;
+        }
+
+        setIsOrdering(side);
+        setOrderResult(null);
+
+        try {
+            const response = await fetch(`${API_BASE}/api/orders/market`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    symbol,
+                    side,
+                    quantity: volumeNum,
+                    accountId: 'RTX-000001'
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success || result.order) {
+                setOrderResult({ success: true, message: `${side} ${volumeNum} ${symbol} ✓` });
+                console.log(`[Trading] Order placed: ${side} ${volumeNum} ${symbol}`);
+            } else {
+                throw new Error(result.error || 'Order failed');
+            }
+        } catch (error) {
+            console.error(`[Trading] Order error:`, error);
+            setOrderResult({ success: false, message: error instanceof Error ? error.message : 'Order failed' });
+        } finally {
+            setIsOrdering(null);
+            setTimeout(() => setOrderResult(null), 3000);
+        }
+    };
+
+    // Show placeholder if no tick data
+    if (!tick) {
+        return (
+            <div className="bg-[#2d3436] rounded border border-zinc-700 p-1 flex items-center justify-between opacity-50">
+                <div className="flex flex-col w-1/4">
+                    <span className="text-zinc-100 font-bold text-xs">{symbol}</span>
+                    <span className="text-[9px] text-zinc-500">Waiting for data...</span>
+                </div>
+                <div className="flex gap-1 flex-1 justify-end">
+                    <div className="flex flex-col bg-zinc-800/50 border border-zinc-700 rounded px-2 py-1 w-20 opacity-50">
+                        <span className="text-[9px] text-zinc-500 font-bold">SELL</span>
+                        <span className="text-sm font-mono text-zinc-500">-.-----</span>
+                    </div>
+                    <div className="flex flex-col justify-center items-center w-12">
+                        <input type="text" value={volume} onChange={e => setVolume(e.target.value)} className="w-10 bg-[#1e1e1e] border border-zinc-600 rounded text-center text-xs text-zinc-300 py-0.5" />
+                    </div>
+                    <div className="flex flex-col bg-zinc-800/50 border border-zinc-700 rounded px-2 py-1 w-20 opacity-50">
+                        <span className="text-[9px] text-zinc-500 font-bold">BUY</span>
+                        <span className="text-sm font-mono text-zinc-500">-.-----</span>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className="bg-[#2d3436] rounded border border-zinc-700 p-1 flex items-center justify-between">
+        <div className="bg-[#2d3436] rounded border border-zinc-700 p-1 flex items-center justify-between relative">
+            {/* Order Result Overlay */}
+            {orderResult && (
+                <div className={`absolute inset-0 flex items-center justify-center rounded z-10 ${orderResult.success ? 'bg-emerald-900/90' : 'bg-red-900/90'}`}>
+                    <span className={`text-xs font-bold ${orderResult.success ? 'text-emerald-300' : 'text-red-300'}`}>
+                        {orderResult.message}
+                    </span>
+                </div>
+            )}
+
             <div className="flex flex-col w-1/4">
                 <span className="text-zinc-100 font-bold text-xs">{symbol}</span>
                 <span className="text-[9px] text-zinc-500">{new Date().toLocaleTimeString()}</span>
@@ -828,17 +1072,38 @@ const TradingPanelRow = ({ symbol, tick }: { symbol: string, tick?: Tick }) => {
 
             <div className="flex gap-1 flex-1 justify-end">
                 {/* Sell Btn */}
-                <div className="flex flex-col bg-red-900/20 border border-red-800/50 rounded px-2 py-1 w-20 cursor-pointer hover:bg-red-900/40 transition-colors group">
-                    <span className="text-[9px] text-red-400 font-bold group-hover:text-red-300">SELL</span>
+                <div
+                    onClick={() => !isOrdering && placeOrder('SELL')}
+                    className={`flex flex-col bg-red-900/20 border border-red-800/50 rounded px-2 py-1 w-20 cursor-pointer transition-all group
+                        ${isOrdering === 'SELL' ? 'animate-pulse opacity-50' : 'hover:bg-red-900/40'}
+                        ${isOrdering && isOrdering !== 'SELL' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                    <span className="text-[9px] text-red-400 font-bold group-hover:text-red-300">
+                        {isOrdering === 'SELL' ? '...' : 'SELL'}
+                    </span>
                     <span className="text-sm font-mono text-zinc-200">{tick.bid.toFixed(5)}</span>
                 </div>
+
                 {/* Lots */}
                 <div className="flex flex-col justify-center items-center w-12">
-                    <input type="text" defaultValue="0.10" className="w-10 bg-[#1e1e1e] border border-zinc-600 rounded text-center text-xs text-zinc-300 py-0.5" />
+                    <input
+                        type="text"
+                        value={volume}
+                        onChange={e => setVolume(e.target.value)}
+                        className="w-10 bg-[#1e1e1e] border border-zinc-600 rounded text-center text-xs text-zinc-300 py-0.5 focus:border-blue-500 focus:outline-none"
+                    />
                 </div>
+
                 {/* Buy Btn */}
-                <div className="flex flex-col bg-emerald-900/20 border border-emerald-800/50 rounded px-2 py-1 w-20 cursor-pointer hover:bg-emerald-900/40 transition-colors group">
-                    <span className="text-[9px] text-emerald-400 font-bold group-hover:text-emerald-300">BUY</span>
+                <div
+                    onClick={() => !isOrdering && placeOrder('BUY')}
+                    className={`flex flex-col bg-emerald-900/20 border border-emerald-800/50 rounded px-2 py-1 w-20 cursor-pointer transition-all group
+                        ${isOrdering === 'BUY' ? 'animate-pulse opacity-50' : 'hover:bg-emerald-900/40'}
+                        ${isOrdering && isOrdering !== 'BUY' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                    <span className="text-[9px] text-emerald-400 font-bold group-hover:text-emerald-300">
+                        {isOrdering === 'BUY' ? '...' : 'BUY'}
+                    </span>
                     <span className="text-sm font-mono text-zinc-200">{tick.ask.toFixed(5)}</span>
                 </div>
             </div>
@@ -846,65 +1111,186 @@ const TradingPanelRow = ({ symbol, tick }: { symbol: string, tick?: Tick }) => {
     );
 };
 
-const TicksView = ({ symbol, tick }: { symbol: string, tick?: Tick }) => {
-    // Mock tick history generator for visualization
-    // In a real app, this would come from a history buffer prop
-    const [history, setHistory] = useState<{ bid: number, ask: number, time: number }[]>([]);
+const TicksView = ({ symbol }: { symbol: string }) => {
+    const tick = useTick(symbol);
+    const [history, setHistory] = useState<{ bid: number, ask: number, time: number, spread?: number }[]>([]);
+    const [dataSource, setDataSource] = useState<'api' | 'realtime'>('realtime');
+    const [isLoading, setIsLoading] = useState(false);
+    const [tickCount, setTickCount] = useState(0);
 
+    // Fetch tick history from API on symbol change
+    useEffect(() => {
+        if (!symbol) return;
+
+        const fetchTickHistory = async () => {
+            setIsLoading(true);
+            try {
+                const response = await fetch(`${API_BASE}/api/ticks/?symbol=${symbol}&limit=50`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (Array.isArray(data) && data.length > 0) {
+                        // Transform API data to our format
+                        const apiHistory = data.map((t: any) => ({
+                            bid: t.bid || t.Bid || 0,
+                            ask: t.ask || t.Ask || 0,
+                            time: t.timestamp ? new Date(t.timestamp).getTime() : Date.now(),
+                            spread: t.spread || (t.ask - t.bid) || 0
+                        }));
+                        setHistory(apiHistory);
+                        setDataSource('api');
+                        setTickCount(apiHistory.length);
+                        console.log(`[TicksView] Loaded ${apiHistory.length} ticks for ${symbol} from API`);
+                        return;
+                    }
+                }
+                throw new Error('No tick data from API');
+            } catch (error) {
+                console.log(`[TicksView] API failed for ${symbol}, using real-time data`);
+                setDataSource('realtime');
+                setHistory([]);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchTickHistory();
+    }, [symbol]);
+
+    // Update history with real-time ticks (always append new ticks)
     useEffect(() => {
         if (tick) {
             setHistory(prev => {
-                const newH = [...prev, { bid: tick.bid, ask: tick.ask, time: Date.now() }];
-                if (newH.length > 50) return newH.slice(newH.length - 50);
+                const newTick = {
+                    bid: tick.bid,
+                    ask: tick.ask,
+                    time: Date.now(),
+                    spread: tick.ask - tick.bid
+                };
+                const newH = [...prev, newTick];
+                // Keep last 100 ticks
+                if (newH.length > 100) return newH.slice(newH.length - 100);
                 return newH;
             });
+            setTickCount(prev => prev + 1);
+            // Mark as real-time once we start receiving live ticks
+            if (dataSource === 'api') {
+                setDataSource('realtime');
+            }
         }
-    }, [tick]);
+    }, [tick?.bid, tick?.ask]);
 
-    if (!tick) return <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs">select a symbol</div>;
+    if (!symbol) return <div className="flex-1 flex items-center justify-center text-zinc-500 text-xs">select a symbol</div>;
 
-    // Simple SVG scaler
-    const minP = Math.min(...history.map(h => h.bid)) * 0.9999;
-    const maxP = Math.max(...history.map(h => h.ask)) * 1.0001;
+    // Chart calculations
+    const chartHistory = history.length > 0 ? history : [{ bid: 1, ask: 1, time: Date.now() }];
+    const minP = Math.min(...chartHistory.map(h => h.bid)) * 0.9999;
+    const maxP = Math.max(...chartHistory.map(h => h.ask)) * 1.0001;
     const range = maxP - minP || 0.0001;
-    const width = 300; // viewbox width
-    const height = 200; // viewbox height
+    const width = 300;
+    const height = 150;
 
     const getY = (p: number) => height - ((p - minP) / range) * height;
-    const getX = (i: number) => (i / (50 - 1)) * width;
+    const getX = (i: number) => (i / Math.max(chartHistory.length - 1, 1)) * width;
 
-    const bidPath = history.map((h, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(h.bid)}`).join(' ');
-    const askPath = history.map((h, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(h.ask)}`).join(' ');
+    const bidPath = chartHistory.map((h, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(h.bid)}`).join(' ');
+    const askPath = chartHistory.map((h, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(h.ask)}`).join(' ');
+
+    // Get last 10 ticks for table display
+    const recentTicks = history.slice(-10).reverse();
 
     return (
-        <div className="flex-1 flex flex-col p-2 bg-[#1e1e1e]">
+        <div className="flex-1 flex flex-col p-2 bg-[#1e1e1e] overflow-hidden">
+            {/* Header */}
             <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-bold text-white">{symbol}</span>
-                <span className="text-[10px] text-zinc-400">Real-time Ticks</span>
+                <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-white">{symbol}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded ${dataSource === 'api' ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                        {isLoading ? '...' : dataSource === 'api' ? '○ Historical' : '● Live'}
+                    </span>
+                </div>
+                <span className="text-[10px] text-zinc-400">{tickCount} ticks</span>
             </div>
-            <div className="flex-1 border border-zinc-700/50 bg-[#121212] relative overflow-hidden rounded-sm">
-                <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full" preserveAspectRatio="none">
-                    {/* Grid lines */}
-                    <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="#333" strokeDasharray="4" strokeWidth="1" />
-                    <line x1="0" y1={height / 4} x2={width} y2={height / 4} stroke="#222" strokeDasharray="4" strokeWidth="1" />
-                    <line x1="0" y1={height * 0.75} x2={width} y2={height * 0.75} stroke="#222" strokeDasharray="4" strokeWidth="1" />
 
-                    {/* Paths */}
-                    <path d={askPath} fill="none" stroke="#f87171" strokeWidth="1.5" />
-                    <path d={bidPath} fill="none" stroke="#3b82f6" strokeWidth="1.5" />
-                </svg>
+            {/* Chart */}
+            <div className="h-32 border border-zinc-700/50 bg-[#121212] relative overflow-hidden rounded-sm mb-2">
+                {history.length === 0 ? (
+                    <div className="absolute inset-0 flex items-center justify-center text-zinc-500 text-xs">
+                        {isLoading ? 'Loading tick history...' : 'Waiting for ticks...'}
+                    </div>
+                ) : (
+                    <>
+                        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full" preserveAspectRatio="none">
+                            {/* Grid lines */}
+                            <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="#333" strokeDasharray="4" strokeWidth="1" />
+                            <line x1="0" y1={height / 4} x2={width} y2={height / 4} stroke="#222" strokeDasharray="4" strokeWidth="1" />
+                            <line x1="0" y1={height * 0.75} x2={width} y2={height * 0.75} stroke="#222" strokeDasharray="4" strokeWidth="1" />
+                            {/* Paths */}
+                            <path d={askPath} fill="none" stroke="#f87171" strokeWidth="1.5" />
+                            <path d={bidPath} fill="none" stroke="#3b82f6" strokeWidth="1.5" />
+                        </svg>
+                        <div className="absolute top-1 right-1 text-[9px] text-red-400 font-mono">{tick?.ask?.toFixed(5) || '-'}</div>
+                        <div className="absolute bottom-1 right-1 text-[9px] text-blue-400 font-mono">{tick?.bid?.toFixed(5) || '-'}</div>
+                        <div className="absolute top-1 left-1 flex gap-2 text-[8px]">
+                            <span className="text-red-400">● Ask</span>
+                            <span className="text-blue-400">● Bid</span>
+                        </div>
+                    </>
+                )}
+            </div>
 
-                <div className="absolute top-1 right-1 text-[9px] text-red-400 font-mono">{tick.ask.toFixed(5)}</div>
-                <div className="absolute bottom-1 right-1 text-[9px] text-blue-400 font-mono">{tick.bid.toFixed(5)}</div>
+            {/* Tick Table */}
+            <div className="flex-1 overflow-hidden">
+                <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider mb-1 border-b border-zinc-700 pb-1">
+                    Recent Ticks
+                </div>
+                <div className="overflow-y-auto h-24 scrollbar-thin scrollbar-thumb-zinc-600">
+                    <table className="w-full text-[10px]">
+                        <thead className="sticky top-0 bg-[#1e1e1e]">
+                            <tr className="text-zinc-500">
+                                <th className="text-left font-medium py-0.5">Time</th>
+                                <th className="text-right font-medium py-0.5">Bid</th>
+                                <th className="text-right font-medium py-0.5">Ask</th>
+                                <th className="text-right font-medium py-0.5">Spread</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {recentTicks.length === 0 ? (
+                                <tr>
+                                    <td colSpan={4} className="text-center text-zinc-500 py-2 italic">
+                                        No tick data yet
+                                    </td>
+                                </tr>
+                            ) : (
+                                recentTicks.map((t, i) => (
+                                    <tr key={i} className="border-b border-zinc-800/30 hover:bg-zinc-800/30">
+                                        <td className="text-left text-zinc-400 py-0.5 font-mono">
+                                            {new Date(t.time).toLocaleTimeString()}
+                                        </td>
+                                        <td className="text-right text-blue-400 py-0.5 font-mono">
+                                            {t.bid.toFixed(5)}
+                                        </td>
+                                        <td className="text-right text-red-400 py-0.5 font-mono">
+                                            {t.ask.toFixed(5)}
+                                        </td>
+                                        <td className="text-right text-zinc-400 py-0.5 font-mono">
+                                            {((t.spread || 0) * 10000).toFixed(1)}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );
 };
 
-// MarketWatchRow component with MT5-style flash animations (Agent 2)
-const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, tick, selected, onClick, index, columns, onContextMenu, isSubscribed }: {
+import { useTick } from '../../store/useAppStore';
+
+// MarketWatchRow component with per-row subscription optimization (AGENT 4 FIX)
+const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, selected, onClick, index, columns, onContextMenu, isSubscribed }: {
     symbol: string;
-    tick: Tick | undefined;
     selected: boolean;
     onClick: () => void;
     index: number;
@@ -912,6 +1298,11 @@ const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, tick, select
     onContextMenu: (e: React.MouseEvent, symbol: string) => void;
     isSubscribed?: boolean;
 }) {
+    if (!symbol) return null;
+
+    // Hook-based subscription for this specific symbol only
+    const tick = useTick(symbol);
+
     // Flash animation state (Agent 2 - MT5 parity)
     const [flashBid, setFlashBid] = useState<'up' | 'down' | 'none'>('none');
     const [flashAsk, setFlashAsk] = useState<'up' | 'down' | 'none'>('none');
@@ -961,12 +1352,12 @@ const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, tick, select
             onClick={onClick}
             onContextMenu={(e) => onContextMenu(e, symbol)}
             className={`flex items-center px-2 py-0.5 cursor-pointer text-xs font-medium border-b border-zinc-800/30 
-                ${selected ? 'bg-[#2d3436] text-white' : index % 2 === 0 ? 'bg-[#1e1e1e]' : 'bg-[#232323]'}
+                ${selected ? 'bg-[#0078D7] text-white' : index % 2 === 0 ? 'bg-[#1e1e1e]' : 'bg-[#232323]'}
                 hover:bg-[#2d3436]/80 hover:text-white transition-colors
             `}
         >
             {columns.map(col => {
-                let content: React.ReactNode = '-';
+                let content: React.ReactNode = '';
                 let cellClass = '';
 
                 if (tick) {
@@ -974,31 +1365,60 @@ const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, tick, select
                         case 'symbol':
                             content = (
                                 <div className="flex items-center gap-1">
-                                    <div className={`w-1.5 h-1.5 rounded-full ${bidDir === 'up' ? 'bg-[#4ade80]' : bidDir === 'down' ? 'bg-[#f87171]' : 'bg-zinc-600'}`}></div>
+                                    {bidDir === 'up' ? (
+                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" className="text-[#4ade80]">
+                                            <path d="M12 19V5M5 12l7-7 7 7" />
+                                        </svg>
+                                    ) : bidDir === 'down' ? (
+                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" className="text-[#f87171]">
+                                            <path d="M12 5v14M5 12l7 7 7-7" />
+                                        </svg>
+                                    ) : (
+                                        <div className="w-1.5 h-1.5 rounded-full bg-zinc-600"></div>
+                                    )}
                                     <span className={selected ? 'text-white font-bold' : 'text-zinc-200'}>{symbol}</span>
                                 </div>
                             );
                             break;
+                        case 'lp':
+                            const lpValue = tick.lp || 'SIM';
+                            const isReal = lpValue === 'YOFX';
+                            content = (
+                                <div className={`flex items-center justify-center gap-1 ${isReal ? 'text-[#4ade80]' : 'text-[#f87171]'}`} title={isReal ? '✓ Real market data from YOFX broker' : '⚠️ Simulated data - not real market prices'}>
+                                    {isReal ? (
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="flex-shrink-0">
+                                            <path d="M20 6L9 17l-5-5" />
+                                        </svg>
+                                    ) : (
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="flex-shrink-0">
+                                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                                            <line x1="12" y1="9" x2="12" y2="13" />
+                                            <line x1="12" y1="17" x2="12.01" y2="17" />
+                                        </svg>
+                                    )}
+                                    <span className="text-[9px] font-bold uppercase">{lpValue}</span>
+                                </div>
+                            );
+                            cellClass = 'cursor-help';
+                            break;
                         case 'bid':
                             content = formatPrice(tick.bid, symbol);
-                            cellClass = `${bidColor} transition-colors duration-200 ${
-                                flashBid === 'up' ? 'bg-emerald-500/30' :
+                            cellClass = `${bidColor} transition-colors duration-200 ${flashBid === 'up' ? 'bg-emerald-500/30' :
                                 flashBid === 'down' ? 'bg-red-500/30' : ''
-                            }`;
+                                }`;
                             break;
                         case 'ask':
                             content = formatPrice(tick.ask, symbol);
-                            cellClass = `${askColor} transition-colors duration-200 ${
-                                flashAsk === 'up' ? 'bg-emerald-500/30' :
+                            cellClass = `${askColor} transition-colors duration-200 ${flashAsk === 'up' ? 'bg-emerald-500/30' :
                                 flashAsk === 'down' ? 'bg-red-500/30' : ''
-                            }`;
+                                }`;
                             break;
                         case 'spread':
                             // Always recalculate spread dynamically (Agent 4 fix - MT5 parity)
                             const rawSpread = tick.ask - tick.bid;
                             const spreadFormat = getSpreadFormat(symbol);
                             const spreadInPips = rawSpread * spreadFormat.multiplier;
-                            content = spreadInPips > 0 ? spreadInPips.toFixed(spreadFormat.decimals) : '-';
+                            content = spreadInPips > 0 ? spreadInPips.toFixed(spreadFormat.decimals) : '';
                             cellClass = 'text-zinc-400 text-[10px]';
                             break;
                         case 'dailyChange':
@@ -1008,9 +1428,9 @@ const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, tick, select
                             break;
                         case 'high': content = formatPrice(tick.high || 0, symbol); break;
                         case 'low': content = formatPrice(tick.low || 0, symbol); break;
-                        case 'volume': content = tick.volume?.toLocaleString() || '-'; break;
+                        case 'volume': content = tick.volume?.toLocaleString() || ''; break;
                         case 'time': content = new Date().toLocaleTimeString('en-US', { hour12: false }); break;
-                        default: content = '-';
+                        default: content = '';
                     }
                 } else if (isSubscribed) {
                     // PERFORMANCE FIX: Show subscription status for symbols waiting for data (MT5 parity)
@@ -1023,6 +1443,10 @@ const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, tick, select
                                 </div>
                             );
                             break;
+                        case 'lp':
+                            content = <span className="text-yellow-600 text-[9px] italic">...</span>;
+                            cellClass = 'text-center';
+                            break;
                         case 'bid':
                         case 'ask':
                         case 'spread':
@@ -1030,7 +1454,7 @@ const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, tick, select
                             cellClass = 'text-center';
                             break;
                         default:
-                            content = '-';
+                            content = '';
                     }
                 }
 
@@ -1043,11 +1467,10 @@ const MarketWatchRow = React.memo(function MarketWatchRow({ symbol, tick, select
         </div>
     );
 }, (prevProps, nextProps) => {
-    // Only re-render if tick data actually changed (performance optimization)
-    return prevProps.tick?.bid === nextProps.tick?.bid &&
-           prevProps.tick?.ask === nextProps.tick?.ask &&
-           prevProps.selected === nextProps.selected &&
-           prevProps.isSubscribed === nextProps.isSubscribed;
+    // Only re-render if essential UI state changed
+    // Tick data is handled internally by useTick() now
+    return prevProps.selected === nextProps.selected &&
+        prevProps.isSubscribed === nextProps.isSubscribed;
 });
 
 function formatPrice(price: number, symbol: string): string {

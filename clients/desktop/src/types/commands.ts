@@ -11,63 +11,119 @@
 export type Command =
   // Order Management Commands
   | {
-      type: 'OPEN_ORDER_PANEL';
-      payload: { symbol: string; price: { bid: number; ask: number } };
-    }
+    type: 'OPEN_ORDER_PANEL';
+    payload: { symbol: string; price: { bid: number; ask: number } };
+  }
   // Chart Type Commands
   | {
-      type: 'SET_CHART_TYPE';
-      payload: { chartType: 'candlestick' | 'bar' | 'line' | 'area' };
-    }
+    type: 'SET_CHART_TYPE';
+    payload: { chartType: 'candlestick' | 'bar' | 'line' | 'area' };
+  }
   // Indicator Commands
   | {
-      type: 'OPEN_INDICATOR_NAVIGATOR';
-      payload: Record<string, never>;
-    }
+    type: 'OPEN_INDICATOR_NAVIGATOR';
+    payload: Record<string, never>;
+  }
   // Chart Tool Commands
   | {
-      type: 'TOGGLE_CROSSHAIR';
-      payload: Record<string, never>;
-    }
+    type: 'TOGGLE_CROSSHAIR';
+    payload: Record<string, never>;
+  }
   | {
-      type: 'ZOOM_IN';
-      payload: Record<string, never>;
-    }
+    type: 'ZOOM_IN';
+    payload: Record<string, never>;
+  }
   | {
-      type: 'ZOOM_OUT';
-      payload: Record<string, never>;
-    }
+    type: 'ZOOM_OUT';
+    payload: Record<string, never>;
+  }
   // Window Management Commands
   | {
-      type: 'TILE_WINDOWS';
-      payload: { mode: 'horizontal' | 'vertical' | 'grid' };
-    }
+    type: 'TILE_WINDOWS';
+    payload: { mode: 'horizontal' | 'vertical' | 'grid' };
+  }
   // Drawing Tool Commands
   | {
-      type: 'SELECT_TOOL';
-      payload: {
-        tool: 'cursor' | 'trendline' | 'hline' | 'vline' | 'text';
-      };
-    }
+    type: 'SELECT_TOOL';
+    payload: {
+      tool: 'cursor' | 'trendline' | 'hline' | 'vline' | 'text' | 'channel' | 'fibonacci' | 'shapes';
+    };
+  }
   // Timeframe Commands
   | {
-      type: 'SET_TIMEFRAME';
-      payload: { timeframe: string };
-    }
+    type: 'SET_TIMEFRAME';
+    payload: { timeframe: string };
+  }
   // Indicator Management
   | {
-      type: 'ADD_INDICATOR';
-      payload: { name: string; params: Record<string, any> };
-    }
+    type: 'ADD_INDICATOR';
+    payload: { name: string; params: Record<string, any> };
+  }
   // Drawing Persistence
   | {
-      type: 'SAVE_DRAWING';
-      payload: { type: string; points: Array<{ x: number; y: number }> };
-    }
+    type: 'SAVE_DRAWING';
+    payload: { type: string; points: Array<{ x: number; y: number }> };
+  }
   | {
-      type: 'DELETE_DRAWING';
-      payload: { id: string };
-    };
+    type: 'DELETE_DRAWING';
+    payload: { id: string };
+  }
+  | {
+    type: 'FIT_CONTENT';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'SELECT_TRENDLINE';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'SELECT_HLINE';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'SELECT_VLINE';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'SELECT_TEXT';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'TOGGLE_ALGO_TRADING';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'OPEN_DRAWING_TOOLS_MENU';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'OPEN_SHAPES_MENU';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'UNDO';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'REDO';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'DELETE_SELECTED_DRAWING';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'SELECT_ALL_DRAWINGS';
+    payload: Record<string, never>;
+  }
+  | {
+    type: 'SET_AUTO_SCROLL';
+    payload: { enabled: boolean };
+  }
+  | {
+    type: 'SET_CHART_SHIFT';
+    payload: { enabled: boolean };
+  };
 
 /**
  * Extract the type from a command

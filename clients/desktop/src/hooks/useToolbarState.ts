@@ -1,5 +1,5 @@
 import { useReducer, useEffect } from 'react';
-import type { ToolbarAction, ToolbarState } from '../store/toolbarState';
+import type { ToolbarAction } from '../store/toolbarState';
 import { toolbarReducer, initialToolbarState } from '../store/toolbarState';
 import { useCommandBus } from './useCommandBus';
 import type { Command } from '../types/commands';
@@ -14,7 +14,7 @@ export function useToolbarState() {
       // Map commands to toolbar actions
       switch (cmd.type) {
         case 'SELECT_TOOL':
-          dispatchLocal({ type: 'SELECT_TOOL', tool: cmd.payload.tool });
+          dispatchLocal({ type: 'SELECT_TOOL', tool: cmd.payload.tool, subtype: (cmd.payload as any).subtype });
           break;
 
         case 'SET_CHART_TYPE':
@@ -37,24 +37,16 @@ export function useToolbarState() {
           dispatchLocal({ type: 'ZOOM', delta: -2 });
           break;
 
-        case 'ADD_INDICATOR':
-          dispatchLocal({ type: 'ADD_INDICATOR', indicator: cmd.payload.indicator });
-          break;
-
-        case 'REMOVE_INDICATOR':
-          dispatchLocal({ type: 'REMOVE_INDICATOR', name: cmd.payload.name });
-          break;
-
-        case 'ADD_DRAWING':
-          dispatchLocal({ type: 'ADD_DRAWING', drawing: cmd.payload.drawing });
-          break;
-
         case 'DELETE_DRAWING':
           dispatchLocal({ type: 'DELETE_DRAWING', id: cmd.payload.id });
           break;
 
-        case 'CLEAR_DRAWINGS':
-          dispatchLocal({ type: 'CLEAR_DRAWINGS' });
+        case 'SET_AUTO_SCROLL':
+          dispatchLocal({ type: 'TOGGLE_AUTO_SCROLL' });
+          break;
+
+        case 'SET_CHART_SHIFT':
+          dispatchLocal({ type: 'TOGGLE_CHART_SHIFT' });
           break;
 
         default:
@@ -76,7 +68,7 @@ export function useToolbarState() {
       case 'SELECT_TOOL':
         dispatchCommand({
           type: 'SELECT_TOOL',
-          payload: { tool: action.tool || 'cursor' }
+          payload: { tool: action.tool || 'cursor', subtype: action.subtype }
         } as Command);
         break;
 
@@ -116,27 +108,26 @@ export function useToolbarState() {
         }
         break;
 
-      case 'ADD_INDICATOR':
-        dispatchCommand({
-          type: 'ADD_INDICATOR',
-          payload: {
-            name: action.indicator.name,
-            params: action.indicator.params
-          }
-        } as Command);
-        break;
-
       case 'DELETE_DRAWING':
         dispatchCommand({
           type: 'DELETE_DRAWING',
           payload: { id: action.id }
         } as Command);
         break;
+      case 'TOGGLE_AUTO_SCROLL':
+        dispatchCommand({
+          type: 'SET_AUTO_SCROLL',
+          payload: { enabled: !state.autoScrollEnabled }
+        } as Command);
+        break;
 
-      // These actions are internal state changes and don't need to broadcast commands:
-      // - REMOVE_INDICATOR (internal state management)
-      // - ADD_DRAWING (drawings are handled via chart manager)
-      // - CLEAR_DRAWINGS (internal state management)
+      case 'TOGGLE_CHART_SHIFT':
+        dispatchCommand({
+          type: 'SET_CHART_SHIFT',
+          payload: { enabled: !state.chartShiftEnabled }
+        } as Command);
+        break;
+
       default:
         break;
     }

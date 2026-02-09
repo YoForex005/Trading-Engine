@@ -4,7 +4,7 @@
  * Optimized for 60 FPS with batched updates and requestAnimationFrame
  */
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { getWebSocketService } from '../services/websocket';
 
 // ============================================
@@ -130,7 +130,7 @@ const renderHeatmap = (config: RenderConfig): void => {
 
       // Skip if outside visible area
       if (x + cellWidth < SYMBOL_WIDTH || x > canvas.width ||
-          y + cellHeight < HEADER_HEIGHT || y > canvas.height) {
+        y + cellHeight < HEADER_HEIGHT || y > canvas.height) {
         continue;
       }
 
@@ -298,7 +298,7 @@ export const ExposureHeatmap = () => {
 
   useEffect(() => {
     const ws = getWebSocketService(
-      import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws'
+      import.meta.env.VITE_WS_URL || 'ws://localhost:7999/ws'
     );
 
     const unsubscribe = ws.subscribe('exposure-updates', (update: ExposureCell) => {
@@ -477,11 +477,10 @@ export const ExposureHeatmap = () => {
             <button
               key={int}
               onClick={() => setTimeInterval(int)}
-              className={`px-3 py-1 text-xs rounded ${
-                timeInterval === int
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
-              }`}
+              className={`px-3 py-1 text-xs rounded ${timeInterval === int
+                ? 'bg-blue-600 text-white'
+                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                }`}
             >
               {int}
             </button>

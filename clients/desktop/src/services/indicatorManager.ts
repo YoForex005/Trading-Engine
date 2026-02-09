@@ -30,7 +30,7 @@ export class IndicatorManager {
   private chart: IChartApi | null = null;
   private ohlcData: OHLCData[] = [];
 
-  constructor() {}
+  constructor() { }
 
   /**
    * Set chart reference
@@ -125,6 +125,8 @@ export class IndicatorManager {
     const series = this.chart.addSeries(LineSeries, {
       color: config.color || this.getDefaultColor(config.type),
       lineWidth: 2,
+      lastValueVisible: false, // Fix: Hide indicator price labels on Y-axis
+      priceLineVisible: false, // Fix: Hide indicator horizontal lines
       title: config.name,
       priceScaleId: this.needsSeparateScale(config.type) ? config.id : 'right',
       visible: config.visible
@@ -289,7 +291,7 @@ export class IndicatorManager {
     data: OHLCData[],
     fastPeriod: number,
     slowPeriod: number,
-    signalPeriod: number
+    _signalPeriod: number
   ): Array<{ time: Time; value: number }> {
     const fastEMA = this.calculateEMA(data, fastPeriod);
     const slowEMA = this.calculateEMA(data, slowPeriod);

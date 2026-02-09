@@ -97,3 +97,57 @@ input[type="number"]::-webkit-outer-spin-button {
 .grid-auto-fill {
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
 }
+
+/* Chart Drawing & Annotation Styles */
+.chart-drawing-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+  overflow: hidden;
+}
+
+.chart-drawing {
+  pointer-events: auto !important;
+  z-index: 20;
+  transition: opacity 0.2s ease;
+}
+
+.chart-drawing:hover {
+  filter: brightness(1.3);
+  opacity: 0.9;
+  cursor: pointer;
+  box-shadow: 0 0 5px rgba(255, 255, 255, 0.3);
+}
+
+.drawing-node {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background-color: #ffffff;
+  border: 2px solid #3b82f6;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  pointer-events: auto;
+  cursor: move;
+  box-shadow: var(--shadow-sm);
+}
+
+.drawing-node:hover {
+  background-color: #3b82f6;
+  border-color: #ffffff;
+  scale: 1.2;
+}
+
+.chart-drawing-text {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-md);
+}

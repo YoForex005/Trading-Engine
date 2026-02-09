@@ -50,27 +50,26 @@ export const NavigatorPanel: React.FC = () => {
                     <TreeItem label="Bill Williams" icon={<Folder size={14} className="text-amber-300" />} />
                 </TreeItem>
 
-                {/* RTX5 Advisors */}
-                <TreeItem label="RTX5 Advisors" icon={<Bot size={14} className="text-blue-400" />}>
-                    <TreeItem label="RTX5_Scalper_Pro" icon={<Bot size={14} className="text-blue-300" />} />
-                    <TreeItem label="News_Event_Trader" icon={<Bot size={14} className="text-blue-300" />} />
+                {/* Expert Advisors */}
+                <TreeItem label="Expert Advisors" icon={<Bot size={14} className="text-blue-400" />}>
+                    <TreeItem label="Macd Sample" icon={<Bot size={14} className="text-blue-300" />} />
+                    <TreeItem label="Moving Average" icon={<Bot size={14} className="text-blue-300" />} />
                     <TreeItem label="Examples" icon={<Folder size={14} className="text-amber-300" />}>
-                        <TreeItem label="MACD Sample" icon={<Bot size={14} className="text-zinc-400" />} />
-                        <TreeItem label="Moving Average" icon={<Bot size={14} className="text-zinc-400" />} />
+                        <TreeItem label="Momentum" icon={<Bot size={14} className="text-zinc-400" />} />
                     </TreeItem>
                 </TreeItem>
 
-                {/* RTX5 Scripts */}
-                <TreeItem label="RTX5 Scripts" icon={<FileCode size={14} className="text-purple-400" />}>
-                    <TreeItem label="CloseAll" icon={<FileCode size={14} className="text-purple-300" />} />
-                    <TreeItem label="CalculateLot" icon={<FileCode size={14} className="text-purple-300" />} />
+                {/* Scripts */}
+                <TreeItem label="Scripts" icon={<FileCode size={14} className="text-purple-400" />}>
+                    <TreeItem label="CloseAllPositions" icon={<FileCode size={14} className="text-purple-300" />} />
+                    <TreeItem label="CalculateLotSize" icon={<FileCode size={14} className="text-purple-300" />} />
                 </TreeItem>
 
-                {/* RTX5 Services */}
-                <TreeItem label="RTX5 Services" icon={<Zap size={14} className="text-yellow-400" />} defaultOpen>
-                    <TreeItem label="RTX5 Marketplace" icon={<ShoppingBag size={14} className="text-blue-400" />} />
-                    <TreeItem label="RTX5 Signals" icon={<Radio size={14} className="text-emerald-400" />} />
-                    <TreeItem label="RTX5 Cloud Hosting" icon={<Cloud size={14} className="text-sky-400" />} />
+                {/* Services */}
+                <TreeItem label="Services" icon={<Zap size={14} className="text-yellow-400" />} defaultOpen>
+                    <TreeItem label="Market" icon={<ShoppingBag size={14} className="text-blue-400" />} />
+                    <TreeItem label="Signals" icon={<Radio size={14} className="text-emerald-400" />} />
+                    <TreeItem label="Virtual Hosting" icon={<Cloud size={14} className="text-sky-400" />} />
                 </TreeItem>
             </div>
         </div>

@@ -61,6 +61,17 @@ interface SymbolData {
   lastAggregation: number;
 }
 
+export interface CandleUpdate {
+  symbol: string;
+  timeframe: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  time: number;
+}
+
 interface MarketDataState {
   // Symbol data organized by symbol for efficient access
   symbolData: Record<string, SymbolData>;
@@ -70,6 +81,7 @@ interface MarketDataState {
 
   // Actions
   updateTick: (symbol: string, tick: Tick) => void;
+  updateCandle: (update: CandleUpdate) => void;
   updateBulkTicks: (ticks: Tick[]) => void;
   subscribeSymbol: (symbol: string) => void;
   unsubscribeSymbol: (symbol: string) => void;
@@ -297,18 +309,63 @@ export const useMarketDataStore = create<MarketDataState>()(
               symbolData: {
                 ...state.symbolData,
                 [symbol]: {
+                  ...data,
                   currentTick,
                   previousTick,
                   stats,
-                  ohlcv1m,
-                  ohlcv5m,
-                  ohlcv15m,
-                  ohlcv1h,
                   tickBuffer,
                   lastAggregation: shouldAggregate ? now : data.lastAggregation,
                 },
               },
             };
+          });
+        },
+
+        updateCandle: (update) => {
+          set((state) => {
+            const data = state.symbolData[update.symbol] || createEmptySymbolData();
+
+            // Only handling 1m for now as per backend
+            if (update.timeframe === 'M1') {
+              const ohlcv = data.ohlcv1m;
+              const lastCandle = ohlcv[ohlcv.length - 1];
+
+              let newOHLCV = [...ohlcv];
+              if (lastCandle && lastCandle.timestamp === update.time * 1000) {
+                // Update existing
+                newOHLCV[newOHLCV.length - 1] = {
+                  timestamp: update.time * 1000,
+                  open: update.open,
+                  high: update.high,
+                  low: update.low,
+                  close: update.close,
+                  volume: update.volume
+                };
+              } else {
+                // New candle
+                newOHLCV.push({
+                  timestamp: update.time * 1000,
+                  open: update.open,
+                  high: update.high,
+                  low: update.low,
+                  close: update.close,
+                  volume: update.volume
+                });
+                if (newOHLCV.length > 1000) newOHLCV.shift();
+              }
+
+              return {
+                symbolData: {
+                  ...state.symbolData,
+                  [update.symbol]: {
+                    ...data,
+                    ohlcv1m: newOHLCV,
+                    // Note: We don't update lastAggregation here as this is from server
+                  }
+                }
+              };
+            }
+            return state;
           });
         },
 
@@ -455,3 +512,11 @@ export const useOHLCV = (symbol: string, timeframe: '1m' | '5m' | '15m' | '1h') 
 
 export const useSubscribedSymbols = () =>
   useMarketDataStore((state) => Array.from(state.subscribedSymbols));
+
+export const useRecentOHLCV = (symbol: string, timeframe: '1m') =>
+  useMarketDataStore((state) => {
+    const data = state.symbolData[symbol];
+    if (!data) return null;
+    if (timeframe === '1m' && data.ohlcv1m.length > 0) return data.ohlcv1m[data.ohlcv1m.length - 1];
+    return null;
+  });

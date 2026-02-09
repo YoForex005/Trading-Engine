@@ -3,8 +3,8 @@
  * Level 2 market depth with cumulative volume visualization and real-time updates
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Layers, TrendingUp, TrendingDown, BarChart2 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Layers, TrendingUp, TrendingDown } from 'lucide-react';
 import type { MarketDepth, MarketDepthEntry } from '../../types/trading';
 
 type DepthOfMarketProps = {
@@ -25,7 +25,7 @@ export const DepthOfMarket = ({ symbol, depth = 20 }: DepthOfMarketProps) => {
     const fetchDepth = async () => {
       try {
         const response = await fetch(
-          `http://localhost:8080/api/market-depth?symbol=${symbol}&depth=${selectedDepth}`
+          `http://localhost:7999/api/market-depth?symbol=${symbol}&depth=${selectedDepth}`
         );
 
         if (response.ok) {
@@ -125,11 +125,10 @@ export const DepthOfMarket = ({ symbol, depth = 20 }: DepthOfMarketProps) => {
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/20 text-[10px]">
         <button
           onClick={() => setShowCumulative(!showCumulative)}
-          className={`px-2 py-1 rounded font-medium transition-colors ${
-            showCumulative
-              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-              : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
-          }`}
+          className={`px-2 py-1 rounded font-medium transition-colors ${showCumulative
+            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+            : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
+            }`}
         >
           Cumulative
         </button>
@@ -250,7 +249,6 @@ const DepthRow = ({
   showCumulative: boolean;
 }) => {
   const percentage = maxVolume > 0 ? (entry.volume / maxVolume) * 100 : 0;
-  const bgColor = side === 'bid' ? 'bg-emerald-500/10' : 'bg-red-500/10';
   const textColor = side === 'bid' ? 'text-emerald-400' : 'text-red-400';
   const barColor = side === 'bid' ? 'bg-emerald-500/30' : 'bg-red-500/30';
 

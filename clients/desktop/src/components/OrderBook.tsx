@@ -40,7 +40,7 @@ export const OrderBook = ({ symbol, currentBid = 0, currentAsk = 0 }: OrderBookP
       setLoading(true);
       try {
         const response = await fetch(
-          `http://localhost:8080/api/orderbook?symbol=${symbol}&depth=${depth}`
+          `http://localhost:7999/api/orderbook?symbol=${symbol}&depth=${depth}`
         );
 
         if (response.ok) {

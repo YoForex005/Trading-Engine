@@ -15,6 +15,16 @@ export interface Tick {
   lp?: string;
   prevBid?: number;
   prevAsk?: number;
+  dailyChange?: number;
+  high?: number;
+  low?: number;
+  high24h?: number;
+  low24h?: number;
+  volume?: number;
+  last?: number;
+  open?: number;
+  close?: number;
+  tickHistory?: number[]; // For tick chart
 }
 
 export interface Position {
@@ -215,3 +225,5 @@ export const useAppStore = create<AppState>()(
     )
   )
 );
+// Selector for a single tick
+export const useTick = (symbol: string) => useAppStore((state) => state.ticks[symbol]);

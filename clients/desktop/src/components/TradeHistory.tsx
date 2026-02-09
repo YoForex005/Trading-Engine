@@ -54,7 +54,7 @@ export const TradeHistory = ({ accountId }: TradeHistoryProps) => {
       setLoading(true);
       try {
         const response = await fetch(
-          `http://localhost:8080/api/trades/history?accountId=${activeAccountId}`
+          `http://localhost:7999/api/trades/history?accountId=${activeAccountId}`
         );
 
         if (response.ok) {
@@ -331,11 +331,10 @@ export const TradeHistory = ({ accountId }: TradeHistoryProps) => {
                   <td className="p-2 font-medium text-white">{trade.symbol}</td>
                   <td className="p-2">
                     <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
-                        trade.side === 'BUY'
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${trade.side === 'BUY'
                           ? 'bg-green-900/30 text-green-400'
                           : 'bg-red-900/30 text-red-400'
-                      }`}
+                        }`}
                     >
                       {trade.side === 'BUY' ? (
                         <TrendingUp className="w-3 h-3" />
@@ -354,9 +353,8 @@ export const TradeHistory = ({ accountId }: TradeHistoryProps) => {
                   </td>
                   <td className="p-2">
                     <div
-                      className={`font-mono font-bold ${
-                        trade.profit >= 0 ? 'text-green-400' : 'text-red-400'
-                      }`}
+                      className={`font-mono font-bold ${trade.profit >= 0 ? 'text-green-400' : 'text-red-400'
+                        }`}
                     >
                       {trade.profit >= 0 ? '+' : ''}${trade.profit.toFixed(2)}
                     </div>

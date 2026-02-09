@@ -47,7 +47,7 @@ export class HistoryDataManager {
         symbolInfo.downloadedDates = downloadedDates;
 
         const downloadedCount = downloadedDates.length;
-        const totalCount = symbolInfo.availableDates.length;
+        const totalCount = symbolInfo.availableDates?.length || 0;
         symbolInfo.downloadProgress = totalCount > 0
           ? (downloadedCount / totalCount) * 100
           : 0;
@@ -69,8 +69,9 @@ export class HistoryDataManager {
       const downloadedDates = await ticksDB.getDownloadedDates(symbol);
 
       symbolInfo.downloadedDates = downloadedDates;
-      symbolInfo.downloadProgress = symbolInfo.availableDates.length > 0
-        ? (downloadedDates.length / symbolInfo.availableDates.length) * 100
+      const totalCount = symbolInfo.availableDates?.length || 0;
+      symbolInfo.downloadProgress = totalCount > 0
+        ? (downloadedDates.length / totalCount) * 100
         : 0;
 
       return symbolInfo;

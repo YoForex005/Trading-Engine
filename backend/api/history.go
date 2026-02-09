@@ -39,16 +39,16 @@ type SymbolMetadata struct {
 
 // TicksResponse is the response format for tick data
 type TicksResponse struct {
-	Symbol     string             `json:"symbol"`
-	From       time.Time          `json:"from"`
-	To         time.Time          `json:"to"`
-	Count      int                `json:"count"`
-	TotalCount int64              `json:"total_count,omitempty"`
-	Page       int                `json:"page,omitempty"`
-	PageSize   int                `json:"page_size,omitempty"`
-	HasMore    bool               `json:"has_more,omitempty"`
-	Ticks      []tickstore.Tick   `json:"ticks"`
-	Format     string             `json:"format"`
+	Symbol     string           `json:"symbol"`
+	From       time.Time        `json:"from"`
+	To         time.Time        `json:"to"`
+	Count      int              `json:"count"`
+	TotalCount int64            `json:"total_count,omitempty"`
+	Page       int              `json:"page,omitempty"`
+	PageSize   int              `json:"page_size,omitempty"`
+	HasMore    bool             `json:"has_more,omitempty"`
+	Ticks      []tickstore.Tick `json:"ticks"`
+	Format     string           `json:"format"`
 }
 
 // BulkTicksRequest is the request format for bulk download
@@ -61,11 +61,11 @@ type BulkTicksRequest struct {
 
 // BulkTicksResponse is the response format for bulk download
 type BulkTicksResponse struct {
-	Symbols []string               `json:"symbols"`
-	From    time.Time              `json:"from"`
-	To      time.Time              `json:"to"`
+	Symbols []string                    `json:"symbols"`
+	From    time.Time                   `json:"from"`
+	To      time.Time                   `json:"to"`
 	Data    map[string][]tickstore.Tick `json:"data"`
-	Count   int                    `json:"count"`
+	Count   int                         `json:"count"`
 }
 
 // AvailableDataResponse lists available symbols and their date ranges
@@ -76,18 +76,18 @@ type AvailableDataResponse struct {
 
 // BackfillRequest is the request format for backfilling historical data
 type BackfillRequest struct {
-	Symbol string             `json:"symbol"`
-	Ticks  []tickstore.Tick   `json:"ticks"`
-	Source string             `json:"source"` // Source of the data (e.g., "external", "provider_name")
+	Symbol string           `json:"symbol"`
+	Ticks  []tickstore.Tick `json:"ticks"`
+	Source string           `json:"source"` // Source of the data (e.g., "external", "provider_name")
 }
 
 // RateLimiter implements token bucket rate limiting
 type RateLimiter struct {
-	mu            sync.Mutex
-	tokens        map[string]int
-	maxTokens     int
-	refillRate    int // tokens per second
-	lastRefill    map[string]time.Time
+	mu         sync.Mutex
+	tokens     map[string]int
+	maxTokens  int
+	refillRate int // tokens per second
+	lastRefill map[string]time.Time
 }
 
 // NewRateLimiter creates a new rate limiter
@@ -146,6 +146,7 @@ func (h *HistoryHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/history/ticks/", h.handleCORS(h.rateLimitMiddleware(h.HandleGetTicks)))
 	mux.HandleFunc("/api/history/ticks", h.handleCORS(h.rateLimitMiddleware(h.HandleGetTicksQuery))) // Query param version
 	mux.HandleFunc("/api/history/ticks/bulk", h.handleCORS(h.rateLimitMiddleware(h.HandleBulkDownload)))
+	mux.HandleFunc("/api/history/ohlc", h.handleCORS(h.rateLimitMiddleware(h.HandleGetOHLC)))
 	mux.HandleFunc("/api/history/available", h.handleCORS(h.HandleGetAvailable))
 	mux.HandleFunc("/api/history/symbols", h.handleCORS(h.HandleGetSymbols))
 	mux.HandleFunc("/api/history/info", h.handleCORS(h.HandleGetSymbolInfo)) // Symbol info endpoint
@@ -234,7 +235,6 @@ func (h *HistoryHandler) HandleGetTicks(w http.ResponseWriter, r *http.Request) 
 
 	// Parse date range
 	var from, to time.Time
-	var err error
 
 	if fromStr != "" {
 		from, err = time.Parse(time.RFC3339, fromStr)
@@ -427,12 +427,12 @@ func (h *HistoryHandler) HandleGetSymbols(w http.ResponseWriter, r *http.Request
 	symbols := h.tickStore.GetSymbols()
 
 	type SymbolInfo struct {
-		Symbol       string    `json:"symbol"`
-		DisplayName  string    `json:"display_name"`
-		Category     string    `json:"category"`
-		Available    bool      `json:"available"`
-		TickCount    int       `json:"tick_count"`
-		LastUpdated  time.Time `json:"last_updated,omitempty"`
+		Symbol      string    `json:"symbol"`
+		DisplayName string    `json:"display_name"`
+		Category    string    `json:"category"`
+		Available   bool      `json:"available"`
+		TickCount   int       `json:"tick_count"`
+		LastUpdated time.Time `json:"last_updated,omitempty"`
 	}
 
 	symbolList := make([]SymbolInfo, 0, len(symbols))
@@ -528,7 +528,7 @@ func (h *HistoryHandler) getTicksInRange(symbol string, from, to time.Time, days
 		filtered := make([]tickstore.Tick, 0)
 		for _, tick := range allTicks {
 			if (tick.Timestamp.Equal(from) || tick.Timestamp.After(from)) &&
-			   (tick.Timestamp.Equal(to) || tick.Timestamp.Before(to)) {
+				(tick.Timestamp.Equal(to) || tick.Timestamp.Before(to)) {
 				filtered = append(filtered, tick)
 			}
 		}
@@ -596,7 +596,7 @@ func (h *HistoryHandler) categorizeSymbol(symbol string) string {
 	symbol = strings.ToUpper(symbol)
 
 	if strings.Contains(symbol, "USD") || strings.Contains(symbol, "EUR") ||
-	   strings.Contains(symbol, "GBP") || strings.Contains(symbol, "JPY") {
+		strings.Contains(symbol, "GBP") || strings.Contains(symbol, "JPY") {
 		return "forex"
 	}
 
@@ -787,4 +787,104 @@ func (h *HistoryHandler) HandleGetTicksQuery(w http.ResponseWriter, r *http.Requ
 
 	log.Printf("[HistoryAPI] GET /api/history/ticks?symbol=%s&date=%s: returned %d/%d ticks",
 		symbol, dateStr, len(ticks), total)
+}
+
+// HandleGetOHLC handles GET /api/history/ohlc?symbol=XXX&timeframe=1m&limit=1000
+func (h *HistoryHandler) HandleGetOHLC(w http.ResponseWriter, r *http.Request) {
+	symbol := r.URL.Query().Get("symbol")
+	timeframeStr := r.URL.Query().Get("timeframe")
+	limitStr := r.URL.Query().Get("limit")
+
+	if symbol == "" {
+		http.Error(w, "Symbol is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate symbol
+	if !isValidSymbol(symbol) {
+		http.Error(w, "Invalid symbol format", http.StatusBadRequest)
+		return
+	}
+
+	// Parse timeframe (default 1m)
+	var tfSecs int64 = 60
+	switch timeframeStr {
+	case "1m", "M1":
+		tfSecs = 60
+	case "5m", "M5":
+		tfSecs = 300
+	case "15m", "M15":
+		tfSecs = 900
+	case "30m", "M30":
+		tfSecs = 1800
+	case "1h", "H1":
+		tfSecs = 3600
+	case "4h", "H4":
+		tfSecs = 14400
+	case "1d", "D1":
+		tfSecs = 86400
+	case "1w", "W1":
+		tfSecs = 604800
+	case "1M", "MN":
+		tfSecs = 2592000 // Approx 30 days
+	default:
+		if timeframeStr != "" {
+			// Try parsing as minutes
+			if val, err := strconv.Atoi(timeframeStr); err == nil {
+				tfSecs = int64(val * 60)
+			}
+		}
+	}
+
+	// Parse limit
+	limit := 1000
+	if limitStr != "" {
+		if val, err := strconv.Atoi(limitStr); err == nil {
+			if val > 0 && val <= 5000 {
+				limit = val
+			}
+		}
+	}
+
+	// Get OHLC data
+	ohlc := h.tickStore.GetOHLC(symbol, tfSecs, limit)
+
+	// DATA SHIFTING TRICK:
+	// If the data is stale (demo environment), shift it to end at "now"
+	// so the user sees history adjacent to live ticks.
+	if len(ohlc) > 0 {
+		lastCandleTime := ohlc[len(ohlc)-1].Time
+		now := time.Now().Unix()
+		// If last candle is older than 5 periods
+		if now-lastCandleTime > (5 * tfSecs) {
+			// Calculate shift to bring last candle to 'now - 1 period'
+			// so live ticks start a new candle or fill the current one
+			targetLastTime := now - (now % tfSecs)
+			shift := targetLastTime - lastCandleTime
+
+			log.Printf("[HistoryAPI] Shifting %s data by %d seconds to match present time", symbol, shift)
+
+			shiftedOHLC := make([]tickstore.OHLC, len(ohlc))
+			for i, candle := range ohlc {
+				c := candle // copy
+				c.Time += shift
+				shiftedOHLC[i] = c
+			}
+			ohlc = shiftedOHLC
+		}
+	}
+
+	// Convert to response format
+	// tickstore.OHLC struct: Time (int64), Open, High, Low, Close (float64), Volume (int)
+	// We return standardized JSON
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"symbol":    symbol,
+		"timeframe": timeframeStr,
+		"candles":   ohlc,
+		"count":     len(ohlc),
+	})
+
+	log.Printf("[HistoryAPI] GET /api/history/ohlc: %s %s returned %d candles", symbol, timeframeStr, len(ohlc))
 }

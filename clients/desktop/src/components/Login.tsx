@@ -67,7 +67,7 @@ export function Login({ onLogin }: LoginProps) {
             {/* Background Decor */}
             <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-900/20 via-black to-black pointer-events-none" />
 
-            <div className="z-10 w-full max-w-md p-8 bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-2xl shadow-2xl animate-in fade-in zoom-in duration-300">
+            <div className="z-10 w-full max-w-md p-8 bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-2xl shadow-2xl duration-300">
                 <div className="flex flex-col items-center mb-8">
                     <div className="w-12 h-12 bg-emerald-500/10 rounded-xl flex items-center justify-center mb-4 border border-emerald-500/20">
                         <Activity className="w-6 h-6 text-emerald-500" />

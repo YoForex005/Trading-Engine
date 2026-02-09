@@ -1,18 +1,22 @@
 export interface ToolbarState {
-  activeTool: 'cursor' | 'trendline' | 'hline' | 'vline' | 'text' | null;
+  activeTool: 'cursor' | 'trendline' | 'hline' | 'vline' | 'text' | 'channel' | 'fibonacci' | 'shapes' | null;
   chartType: 'candlestick' | 'bar' | 'line' | 'area';
   timeframe: string;
   crosshairEnabled: boolean;
+  autoScrollEnabled: boolean;
+  chartShiftEnabled: boolean;
   candleWidth: number; // for zoom
   indicators: Array<{ name: string; params: any }>;
   drawings: Array<{ id: string; type: string; points: any[] }>;
 }
 
 export type ToolbarAction =
-  | { type: 'SELECT_TOOL'; tool: ToolbarState['activeTool'] }
+  | { type: 'SELECT_TOOL'; tool: ToolbarState['activeTool']; subtype?: string }
   | { type: 'SET_CHART_TYPE'; chartType: ToolbarState['chartType'] }
   | { type: 'SET_TIMEFRAME'; timeframe: string }
   | { type: 'TOGGLE_CROSSHAIR' }
+  | { type: 'TOGGLE_AUTO_SCROLL' }
+  | { type: 'TOGGLE_CHART_SHIFT' }
   | { type: 'ZOOM'; delta: number }
   | { type: 'ADD_INDICATOR'; indicator: { name: string; params: any } }
   | { type: 'REMOVE_INDICATOR'; name: string }
@@ -25,6 +29,8 @@ export const initialToolbarState: ToolbarState = {
   chartType: 'candlestick',
   timeframe: 'm1',
   crosshairEnabled: true,
+  autoScrollEnabled: true,
+  chartShiftEnabled: true,
   candleWidth: 10,
   indicators: [],
   drawings: []
@@ -56,6 +62,18 @@ export function toolbarReducer(state: ToolbarState, action: ToolbarAction): Tool
       return {
         ...state,
         crosshairEnabled: !state.crosshairEnabled
+      };
+
+    case 'TOGGLE_AUTO_SCROLL':
+      return {
+        ...state,
+        autoScrollEnabled: !state.autoScrollEnabled
+      };
+
+    case 'TOGGLE_CHART_SHIFT':
+      return {
+        ...state,
+        chartShiftEnabled: !state.chartShiftEnabled
       };
 
     case 'ZOOM':

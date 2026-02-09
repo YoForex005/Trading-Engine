@@ -109,6 +109,8 @@ type MarketData struct {
 	Ask       float64
 	BidSize   float64
 	AskSize   float64
+	High24h   float64
+	Low24h    float64
 	MDReqID   string
 	SessionID string
 	Timestamp time.Time
@@ -173,6 +175,33 @@ type OrderStatus struct {
 	TimestampMs int64
 }
 
+// SecurityDefinition represents a tradeable instrument
+type SecurityDefinition struct {
+	Symbol            string
+	SecurityType      string // FXSPOT, etc.
+	Product           string
+	Exchange          string
+	Currency          string
+	MinPriceIncrement float64
+	Digits            int
+}
+
+// PricePoint represents a price at a specific time for high/low tracking
+type PricePoint struct {
+	Price     float64
+	Timestamp time.Time
+}
+
+// SymbolHighLow tracks 24h high/low for a symbol using time-windowed data
+type SymbolHighLow struct {
+	Symbol     string
+	High24h    float64
+	Low24h     float64
+	HighPoints []PricePoint
+	LowPoints  []PricePoint
+	mu         sync.RWMutex
+}
+
 // FIXGateway manages connections to Liquidity Providers
 type FIXGateway struct {
 	sessions            map[string]*LPSession
@@ -188,6 +217,14 @@ type FIXGateway struct {
 	quoteCache          map[string]*MarketData // Symbol -> Last known quote (for merging incremental updates)
 	quoteCacheMu        sync.RWMutex
 	mu                  sync.RWMutex
+
+	// Securities discovered from LP
+	securities   map[string]SecurityDefinition
+	securitiesMu sync.RWMutex
+
+	// 24-hour high/low tracking
+	highLowData   map[string]*SymbolHighLow
+	highLowDataMu sync.RWMutex
 }
 
 func NewFIXGateway() *FIXGateway {
@@ -286,6 +323,8 @@ func NewFIXGateway() *FIXGateway {
 		symbolSubscriptions: make(map[string]string),
 		posSubscriptions:    make(map[string]bool),
 		quoteCache:          make(map[string]*MarketData),
+		securities:          make(map[string]SecurityDefinition),
+		highLowData:         make(map[string]*SymbolHighLow),
 	}
 
 	// Load persisted sequence numbers for all sessions
@@ -424,22 +463,33 @@ func (g *FIXGateway) connectSession(session *LPSession) {
 	var conn net.Conn
 	var err error
 
+	// Use longer timeout for better reliability
+	dialTimeout := 30 * time.Second
+
+	log.Printf("[FIX] Initiating connection to %s at %s:%d (timeout: %v)",
+		session.Name, session.Host, session.Port, dialTimeout)
+
 	if session.UseProxy {
 		// Connect via HTTP CONNECT proxy
+		log.Printf("[FIX] Using proxy: %s:%d", session.ProxyHost, session.ProxyPort)
 		conn, err = g.dialViaHTTPProxy(session)
 	} else {
 		// Direct connection
-		addr := fmt.Sprintf("%s:%d", session.Host, session.Port)
-		conn, err = net.DialTimeout("tcp", addr, 10*time.Second)
+		addr := net.JoinHostPort(session.Host, strconv.Itoa(session.Port))
+		log.Printf("[FIX] Dialing direct TCP connection to %s", addr)
+		conn, err = net.DialTimeout("tcp", addr, dialTimeout)
 	}
 
 	if err != nil {
-		log.Printf("[FIX] Failed to connect to %s: %v", session.Name, err)
+		log.Printf("[FIX] TCP connection failed for %s: %v (Host: %s:%d)",
+			session.Name, err, session.Host, session.Port)
 		g.mu.Lock()
 		session.Status = "DISCONNECTED"
 		g.mu.Unlock()
 		return
 	}
+
+	log.Printf("[FIX] TCP connection established to %s", session.Name)
 
 	// Wrap with TLS if SSL is enabled
 	if session.SSL {
@@ -508,8 +558,8 @@ func (g *FIXGateway) connectSession(session *LPSession) {
 
 // dialViaHTTPProxy connects to the target through an HTTP CONNECT proxy
 func (g *FIXGateway) dialViaHTTPProxy(session *LPSession) (net.Conn, error) {
-	proxyAddr := fmt.Sprintf("%s:%d", session.ProxyHost, session.ProxyPort)
-	targetAddr := fmt.Sprintf("%s:%d", session.Host, session.Port)
+	proxyAddr := net.JoinHostPort(session.ProxyHost, strconv.Itoa(session.ProxyPort))
+	targetAddr := net.JoinHostPort(session.Host, strconv.Itoa(session.Port))
 
 	log.Printf("[FIX] Connecting to proxy %s", proxyAddr)
 
@@ -808,12 +858,17 @@ func (g *FIXGateway) validateAndUpdateInSeq(session *LPSession, msg string) erro
 		go g.sendResendRequest(session, expectedSeq, inSeq-1)
 	} else if inSeq < expectedSeq {
 		// Check for PossDupFlag
-		if !g.containsTag(msg, "43", "Y") {
-			return fmt.Errorf("sequence number too low: expected %d, got %d (no PossDupFlag)",
-				expectedSeq, inSeq)
+		if g.containsTag(msg, "43", "Y") {
+			// It's a resend, accept it
+			log.Printf("[FIX] Received resent message %d (PossDupFlag=Y)", inSeq)
+			return nil
 		}
-		// It's a resend, accept it
-		log.Printf("[FIX] Received resent message %d (PossDupFlag=Y)", inSeq)
+
+		// CRITICAL FIX: If sequence is too low and NO PossDup, the remote side likely reset.
+		// Instead of erroring/disconnecting, we reset to their sequence to stay alive.
+		log.Printf("[FIX] Sequence reset detected (Remote %d vs Local %d). Resetting local to %d.", inSeq, expectedSeq, inSeq)
+		session.InSeqNum = inSeq
+		g.saveSequenceNumbers(session)
 		return nil
 	}
 
@@ -1032,38 +1087,38 @@ func (g *FIXGateway) sendHeartbeat(session *LPSession, conn net.Conn, testReqID 
 }
 
 // sendTestRequest sends a TestRequest message (35=1)
-func (g *FIXGateway) sendTestRequest(session *LPSession, conn net.Conn) error {
-	g.mu.Lock()
-	msgSeqNum := g.getNextOutSeqNum(session)
-	g.mu.Unlock()
-
-	sendingTime := time.Now().UTC().Format("20060102-15:04:05.000")
-	testReqID := fmt.Sprintf("TEST%d", time.Now().UnixNano())
-
-	body := fmt.Sprintf("35=%s\x01"+
-		"49=%s\x01"+
-		"56=%s\x01"+
-		"34=%d\x01"+
-		"52=%s\x01"+
-		"112=%s\x01", // TestReqID
-		MsgTypeTestRequest,
-		session.SenderCompID,
-		session.TargetCompID,
-		msgSeqNum,
-		sendingTime,
-		testReqID,
-	)
-
-	fullMsg := g.buildMessage(session, body)
-	g.storeMessage(session, msgSeqNum, fullMsg)
-
-	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	_, err := conn.Write([]byte(fullMsg))
-	if err == nil {
-		log.Printf("[FIX] Sent TestRequest to %s: SeqNum=%d, TestReqID=%s", session.Name, msgSeqNum, testReqID)
-	}
-	return err
-}
+// func (g *FIXGateway) sendTestRequest(session *LPSession, conn net.Conn) error {
+// 	g.mu.Lock()
+// 	msgSeqNum := g.getNextOutSeqNum(session)
+// 	g.mu.Unlock()
+//
+// 	sendingTime := time.Now().UTC().Format("20060102-15:04:05.000")
+// 	testReqID := fmt.Sprintf("TEST%d", time.Now().UnixNano())
+//
+// 	body := fmt.Sprintf("35=%s\x01"+
+// 		"49=%s\x01"+
+// 		"56=%s\x01"+
+// 		"34=%d\x01"+
+// 		"52=%s\x01"+
+// 		"112=%s\x01", // TestReqID
+// 		MsgTypeTestRequest,
+// 		session.SenderCompID,
+// 		session.TargetCompID,
+// 		msgSeqNum,
+// 		sendingTime,
+// 		testReqID,
+// 	)
+//
+// 	fullMsg := g.buildMessage(session, body)
+// 	g.storeMessage(session, msgSeqNum, fullMsg)
+//
+// 	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+// 	_, err := conn.Write([]byte(fullMsg))
+// 	if err == nil {
+// 		log.Printf("[FIX] Sent TestRequest to %s: SeqNum=%d, TestReqID=%s", session.Name, msgSeqNum, testReqID)
+// 	}
+// 	return err
+// }
 
 // sendResendRequest sends a ResendRequest message (35=2)
 func (g *FIXGateway) sendResendRequest(session *LPSession, beginSeqNo, endSeqNo int) error {
@@ -1172,6 +1227,7 @@ func (g *FIXGateway) sendSequenceReset(session *LPSession, conn net.Conn, newSeq
 }
 
 // handleResendRequest processes an incoming ResendRequest
+// Optimized to send a single GapFill for a range of missing messages
 func (g *FIXGateway) handleResendRequest(session *LPSession, msg string) {
 	beginSeqNo, _ := strconv.Atoi(g.extractTag(msg, "7"))
 	endSeqNo, _ := strconv.Atoi(g.extractTag(msg, "16"))
@@ -1192,19 +1248,45 @@ func (g *FIXGateway) handleResendRequest(session *LPSession, msg string) {
 		endSeqNo = session.OutSeqNum
 	}
 
-	// Try to resend stored messages or send GapFill
-	for seqNum := beginSeqNo; seqNum <= endSeqNo; seqNum++ {
+	// We iterate through the requested range.
+	// If we find a message, we send it.
+	// If we find a gap (message missing), we don't send GapFill immediately.
+	// We find the END of the gap (next available message or endSeqNo) and send ONE GapFill.
+
+	seqNum := beginSeqNo
+	for seqNum <= endSeqNo {
 		storedMsg, found := g.getStoredMessage(session, seqNum)
 		if found {
-			// Resend with PossDupFlag=Y
+			// Message exists, resend it with PossDupFlag=Y
 			resendMsg := g.addPossDupFlag(storedMsg)
 			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			conn.Write([]byte(resendMsg))
 			log.Printf("[FIX] Resent message %d to %s", seqNum, session.Name)
+			seqNum++
 		} else {
-			// Message not found - send GapFill to skip it
-			log.Printf("[FIX] Message %d not found, sending GapFill", seqNum)
-			g.sendSequenceReset(session, conn, seqNum+1, true)
+			// Gap detected at seqNum. Find how long the gap is.
+			gapStart := seqNum
+			gapEnd := seqNum
+
+			// Scan ahead to find where the gap ends
+			for i := seqNum + 1; i <= endSeqNo; i++ {
+				_, exists := g.getStoredMessage(session, i)
+				if exists {
+					break // Found a message, gap ends here
+				}
+				gapEnd = i
+			}
+
+			// Send GapFill for the range [gapStart, gapEnd]
+			// NewSeqNo (Tag 36) in SequenceReset should be the NEXT expected sequence number
+			// So NewSeqNo = gapEnd + 1
+			newSeqNo := gapEnd + 1
+
+			log.Printf("[FIX] Messages %d-%d not found, sending GapFill (NewSeqNo=%d)", gapStart, gapEnd, newSeqNo)
+			g.sendSequenceReset(session, conn, newSeqNo, true)
+
+			// Advance outer loop past the gap
+			seqNum = gapEnd + 1
 		}
 	}
 }
@@ -1422,6 +1504,9 @@ func (g *FIXGateway) processMessage(session *LPSession, conn net.Conn, msg strin
 		reason := g.extractTag(msg, "380")
 		text := g.extractTag(msg, "58")
 		log.Printf("[FIX] BusinessReject from %s: RefMsgType=%s, Reason=%s, Text=%s", session.Name, refMsgType, reason, text)
+
+	case MsgTypeSecurityList: // SecurityList (35=y)
+		g.handleSecurityList(session, msg)
 
 	default:
 		log.Printf("[FIX] Received message type %s from %s", msgType, session.Name)
@@ -1763,6 +1848,13 @@ func (g *FIXGateway) GetStatus() map[string]string {
 	return status
 }
 
+// GetSession returns a specific session (for connection manager)
+func (g *FIXGateway) GetSession(sessionID string) *LPSession {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.sessions[sessionID]
+}
+
 // SessionInfo contains detailed information about a FIX session
 type SessionInfo struct {
 	ID             string    `json:"id"`
@@ -1996,8 +2088,8 @@ func (g *FIXGateway) SubscribeMarketData(sessionID string, symbol string) (strin
 		"55=%s\x01"+ // Symbol (EURUSD format)
 		"460=4\x01"+ // Product: 4=CURRENCY (FX spot)
 		"167=FXSPOT\x01"+ // SecurityType: FXSPOT for forex pairs
-		"207=YOFX\x01"+ // SecurityExchange: YOFX exchange identifier
-		"15=USD\x01", // Currency: Quote currency (second currency in pair)
+		"207=YOFX\x01", // SecurityExchange: YOFX exchange identifier
+		// REMOVED Tag 15 (Currency)
 		MsgTypeMarketDataRequest,
 		session.SenderCompID,
 		session.TargetCompID,
@@ -2188,6 +2280,97 @@ func (g *FIXGateway) RequestSecurityList(sessionID string) (string, error) {
 	return securityReqID, nil
 }
 
+// updateHighLow tracks 24-hour high/low for a symbol using rolling time window
+func (g *FIXGateway) updateHighLow(symbol string, bid, ask float64) (high24h, low24h float64) {
+	g.highLowDataMu.Lock()
+	defer g.highLowDataMu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-24 * time.Hour)
+
+	hl, exists := g.highLowData[symbol]
+	if !exists {
+		hl = &SymbolHighLow{
+			Symbol:     symbol,
+			High24h:    ask,
+			Low24h:     bid,
+			HighPoints: make([]PricePoint, 0, 1000),
+			LowPoints:  make([]PricePoint, 0, 1000),
+		}
+		g.highLowData[symbol] = hl
+	}
+
+	hl.mu.Lock()
+	defer hl.mu.Unlock()
+
+	midPrice := (bid + ask) / 2
+
+	if hl.High24h == 0 || midPrice > hl.High24h {
+		hl.High24h = midPrice
+		hl.HighPoints = append(hl.HighPoints, PricePoint{Price: midPrice, Timestamp: now})
+	}
+
+	if hl.Low24h == 0 || midPrice < hl.Low24h {
+		hl.Low24h = midPrice
+		hl.LowPoints = append(hl.LowPoints, PricePoint{Price: midPrice, Timestamp: now})
+	}
+
+	newHighPoints := make([]PricePoint, 0, len(hl.HighPoints))
+	for _, p := range hl.HighPoints {
+		if p.Timestamp.After(cutoff) {
+			newHighPoints = append(newHighPoints, p)
+		}
+	}
+	hl.HighPoints = newHighPoints
+
+	newLowPoints := make([]PricePoint, 0, len(hl.LowPoints))
+	for _, p := range hl.LowPoints {
+		if p.Timestamp.After(cutoff) {
+			newLowPoints = append(newLowPoints, p)
+		}
+	}
+	hl.LowPoints = newLowPoints
+
+	if len(hl.HighPoints) > 0 {
+		maxPrice := hl.HighPoints[0].Price
+		for _, p := range hl.HighPoints {
+			if p.Price > maxPrice {
+				maxPrice = p.Price
+			}
+		}
+		hl.High24h = maxPrice
+	} else {
+		hl.High24h = midPrice
+	}
+
+	if len(hl.LowPoints) > 0 {
+		minPrice := hl.LowPoints[0].Price
+		for _, p := range hl.LowPoints {
+			if p.Price < minPrice {
+				minPrice = p.Price
+			}
+		}
+		hl.Low24h = minPrice
+	} else {
+		hl.Low24h = midPrice
+	}
+
+	return hl.High24h, hl.Low24h
+}
+
+// getHighLow retrieves current 24h high/low for a symbol
+func (g *FIXGateway) getHighLow(symbol string) (high24h, low24h float64) {
+	g.highLowDataMu.RLock()
+	defer g.highLowDataMu.RUnlock()
+
+	if hl, exists := g.highLowData[symbol]; exists {
+		hl.mu.RLock()
+		defer hl.mu.RUnlock()
+		return hl.High24h, hl.Low24h
+	}
+	return 0, 0
+}
+
 // handleMarketDataSnapshot processes incoming market data (35=W)
 func (g *FIXGateway) handleMarketDataSnapshot(session *LPSession, msg string) {
 	symbol := g.extractTag(msg, "55")
@@ -2216,21 +2399,27 @@ func (g *FIXGateway) handleMarketDataSnapshot(session *LPSession, msg string) {
 		} else if strings.HasPrefix(part, "270=") {
 			price := 0.0
 			fmt.Sscanf(part[4:], "%f", &price)
-			if currentType == "0" { // Bid
+			switch currentType {
+			case "0": // Bid
 				md.Bid = price
-			} else if currentType == "1" { // Offer/Ask
+			case "1": // Offer/Ask
 				md.Ask = price
 			}
 		} else if strings.HasPrefix(part, "271=") {
 			size := 0.0
 			fmt.Sscanf(part[4:], "%f", &size)
-			if currentType == "0" {
+			switch currentType {
+			case "0":
 				md.BidSize = size
-			} else if currentType == "1" {
+			case "1":
 				md.AskSize = size
 			}
 		}
 	}
+
+	high24h, low24h := g.updateHighLow(symbol, md.Bid, md.Ask)
+	md.High24h = high24h
+	md.Low24h = low24h
 
 	// Update quote cache with snapshot data
 	g.quoteCacheMu.Lock()
@@ -2240,13 +2429,15 @@ func (g *FIXGateway) handleMarketDataSnapshot(session *LPSession, msg string) {
 		Ask:       md.Ask,
 		BidSize:   md.BidSize,
 		AskSize:   md.AskSize,
+		High24h:   high24h,
+		Low24h:    low24h,
 		SessionID: session.ID,
 		Timestamp: md.Timestamp,
 	}
 	g.quoteCacheMu.Unlock()
 
-	log.Printf("[FIX] MarketData from %s: %s Bid=%.5f Ask=%.5f",
-		session.Name, symbol, md.Bid, md.Ask)
+	log.Printf("[FIX] MarketData from %s: %s Bid=%.5f Ask=%.5f High24h=%.5f Low24h=%.5f",
+		session.Name, symbol, md.Bid, md.Ask, high24h, low24h)
 
 	// Send to channel (non-blocking)
 	select {
@@ -2675,9 +2866,10 @@ func (g *FIXGateway) handleTradeCaptureReport(session *LPSession, msg string) {
 
 	// Parse side
 	side := g.extractTag(msg, "54")
-	if side == "1" {
+	switch side {
+	case "1":
 		trade.Side = "BUY"
-	} else if side == "2" {
+	case "2":
 		trade.Side = "SELL"
 	}
 
@@ -2781,13 +2973,16 @@ func (g *FIXGateway) handleMarketDataIncremental(session *LPSession, msg string)
 				}
 
 				// Apply incremental update
-				if currentType == "0" { // Bid update
+				switch currentType {
+				case "0": // Bid update
 					bid = currentPrice
 					bidSize = currentSize
-				} else if currentType == "1" { // Ask update
+				case "1": // Ask update
 					ask = currentPrice
 					askSize = currentSize
 				}
+
+				high24h, low24h := g.updateHighLow(currentSymbol, bid, ask)
 
 				// Create merged market data
 				md := MarketData{
@@ -2798,6 +2993,8 @@ func (g *FIXGateway) handleMarketDataIncremental(session *LPSession, msg string)
 					Ask:       ask,
 					BidSize:   bidSize,
 					AskSize:   askSize,
+					High24h:   high24h,
+					Low24h:    low24h,
 				}
 
 				// Update cache with merged data
@@ -2808,6 +3005,8 @@ func (g *FIXGateway) handleMarketDataIncremental(session *LPSession, msg string)
 					Ask:       ask,
 					BidSize:   bidSize,
 					AskSize:   askSize,
+					High24h:   high24h,
+					Low24h:    low24h,
 					SessionID: session.ID,
 					Timestamp: now,
 				}
@@ -2820,4 +3019,122 @@ func (g *FIXGateway) handleMarketDataIncremental(session *LPSession, msg string)
 			}
 		}
 	}
+}
+
+// handleSecurityList processes Security List (35=y)
+func (g *FIXGateway) handleSecurityList(session *LPSession, msg string) {
+	securityReqID := g.extractTag(msg, "320")
+	securityResponseID := g.extractTag(msg, "322")
+	totalNumSecurities := g.extractTag(msg, "560") // Optional
+
+	log.Printf("[FIX] SecurityList from %s: ReqID=%s, RespID=%s, Total=%s",
+		session.Name, securityReqID, securityResponseID, totalNumSecurities)
+
+	// Parse NoRelatedSym (146) repeating group
+	// Format: 146=N, then N entries with 55 (Symbol), 167 (SecType), etc.
+
+	// Split by SOH to iterate fields
+	parts := strings.Split(msg, "\x01")
+
+	var currentSymbol string
+	var currentSecType string
+	var currentProduct string
+	var currentExchange string
+	var currentCurrency string
+	var currentMinPriceInc float64
+	var currentDigits int
+
+	// Helper to reset current security
+	resetCurrent := func() {
+		currentSymbol = ""
+		currentSecType = ""
+		currentProduct = ""
+		currentExchange = ""
+		currentCurrency = ""
+		currentMinPriceInc = 0
+		currentDigits = 0
+	}
+
+	// We scan the message linearly. When we encounter a new Symbol (55),
+	// we assume the previous security definition is complete (if any).
+	// This is a simplification; robust parsing requires knowing the group structure.
+	// But for flat lists usually Sent by LPs, this works if Symbol is the first field in group.
+
+	// Better approach: Since 55 is usually the first field in the group,
+	// when we see 55, we save the PREVIOUS valid security.
+
+	g.securitiesMu.Lock()
+	defer g.securitiesMu.Unlock()
+
+	count := 0
+
+	for _, part := range parts {
+		if strings.HasPrefix(part, "55=") {
+			// Found new symbol - save previous if complete
+			if currentSymbol != "" {
+				sec := SecurityDefinition{
+					Symbol:            currentSymbol,
+					SecurityType:      currentSecType,
+					Product:           currentProduct,
+					Exchange:          currentExchange,
+					Currency:          currentCurrency,
+					MinPriceIncrement: currentMinPriceInc,
+					Digits:            currentDigits,
+				}
+				g.securities[currentSymbol] = sec
+				count++
+			}
+
+			// Start new
+			resetCurrent()
+			currentSymbol = part[3:]
+
+			// Default digits based on symbol
+			if strings.Contains(currentSymbol, "JPY") {
+				currentDigits = 3
+			} else {
+				currentDigits = 5
+			}
+
+		} else if strings.HasPrefix(part, "167=") {
+			currentSecType = part[4:]
+		} else if strings.HasPrefix(part, "460=") {
+			currentProduct = part[4:]
+		} else if strings.HasPrefix(part, "207=") {
+			currentExchange = part[4:]
+		} else if strings.HasPrefix(part, "15=") {
+			currentCurrency = part[3:]
+		} else if strings.HasPrefix(part, "969=") { // MinPriceIncrement
+			fmt.Sscanf(part[4:], "%f", &currentMinPriceInc)
+		}
+	}
+
+	// Save the last one
+	if currentSymbol != "" {
+		sec := SecurityDefinition{
+			Symbol:            currentSymbol,
+			SecurityType:      currentSecType,
+			Product:           currentProduct,
+			Exchange:          currentExchange,
+			Currency:          currentCurrency,
+			MinPriceIncrement: currentMinPriceInc,
+			Digits:            currentDigits,
+		}
+		g.securities[currentSymbol] = sec
+		count++
+	}
+
+	log.Printf("[FIX] Discovered %d securities from %s", count, session.Name)
+}
+
+// GetSecurities returns all discovered securities
+func (g *FIXGateway) GetSecurities() []SecurityDefinition {
+	g.securitiesMu.RLock()
+	defer g.securitiesMu.RUnlock()
+
+	securities := make([]SecurityDefinition, 0, len(g.securities))
+	for _, sec := range g.securities {
+		securities = append(securities, sec)
+	}
+	return securities
 }

@@ -70,13 +70,16 @@ type Hub struct {
 
 // MarketTick represents a price update for clients
 type MarketTick struct {
-	Type      string  `json:"type"`
-	Symbol    string  `json:"symbol"`
-	Bid       float64 `json:"bid"`
-	Ask       float64 `json:"ask"`
-	Spread    float64 `json:"spread"`
-	Timestamp int64   `json:"timestamp"`
-	LP        string  `json:"lp"` // Liquidity Provider source
+	Type        string  `json:"type"`
+	Symbol      string  `json:"symbol"`
+	Bid         float64 `json:"bid"`
+	Ask         float64 `json:"ask"`
+	Spread      float64 `json:"spread"`
+	Timestamp   int64   `json:"timestamp"`
+	LP          string  `json:"lp"`          // Liquidity Provider source
+	DailyChange float64 `json:"dailyChange"` // Daily percentage change
+	High24h     float64 `json:"high24h"`     // 24-hour high
+	Low24h      float64 `json:"low24h"`      // 24-hour low
 }
 
 func NewHub() *Hub {
