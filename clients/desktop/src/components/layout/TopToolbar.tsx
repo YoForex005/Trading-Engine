@@ -15,13 +15,17 @@ import {
     Play,
     ChevronDown,
     LayoutTemplate,
-    LayoutList
+    LayoutList,
+    User
 } from 'lucide-react';
 import type { ChartType, Timeframe } from '../TradingChart';
 import { useToolbarState } from '../../hooks/useToolbarState';
 import { registerKeyboardShortcutsWithInputCheck } from '../../services/keyboardShortcuts';
 import { useCommandBus } from '../../hooks/useCommandBus';
 import type { Command } from '../../types/commands';
+import { NotificationBadge } from '../notifications/NotificationBadge';
+import { NotificationCenter } from '../notifications/NotificationCenter';
+import { useNotificationStore } from '../../store/useNotificationStore';
 
 interface TopToolbarProps {
     chartType: ChartType;
@@ -29,17 +33,24 @@ interface TopToolbarProps {
     onChartTypeChange: (type: ChartType) => void;
     onTimeframeChange: (tf: Timeframe) => void;
     onToggleDOM?: () => void;
+    symbol?: string;
+    onLoadTemplate?: (template: any) => void;
 }
 
 import { MenuBar } from './MenuBar';
 import { DrawingsDropdown } from './DrawingsDropdown';
+import { ChartTemplateManager } from '../ChartTemplateManager';
+import { indicatorManager } from '../../services/indicatorManager';
+import { drawingManager } from '../../services/drawingManager';
 
 export const TopToolbar: React.FC<TopToolbarProps> = ({
     chartType,
     timeframe,
     onChartTypeChange,
     onTimeframeChange,
-    onToggleDOM
+    onToggleDOM,
+    symbol = 'BTCUSD',
+    onLoadTemplate
 }) => {
     const { state: toolbarState, dispatch: dispatchToolbar } = useToolbarState();
     const { dispatch: dispatchCommand } = useCommandBus();
@@ -86,6 +97,8 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
                 toolbarState={toolbarState}
                 dispatchCommand={dispatchCommand}
                 dispatchToolbar={dispatchToolbar}
+                symbol={symbol}
+                onLoadTemplate={onLoadTemplate}
             />
         </div>
     );
@@ -93,52 +106,76 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
 
 // --- Sub-Components ---
 
-const HeaderBar = ({ symbol, timeframe, account, server }: { symbol: string, timeframe: string, account: string, server: string }) => (
-    <div className="h-8 bg-[#1e1e1e] flex items-center justify-between px-3 text-[11px] font-medium border-b border-[#2a2e39] select-none text-zinc-400">
-        {/* Left: Platform Logo & Account */}
-        <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-zinc-300">
-                <div className="w-4 h-4 rounded bg-gradient-to-br from-blue-500 to-teal-400 flex items-center justify-center text-[9px] text-white font-bold tracking-tight">
-                    H
+const HeaderBar = ({ symbol, timeframe, account, server }: { symbol: string, timeframe: string, account: string, server: string }) => {
+    const { toggleCenter } = useNotificationStore();
+
+    return (
+        <div className="h-8 bg-[#1e1e1e] flex items-center justify-between px-3 text-[11px] font-medium border-b border-[#2a2e39] select-none text-zinc-400">
+            {/* Left: Platform Logo & Account */}
+            <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 text-zinc-300">
+                    <div className="w-4 h-4 rounded bg-gradient-to-br from-blue-500 to-teal-400 flex items-center justify-center text-[9px] text-white font-bold tracking-tight">
+                        H
+                    </div>
+                    <span className="font-bold tracking-wide text-zinc-200">HEXY</span>
                 </div>
-                <span className="font-bold tracking-wide text-zinc-200">HEXY</span>
+                <div className="flex items-center gap-1.5 pl-3 border-l border-zinc-700/50">
+                    <span className="text-zinc-500">ACC:</span>
+                    <span className="text-zinc-300 font-mono">{account}</span>
+                    <span className="text-zinc-600 px-1">•</span>
+                    <span className="text-zinc-500">{server}</span>
+                </div>
             </div>
-            <div className="flex items-center gap-1.5 pl-3 border-l border-zinc-700/50">
-                <span className="text-zinc-500">ACC:</span>
-                <span className="text-zinc-300 font-mono">{account}</span>
-                <span className="text-zinc-600 px-1">•</span>
-                <span className="text-zinc-500">{server}</span>
-            </div>
-        </div>
 
-        {/* Center: Active Symbol Info */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-2">
-            <div className="bg-[#252525] px-3 py-0.5 rounded-full border border-zinc-800 flex items-center gap-2 shadow-sm">
-                <span className="text-emerald-400 font-bold tracking-wider">{symbol}</span>
-                <span className="w-[1px] h-3 bg-zinc-700"></span>
-                <span className="text-blue-400 font-mono font-bold">{timeframe.toUpperCase()}</span>
+            {/* Center: Active Symbol Info */}
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-2">
+                <div className="bg-[#252525] px-3 py-0.5 rounded-full border border-zinc-800 flex items-center gap-2 shadow-sm">
+                    <span className="text-emerald-400 font-bold tracking-wider">{symbol}</span>
+                    <span className="w-[1px] h-3 bg-zinc-700"></span>
+                    <span className="text-blue-400 font-mono font-bold">{timeframe.toUpperCase()}</span>
+                </div>
             </div>
-        </div>
 
-        {/* Right: System Status */}
-        <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-[#252525] rounded border border-zinc-800">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                <span className="text-emerald-500 font-bold text-[10px]">CONNECTED</span>
-                <span className="text-zinc-600 text-[10px] ml-1">12ms</span>
-            </div>
-            <div className="flex items-center gap-3 text-zinc-500 border-l border-zinc-700/50 pl-3">
-                <Bell size={13} className="hover:text-zinc-300 cursor-pointer transition-colors" />
-                <Settings size={13} className="hover:text-zinc-300 cursor-pointer transition-colors" />
+            {/* Right: System Status */}
+            <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5 px-2 py-0.5 bg-[#252525] rounded border border-zinc-800">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <span className="text-emerald-500 font-bold text-[10px]">CONNECTED</span>
+                    <span className="text-zinc-600 text-[10px] ml-1">12ms</span>
+                </div>
+                <div className="flex items-center gap-3 text-zinc-500 border-l border-zinc-700/50 pl-3">
+                    <User
+                        size={13}
+                        className="hover:text-zinc-300 cursor-pointer transition-colors"
+                        onClick={() => {
+                            const event = new Event('toggleAccountPanel');
+                            window.dispatchEvent(event);
+                        }}
+                        title="Account Management"
+                    />
+                    <div className="relative" data-notification-bell>
+                        <Bell
+                            size={13}
+                            className="hover:text-zinc-300 cursor-pointer transition-colors"
+                            onClick={toggleCenter}
+                            title="Notifications"
+                        />
+                        <NotificationBadge />
+                    </div>
+                    <NotificationCenter />
+                    <Settings size={13} className="hover:text-zinc-300 cursor-pointer transition-colors" title="Settings" />
+                </div>
             </div>
         </div>
-    </div>
-);
+    );
+};
 
 interface MainToolbarProps extends TopToolbarProps {
     toolbarState: any;
     dispatchCommand: (cmd: Command) => void;
     dispatchToolbar: (action: any) => void;
+    symbol: string;
+    onLoadTemplate?: (template: any) => void;
 }
 
 const MainToolbar = ({
@@ -149,7 +186,9 @@ const MainToolbar = ({
     onToggleDOM,
     toolbarState,
     dispatchCommand,
-    dispatchToolbar
+    dispatchToolbar,
+    symbol,
+    onLoadTemplate
 }: MainToolbarProps) => {
     return (
         <div className="h-10 bg-gradient-to-b from-[#252525] to-[#1e1e1e] border-b border-black flex items-center px-2 gap-3 shadow-md">
@@ -209,6 +248,29 @@ const MainToolbar = ({
                     title="Line Chart"
                 />
             </ToolbarGroup>
+
+            <Divider />
+
+            {/* Chart Templates */}
+            <ChartTemplateManager
+                currentSymbol={symbol}
+                currentTimeframe={timeframe}
+                currentChartType={chartType}
+                currentShowVolume={true}
+                currentShowGrid={true}
+                currentIndicators={indicatorManager.getIndicators?.() || []}
+                currentDrawingTools={drawingManager.getDrawings?.() || []}
+                onLoadTemplate={(template) => {
+                    // Apply chart type and timeframe
+                    if (template.chartType) onChartTypeChange(template.chartType);
+                    if (template.timeframe) onTimeframeChange(template.timeframe);
+
+                    // Forward to parent for full template application
+                    if (onLoadTemplate) {
+                        onLoadTemplate(template);
+                    }
+                }}
+            />
 
             <Divider />
 

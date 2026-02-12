@@ -3,11 +3,13 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/epic1st/rtx/backend/models"
@@ -386,20 +388,70 @@ func (h *UserPreferencesHandler) HandleTerminateSession(w http.ResponseWriter, r
 // Helper functions
 
 func getDesktopDataPath(userID string) string {
+	// SECURITY: Sanitize userID to prevent path traversal attacks
+	sanitized, err := sanitizeUserID(userID)
+	if err != nil {
+		log.Printf("[SECURITY] Path traversal attempt detected: userID=%s", userID)
+		return ""
+	}
+
 	var basePath string
 
 	switch runtime.GOOS {
 	case "windows":
-		basePath = filepath.Join(os.Getenv("APPDATA"), "TradingEngine", "Users", userID)
+		basePath = filepath.Join(os.Getenv("APPDATA"), "TradingEngine", "Users", sanitized)
 	case "darwin":
-		basePath = filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "TradingEngine", "Users", userID)
+		basePath = filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "TradingEngine", "Users", sanitized)
 	case "linux":
-		basePath = filepath.Join(os.Getenv("HOME"), ".config", "TradingEngine", "Users", userID)
+		basePath = filepath.Join(os.Getenv("HOME"), ".config", "TradingEngine", "Users", sanitized)
 	default:
-		basePath = filepath.Join(".", "data", "users", userID)
+		basePath = filepath.Join(".", "data", "users", sanitized)
 	}
 
 	return basePath
+}
+
+// sanitizeUserID prevents path traversal attacks
+func sanitizeUserID(userID string) (string, error) {
+	// Remove leading/trailing whitespace
+	userID = strings.TrimSpace(userID)
+
+	// Reject empty userID
+	if userID == "" {
+		return "", errors.New("empty userID")
+	}
+
+	// Clean the path (resolves . and ..)
+	cleaned := filepath.Clean(userID)
+
+	// Reject any path that still contains ".."
+	if strings.Contains(cleaned, "..") {
+		return "", errors.New("path traversal detected: contains '..'")
+	}
+
+	// Reject absolute paths (starting with / or drive letter)
+	if filepath.IsAbs(cleaned) {
+		return "", errors.New("absolute paths not allowed")
+	}
+
+	// Reject paths with path separators (only allow simple identifiers)
+	if strings.Contains(cleaned, string(filepath.Separator)) {
+		return "", errors.New("path separators not allowed in userID")
+	}
+
+	// Limit length to prevent buffer overflow attacks
+	if len(cleaned) > 255 {
+		return "", errors.New("userID too long (max 255 characters)")
+	}
+
+	// Only allow alphanumeric, underscore, hyphen
+	for _, c := range cleaned {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+			return "", errors.New("userID contains invalid characters (only alphanumeric, underscore, hyphen allowed)")
+		}
+	}
+
+	return cleaned, nil
 }
 
 func buildVirtualFileSystem(userID string) models.UserDataFolder {

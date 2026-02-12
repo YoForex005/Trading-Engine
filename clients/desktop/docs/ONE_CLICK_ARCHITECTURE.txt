@@ -1,0 +1,367 @@
+════════════════════════════════════════════════════════════════════════════════
+  ONE-CLICK TRADING PANEL - ARCHITECTURE DIAGRAM
+════════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          USER INTERFACE LAYER                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────────────────────────────────────────────┐
+    │                    TradingChart.tsx                      │
+    │  ┌────────────────────────────────────────────────────┐  │
+    │  │  Chart Canvas (lightweight-charts)                 │  │
+    │  │  - Candlestick rendering                           │  │
+    │  │  - Price lines                                     │  │
+    │  │  - Indicators                                      │  │
+    │  └────────────────────────────────────────────────────┘  │
+    │                                                          │
+    │  ┌────────────────────────────────────────────────────┐  │
+    │  │  OneClickPanel Overlay (Conditional)               │  │
+    │  │  ┌──────────────────────────────────────────────┐  │  │
+    │  │  │  Header: "One-Click"              [X]        │  │  │
+    │  │  ├──────────────────────────────────────────────┤  │  │
+    │  │  │  Symbol: EURUSD    Spread: 2.0 pips         │  │  │
+    │  │  ├──────────────────────────────────────────────┤  │  │
+    │  │  │  [-]  [0.01]  [+]       Lots                │  │  │
+    │  │  ├──────────────────────────────────────────────┤  │  │
+    │  │  │  [ SELL ]            [ BUY ]                │  │  │
+    │  │  │  1.08500             1.08520                │  │  │
+    │  │  └──────────────────────────────────────────────┘  │  │
+    │  └────────────────────────────────────────────────────┘  │
+    │                                                          │
+    │  State:                                                  │
+    │  • oneClickTrading: boolean                             │
+    │  • currentTick: { bid, ask, spread }                    │
+    │  • accountId: string                                    │
+    └──────────────────────────────────────────────────────────┘
+                              │
+                              │ Props
+                              ↓
+    ┌──────────────────────────────────────────────────────────┐
+    │                    OneClickPanel.tsx                     │
+    │                                                          │
+    │  Props:                                                  │
+    │  • symbol: string                                        │
+    │  • currentBid: number                                    │
+    │  • currentAsk: number                                    │
+    │  • accountId: number                                     │
+    │  • onClose: () => void                                   │
+    │  • onOrderPlaced: () => void                             │
+    │                                                          │
+    │  Local State:                                            │
+    │  • volume: number (0.01 default)                         │
+    │  • isPlacing: boolean                                    │
+    │  • showDisclaimer: boolean                               │
+    │  • error: string | null                                  │
+    │                                                          │
+    │  Functions:                                              │
+    │  • placeOrder(side: 'BUY' | 'SELL')                      │
+    │  • incrementVolume()                                     │
+    │  • decrementVolume()                                     │
+    │  • handleAcceptDisclaimer()                              │
+    └──────────────────────────────────────────────────────────┘
+                              │
+                              │ API Call
+                              ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         API SERVICE LAYER                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────────────────────────────────────────────┐
+    │                      api.ts (Centralized)                │
+    │                                                          │
+    │  Configuration:                                          │
+    │  • API_BASE_URL = import.meta.env.VITE_API_URL          │
+    │  •   || 'http://localhost:7999'                         │
+    │                                                          │
+    │  Authentication:                                         │
+    │  • fetchWithTimeout(url, options)                        │
+    │    - Auto-adds JWT token from Zustand                   │
+    │    - Handles 401 redirects                              │
+    │    - Request timeout (10s)                              │
+    │                                                          │
+    │  Orders API:                                             │
+    │  • api.orders.placeMarketOrder(data)                     │
+    │    ┌──────────────────────────────────────┐             │
+    │    │ POST /api/orders/market              │             │
+    │    │ {                                    │             │
+    │    │   accountId: number,                 │             │
+    │    │   symbol: string,                    │             │
+    │    │   side: 'BUY' | 'SELL',             │             │
+    │    │   volume: number,                    │             │
+    │    │   sl?: number,                       │             │
+    │    │   tp?: number                        │             │
+    │    │ }                                    │             │
+    │    └──────────────────────────────────────┘             │
+    └──────────────────────────────────────────────────────────┘
+                              │
+                              │ HTTP Request
+                              ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           BACKEND LAYER                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────────────────────────────────────────────┐
+    │              Go Backend (Port 7999)                      │
+    │                                                          │
+    │  Route Handler:                                          │
+    │  • POST /api/orders/market                               │
+    │    - Validate JWT token                                  │
+    │    - Validate order data                                 │
+    │    - Check account balance                               │
+    │    - Check margin requirements                           │
+    │    - Route to execution mode                             │
+    │                                                          │
+    │  Execution Engine:                                       │
+    │  • A-Book: Route to LP                                   │
+    │  • B-Book: Internal execution                            │
+    │  • C-Book: Hybrid routing                                │
+    │                                                          │
+    │  Risk Management:                                        │
+    │  • Margin calculation                                    │
+    │  • Leverage check                                        │
+    │  • Position limits                                       │
+    │  • Stop out level                                        │
+    │                                                          │
+    │  Response:                                               │
+    │  • Position object                                       │
+    │  • Order confirmation                                    │
+    │  • Error details (if failed)                             │
+    └──────────────────────────────────────────────────────────┘
+                              │
+                              │ Database Update
+                              ↓
+    ┌──────────────────────────────────────────────────────────┐
+    │                    PostgreSQL Database                   │
+    │                                                          │
+    │  Tables Updated:                                         │
+    │  • positions (new row)                                   │
+    │  • accounts (balance update)                             │
+    │  • ledger (transaction record)                           │
+    │  • trades (history record)                               │
+    └──────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         STATE MANAGEMENT                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ┌──────────────────────────────────────────────────────────┐
+    │              Zustand Store (useAppStore)                 │
+    │                                                          │
+    │  Global State:                                           │
+    │  • accountId: string | null                              │
+    │  • authToken: string | null                              │
+    │  • ticks: Record<string, Tick>                           │
+    │  • positions: Position[]                                 │
+    │  • orders: Order[]                                       │
+    │                                                          │
+    │  Actions:                                                │
+    │  • setTick(symbol, tick)                                 │
+    │  • setPositions(positions)                               │
+    │  • setAuthToken(token)                                   │
+    └──────────────────────────────────────────────────────────┘
+                              ↑
+                              │ WebSocket Updates
+                              │
+    ┌──────────────────────────────────────────────────────────┐
+    │                  WebSocket Connection                    │
+    │                                                          │
+    │  • ws://localhost:7999/ws                                │
+    │  • Real-time tick updates                                │
+    │  • Position updates                                      │
+    │  • Account balance updates                               │
+    └──────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       DATA FLOW SEQUENCE                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+1. User Action
+   └─→ User presses Ctrl+Shift+T or right-clicks chart
+
+2. Panel Activation
+   └─→ TradingChart sets oneClickTrading = true
+   └─→ OneClickPanel renders
+
+3. First Time Use
+   └─→ Check localStorage for 'oneClickTradingAccepted'
+   └─→ If not found, show disclaimer modal
+   └─→ User clicks "I Understand, Enable"
+   └─→ Store acceptance in localStorage
+
+4. Volume Adjustment (Optional)
+   └─→ User clicks +/- buttons or types value
+   └─→ Volume state updates (min 0.01, rounded to 2 decimals)
+
+5. Default SL/TP Loading
+   └─→ Check localStorage.getItem('defaultStopLoss')
+   └─→ Check localStorage.getItem('defaultTakeProfit')
+   └─→ Calculate actual prices based on pips
+
+6. Order Placement
+   └─→ User clicks BUY or SELL button
+   └─→ placeOrder('BUY' | 'SELL') called
+   └─→ Set isPlacing = true (disable buttons)
+   └─→ Build order payload with SL/TP
+
+7. API Call
+   └─→ api.orders.placeMarketOrder(orderData)
+   └─→ fetchWithTimeout adds JWT token
+   └─→ POST to http://localhost:7999/api/orders/market
+
+8. Backend Processing
+   └─→ Validate JWT token
+   └─→ Validate order data
+   └─→ Check margin requirements
+   └─→ Execute order (A/B/C-Book routing)
+   └─→ Update database (positions, account, ledger)
+   └─→ Return Position object
+
+9. Success Response
+   └─→ API returns position data
+   └─→ OneClickPanel: isPlacing = false
+   └─→ Call onOrderPlaced() callback
+   └─→ TradingChart may refresh positions list
+   └─→ WebSocket broadcasts position update to all clients
+
+10. Error Handling
+    └─→ API throws error
+    └─→ Catch in try-catch block
+    └─→ Set error state with message
+    └─→ Display red error notification
+    └─→ Auto-dismiss after 3 seconds
+    └─→ isPlacing = false (re-enable buttons)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        KEYBOARD SHORTCUTS                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    Ctrl+Shift+T
+         │
+         ├─→ useEffect in TradingChart.tsx
+         │    └─→ addEventListener('keydown', handler)
+         │         └─→ if (e.ctrlKey && e.shiftKey && e.key === 'T')
+         │              └─→ e.preventDefault()
+         │                   └─→ setOneClickTrading(prev => !prev)
+         │
+         └─→ Result: Panel toggles on/off
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         SAFETY MECHANISMS                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+1. Disclaimer System
+   ┌────────────────────────────────────────┐
+   │ localStorage.getItem('oneClick...')    │
+   │  ↓                                     │
+   │ null? → Show warning modal             │
+   │  ↓                                     │
+   │ User accepts → setItem('...', 'true')  │
+   │  ↓                                     │
+   │ Never show again                       │
+   └────────────────────────────────────────┘
+
+2. Volume Validation
+   ┌────────────────────────────────────────┐
+   │ Input: volume                          │
+   │  ↓                                     │
+   │ Check: volume > 0                      │
+   │  ↓                                     │
+   │ Round: Math.round(vol * 100) / 100     │
+   │  ↓                                     │
+   │ Min: Math.max(0.01, volume)            │
+   └────────────────────────────────────────┘
+
+3. Duplicate Prevention
+   ┌────────────────────────────────────────┐
+   │ isPlacing = true                       │
+   │  ↓                                     │
+   │ Buttons disabled                       │
+   │  ↓                                     │
+   │ API call executes                      │
+   │  ↓                                     │
+   │ isPlacing = false                      │
+   │  ↓                                     │
+   │ Buttons re-enabled                     │
+   └────────────────────────────────────────┘
+
+4. Error Recovery
+   ┌────────────────────────────────────────┐
+   │ try { api.orders.place... }            │
+   │  ↓                                     │
+   │ catch (err) {                          │
+   │   setError(err.message)                │
+   │   setTimeout(clear, 3000)              │
+   │   isPlacing = false                    │
+   │ }                                      │
+   └────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        CONFIGURATION STORAGE                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+localStorage:
+  ├─→ 'oneClickTradingAccepted': 'true' | null
+  ├─→ 'defaultStopLoss': '20' | null (pips)
+  └─→ 'defaultTakeProfit': '30' | null (pips)
+
+Zustand (persisted):
+  ├─→ selectedSymbol: string
+  ├─→ chartType: ChartType
+  ├─→ timeframe: Timeframe
+  └─→ orderVolume: number
+
+Zustand (session):
+  ├─→ ticks: Record<string, Tick>
+  ├─→ positions: Position[]
+  ├─→ accountId: string | null
+  └─→ authToken: string | null
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          FILE STRUCTURE                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+clients/desktop/
+│
+├── src/
+│   ├── components/
+│   │   ├── OneClickPanel.tsx         ← NEW: Panel component
+│   │   └── TradingChart.tsx           ← MODIFIED: Integration
+│   │
+│   ├── services/
+│   │   └── api.ts                     ← USES: Centralized API
+│   │
+│   ├── store/
+│   │   └── useAppStore.ts             ← USES: State management
+│   │
+│   └── test/
+│       └── oneClickPanel.test.ts     ← NEW: Test suite
+│
+├── docs/
+│   ├── ONE_CLICK_PANEL_IMPLEMENTATION.md  ← NEW: Tech docs
+│   ├── ONE_CLICK_QUICK_REFERENCE.md       ← NEW: User guide
+│   └── ONE_CLICK_ARCHITECTURE.txt         ← NEW: This file
+│
+└── ONE_CLICK_DELIVERY_SUMMARY.md          ← NEW: Summary
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           DEPENDENCIES                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Existing (No New Packages):
+  ├── react (hooks: useState, useEffect, useCallback)
+  ├── lucide-react (icons: TrendingUp, TrendingDown, Plus, Minus, X, AlertTriangle)
+  ├── zustand (useAppStore)
+  └── ../services/api (centralized API service)
+
+Build Tools:
+  ├── TypeScript (type safety)
+  ├── Vite (bundler)
+  └── ESLint (linting)
+
+Testing:
+  └── Vitest (test runner)
+
+════════════════════════════════════════════════════════════════════════════════
+End of Architecture Document
+════════════════════════════════════════════════════════════════════════════════

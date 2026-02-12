@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -396,10 +397,19 @@ func getUserIDFromRequest(r *http.Request) string {
 }
 
 // Helper function to set CORS headers
+// DEPRECATED: Use middleware.NewCORSMiddleware instead
+// This function is kept for backward compatibility but should not be used with wildcard in production
 func setCORSHeaders(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// SECURITY WARNING: Wildcard CORS is insecure
+	// In production, use config.CORS.AllowedOrigins with specific domains
+	origin := os.Getenv("ALLOWED_ORIGINS")
+	if origin == "" {
+		origin = "http://localhost:3000" // Safe default for development
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Allow-Credentials", "true")
 }
 
 // RegisterRoutes registers all workspace routes

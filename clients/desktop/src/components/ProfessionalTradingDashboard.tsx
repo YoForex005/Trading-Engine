@@ -5,6 +5,8 @@ import type { IChartApi, ISeriesApi, CandlestickData, Time } from 'lightweight-c
 import { OneClickTrading } from './OneClickTrading';
 import { MarketWatch } from './MarketWatch';
 import './ProfessionalTradingDashboard.css';
+import { WS_ENDPOINTS, buildApiUrl } from '../config/api';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 // Icons as React components for better performance
 const Icons = {
@@ -351,7 +353,7 @@ const ProfessionalTradingDashboard: React.FC = () => {
     const fetchHistoricalData = async () => {
         try {
             const response = await fetch(
-                `http://localhost:7999/api/history/ohlc?symbol=${selectedSymbol}&timeframe=${selectedTimeframe}&limit=500`
+                buildApiUrl(`/api/history/ohlc?symbol=${selectedSymbol}&timeframe=${selectedTimeframe}&limit=500`)
             );
             const rawData = await response.json();
             const candlesArray = Array.isArray(rawData) ? rawData : (rawData.candles || []);
@@ -409,15 +411,17 @@ const ProfessionalTradingDashboard: React.FC = () => {
 
     const formingCandleRef = useRef<OHLC | null>(null);
 
+    // Use centralized WebSocket with auto-reconnection
+    const { subscribe } = useWebSocket({
+        url: WS_ENDPOINTS.general,
+        autoConnect: true,
+    });
+
     // WebSocket connection for live updates
     useEffect(() => {
-        // Use the main WebSocket endpoint or the mock market data stream
-        const ws = new WebSocket('ws://localhost:7999/ws');
-        wsRef.current = ws;
-
-        ws.onmessage = (event) => {
+        const unsubscribe = subscribe('*', (message: any) => {
             try {
-                const data = JSON.parse(event.data);
+                const data = message;
 
                 // Handle 'tick' for current price display (Bid/Ask/Spread)
                 if (data.type === 'tick' && data.symbol === selectedSymbol) {
@@ -434,7 +438,7 @@ const ProfessionalTradingDashboard: React.FC = () => {
 
                 // Handle 'candle_update' for Chart
                 if (data.type === 'candle_update' && data.symbol === selectedSymbol && data.timeframe === 'M1') {
-                    // Only verify mapping for M1 current timeframe, 
+                    // Only verify mapping for M1 current timeframe,
                     // generic handling would need timeframe check against selectedTimeframe
                     if (selectedTimeframe !== '1m') return;
 
@@ -472,12 +476,12 @@ const ProfessionalTradingDashboard: React.FC = () => {
             } catch (error) {
                 console.error('WebSocket message error:', error);
             }
-        };
+        });
 
         return () => {
-            if (wsRef.current) wsRef.current.close();
+            unsubscribe();
         };
-    }, [selectedSymbol, selectedTimeframe]);
+    }, [selectedSymbol, selectedTimeframe, subscribe]);
 
     // Refetch chart history when selected symbol changes
     useEffect(() => {
@@ -491,7 +495,7 @@ const ProfessionalTradingDashboard: React.FC = () => {
             // Use the symbols array defined above
             symbols.forEach(async (sym) => {
                 try {
-                    await fetch('http://localhost:7999/api/symbols/subscribe', {
+                    await fetch(`${buildApiUrl('')}/api/symbols/subscribe`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ symbol: sym })
@@ -528,7 +532,7 @@ const ProfessionalTradingDashboard: React.FC = () => {
 
     const placeOrder = async (side: string) => {
         try {
-            const response = await fetch('http://localhost:7999/api/orders/market', {
+            const response = await fetch(`${buildApiUrl('')}/api/orders/market`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -551,7 +555,7 @@ const ProfessionalTradingDashboard: React.FC = () => {
                 // Fallback to legacy endpoint if simple B-Book fails or for debugging
                 if (response.status === 404) {
                     // Try legacy OANDA/A-Book endpoint
-                    const legacyResponse = await fetch('http://localhost:7999/order', {
+                    const legacyResponse = await fetch(`${buildApiUrl('')}/order`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({

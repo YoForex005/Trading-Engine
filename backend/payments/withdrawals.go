@@ -8,7 +8,7 @@ import (
 
 // WithdrawalService handles withdrawal processing
 type WithdrawalService struct {
-	gateway    Gateway
+	gateway    *Gateway
 	providers  map[PaymentProvider]Provider
 	fraud      FraudDetector
 	limits     LimitsChecker
@@ -18,7 +18,7 @@ type WithdrawalService struct {
 
 // NewWithdrawalService creates a new withdrawal service
 func NewWithdrawalService(
-	gateway Gateway,
+	gateway *Gateway,
 	providers map[PaymentProvider]Provider,
 	fraud FraudDetector,
 	limits LimitsChecker,

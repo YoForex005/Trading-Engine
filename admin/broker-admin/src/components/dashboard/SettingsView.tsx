@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { AlertTriangle, Loader2, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
+import TwoFactorSetup from '../settings/TwoFactorSetup';
 
 interface SettingsViewProps {
     mode: string;
@@ -141,6 +142,12 @@ export default function SettingsView({ mode, onModeChange, lp, onLPChange }: Set
                         </select>
                     </div>
                 </div>
+            </div>
+
+            {/* Security Section - 2FA */}
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+                <h3 className="font-semibold mb-4">Security</h3>
+                <TwoFactorSetup />
             </div>
 
             <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">

@@ -3,7 +3,7 @@
  * Manages alert stack with WebSocket integration and sound notifications
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { AlertCard } from './AlertCard';
 import type { Alert } from './AlertCard';
 import { Bell } from 'lucide-react';
@@ -40,40 +40,20 @@ export function AlertsContainer({ wsConnection }: AlertsContainerProps) {
     audioRef.current.volume = 0.5; // 50% volume
   }, []);
 
-  // WebSocket message handler
-  useEffect(() => {
-    if (!wsConnection) return;
+  // Dismiss alert
+  const dismissAlert = useCallback((id: string) => {
+    setAlerts(prev => prev.filter(alert => alert.id !== id));
 
-    const handleMessage = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        // Handle alert messages
-        if (data.type === 'alert') {
-          const newAlert: Alert = {
-            id: data.id || `alert-${Date.now()}-${Math.random()}`,
-            severity: data.severity || 'MEDIUM',
-            message: data.message || 'Alert triggered',
-            timestamp: data.timestamp || Date.now(),
-            acknowledged: false,
-          };
-
-          addAlert(newAlert);
-        }
-      } catch (error) {
-        console.error('[Alerts] Failed to parse WebSocket message:', error);
-      }
-    };
-
-    wsConnection.addEventListener('message', handleMessage);
-
-    return () => {
-      wsConnection.removeEventListener('message', handleMessage);
-    };
-  }, [wsConnection]);
+    // Clear auto-hide timeout
+    const timeout = autoHideTimeouts.current.get(id);
+    if (timeout) {
+      clearTimeout(timeout);
+      autoHideTimeouts.current.delete(id);
+    }
+  }, []);
 
   // Add new alert with sound, notification, and auto-hide
-  const addAlert = (alert: Alert) => {
+  const addAlert = useCallback((alert: Alert) => {
     setAlerts(prev => [alert, ...prev]);
 
     // Play sound
@@ -109,7 +89,39 @@ export function AlertsContainer({ wsConnection }: AlertsContainerProps) {
       }, 10000);
       autoHideTimeouts.current.set(alert.id, timeout);
     }
-  };
+  }, [hasNotificationPermission, dismissAlert]);
+
+  // WebSocket message handler
+  useEffect(() => {
+    if (!wsConnection) return;
+
+    const handleMessage = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        // Handle alert messages
+        if (data.type === 'alert') {
+          const newAlert: Alert = {
+            id: data.id || `alert-${Date.now()}-${Math.random()}`,
+            severity: data.severity || 'MEDIUM',
+            message: data.message || 'Alert triggered',
+            timestamp: data.timestamp || Date.now(),
+            acknowledged: false,
+          };
+
+          addAlert(newAlert);
+        }
+      } catch (error) {
+        console.error('[Alerts] Failed to parse WebSocket message:', error);
+      }
+    };
+
+    wsConnection.addEventListener('message', handleMessage);
+
+    return () => {
+      wsConnection.removeEventListener('message', handleMessage);
+    };
+  }, [wsConnection, addAlert]);
 
   // Acknowledge alert
   const acknowledgeAlert = (id: string) => {
@@ -160,17 +172,6 @@ export function AlertsContainer({ wsConnection }: AlertsContainerProps) {
     }, minutes * 60 * 1000);
   };
 
-  // Dismiss alert
-  const dismissAlert = (id: string) => {
-    setAlerts(prev => prev.filter(alert => alert.id !== id));
-
-    // Clear auto-hide timeout
-    const timeout = autoHideTimeouts.current.get(id);
-    if (timeout) {
-      clearTimeout(timeout);
-      autoHideTimeouts.current.delete(id);
-    }
-  };
 
   // Cleanup timeouts on unmount
   useEffect(() => {

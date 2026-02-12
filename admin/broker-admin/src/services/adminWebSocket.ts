@@ -87,23 +87,21 @@ class AdminWebSocketService {
    */
   connect(): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      console.log('[AdminWS] Already connected');
       return;
     }
 
     this.updateState('connecting');
 
-    // Get auth token from localStorage
-    const token = localStorage.getItem('admin_token') || localStorage.getItem('rtx_token');
+    // Get auth token from localStorage (client-side only)
+    const token = typeof window !== 'undefined'
+      ? (localStorage.getItem('admin_token') || localStorage.getItem('rtx_token'))
+      : null;
     const urlWithAuth = token ? `${this.url}?token=${encodeURIComponent(token)}` : this.url;
-
-    console.log(`[AdminWS] Connecting to ${this.url}...`);
 
     try {
       this.ws = new WebSocket(urlWithAuth);
 
       this.ws.onopen = () => {
-        console.log('[AdminWS] Connected successfully');
         this.reconnectAttempts = 0;
         this.reconnectDelay = 1000;
         this.updateState('connected');
@@ -131,7 +129,6 @@ class AdminWebSocketService {
       };
 
       this.ws.onclose = (event) => {
-        console.log(`[AdminWS] Connection closed (code: ${event.code})`);
         this.updateState('disconnected');
         this.stopPingInterval();
 
@@ -155,8 +152,6 @@ class AdminWebSocketService {
    * Disconnect from WebSocket server
    */
   disconnect(): void {
-    console.log('[AdminWS] Disconnecting...');
-
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
@@ -226,8 +221,6 @@ class AdminWebSocketService {
   private send(message: any): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
-    } else {
-      console.warn('[AdminWS] Cannot send message - not connected');
     }
   }
 
@@ -291,10 +284,6 @@ class AdminWebSocketService {
     const delay = Math.min(
       this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
       30000 // Max 30 seconds
-    );
-
-    console.log(
-      `[AdminWS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`
     );
 
     this.reconnectTimeout = setTimeout(() => {

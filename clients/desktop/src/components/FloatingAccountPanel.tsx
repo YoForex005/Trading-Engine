@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { API_ENDPOINTS } from '../config/api';
 
 interface AccountInfo {
     accountId: number;
@@ -32,7 +33,7 @@ export function FloatingAccountPanel({ initialPosition = { x: 20, y: 100 } }: Fl
         const fetchAccount = async () => {
             try {
                 // Use RTX B-Book API for internal balance (NOT OANDA)
-                const res = await fetch('http://localhost:7999/api/account/summary?accountId=1');
+                const res = await fetch(`${API_ENDPOINTS.account}/summary?accountId=1`);
                 if (res.ok) {
                     const data = await res.json();
                     setAccount(data);

@@ -40,7 +40,7 @@ export interface OHLCData {
 
 export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
 
-const API_BASE_URL = 'http://localhost:7999'; // Backend URL
+import { API_BASE_URL } from '../config/api';
 
 export class ChartAnalysisService {
     /**

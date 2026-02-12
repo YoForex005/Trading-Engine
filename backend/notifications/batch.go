@@ -141,7 +141,7 @@ func (bp *BatchProcessor) sendEmailDigest(ctx context.Context, buffer *batchBuff
 			"notification_types": grouped,
 		},
 		Channels:  []NotificationChannel{ChannelEmail},
-		CreatedAt: time.Now(),
+		CreatedAt: time.Now().Unix(),
 	}
 
 	// Send digest (in production, get user email from database)

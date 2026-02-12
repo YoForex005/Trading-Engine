@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect, useMemo } from 'react';
+import { buildApiUrl } from '../config/api';
 import {
   Clock,
   TrendingUp,
@@ -54,7 +55,7 @@ export const TradeHistory = ({ accountId }: TradeHistoryProps) => {
       setLoading(true);
       try {
         const response = await fetch(
-          `http://localhost:7999/api/trades/history?accountId=${activeAccountId}`
+          buildApiUrl(`/api/trades/history?accountId=${activeAccountId}`)
         );
 
         if (response.ok) {

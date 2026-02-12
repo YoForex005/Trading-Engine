@@ -6,9 +6,14 @@ import "time"
 type AdminRole string
 
 const (
-	RoleSuperAdmin AdminRole = "SUPER_ADMIN" // Full access to everything
-	RoleAdmin      AdminRole = "ADMIN"       // Manage users, funds, orders
-	RoleSupport    AdminRole = "SUPPORT"     // View-only, limited modifications
+	RoleSuperAdmin  AdminRole = "SUPER_ADMIN"  // Full access to everything
+	RoleAdmin       AdminRole = "ADMIN"        // Legacy admin role compatibility
+	RoleBrokerAdmin AdminRole = "BROKER_ADMIN" // Broker administration
+	RoleRiskManager AdminRole = "RISK_MANAGER" // Risk management
+	RoleDealer      AdminRole = "DEALER"       // Trading desk operations
+	RoleAccountant  AdminRole = "ACCOUNTANT"   // Financial operations
+	RoleSupport     AdminRole = "SUPPORT"      // Customer support
+	RoleViewer      AdminRole = "VIEWER"       // Read-only access
 )
 
 // Admin represents an admin user

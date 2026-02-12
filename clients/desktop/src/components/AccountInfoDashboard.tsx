@@ -16,6 +16,39 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { ExportDialog } from './ExportDialog';
 
+const StatCard = ({
+  icon: Icon,
+  label,
+  value,
+  subtext,
+  color = 'blue',
+  highlight = false,
+}: {
+  icon: typeof DollarSign;
+  label: string;
+  value: string;
+  subtext?: string;
+  color?: string;
+  highlight?: boolean;
+}) => (
+  <div
+    className={`p-4 rounded-lg border ${
+      highlight
+        ? `bg-${color}-900/20 border-${color}-700/50`
+        : 'bg-zinc-900 border-zinc-800'
+    }`}
+  >
+    <div className="flex items-center gap-2 mb-2">
+      <Icon className={`w-4 h-4 text-${color}-400`} />
+      <span className="text-xs text-zinc-500">{label}</span>
+    </div>
+    <div className={`text-2xl font-bold text-${highlight ? color + '-400' : 'white'}`}>
+      {value}
+    </div>
+    {subtext && <div className="text-xs text-zinc-500 mt-1">{subtext}</div>}
+  </div>
+);
+
 export const AccountInfoDashboard = () => {
   const { account, positions } = useAppStore();
   const [showExportDialog, setShowExportDialog] = useState(false);
@@ -48,39 +81,6 @@ export const AccountInfoDashboard = () => {
       </div>
     );
   }
-
-  const StatCard = ({
-    icon: Icon,
-    label,
-    value,
-    subtext,
-    color = 'blue',
-    highlight = false,
-  }: {
-    icon: typeof DollarSign;
-    label: string;
-    value: string;
-    subtext?: string;
-    color?: string;
-    highlight?: boolean;
-  }) => (
-    <div
-      className={`p-4 rounded-lg border ${
-        highlight
-          ? `bg-${color}-900/20 border-${color}-700/50`
-          : 'bg-zinc-900 border-zinc-800'
-      }`}
-    >
-      <div className="flex items-center gap-2 mb-2">
-        <Icon className={`w-4 h-4 text-${color}-400`} />
-        <span className="text-xs text-zinc-500">{label}</span>
-      </div>
-      <div className={`text-2xl font-bold text-${highlight ? color + '-400' : 'white'}`}>
-        {value}
-      </div>
-      {subtext && <div className="text-xs text-zinc-500 mt-1">{subtext}</div>}
-    </div>
-  );
 
   return (
     <div className="space-y-4">

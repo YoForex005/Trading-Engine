@@ -3,7 +3,9 @@ package auth
 import (
 	"errors"
 	"log"
+	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/epic1st/rtx/backend/internal/core"
 	"golang.org/x/crypto/bcrypt"
@@ -138,4 +140,37 @@ func (s *Service) GenerateToken(user *User) (string, error) {
 // ValidateToken validates a JWT token using the service's secret
 func (s *Service) ValidateToken(tokenString string) (*Claims, error) {
 	return ValidateToken(tokenString, s.jwtSecret)
+}
+
+// ValidateAdminToken validates Bearer JWT and returns admin user id.
+func (s *Service) ValidateAdminToken(r *http.Request) (int64, error) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return 0, errors.New("missing authorization header")
+	}
+
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || strings.TrimSpace(parts[1]) == "" {
+		return 0, errors.New("invalid authorization header")
+	}
+
+	claims, err := s.ValidateToken(parts[1])
+	if err != nil {
+		return 0, err
+	}
+
+	role := strings.ToUpper(strings.TrimSpace(claims.Role))
+	if role == "" || !strings.Contains(role, "ADMIN") {
+		return 0, errors.New("admin access required")
+	}
+
+	if claims.UserID == "" {
+		return 0, nil
+	}
+
+	id, err := strconv.ParseInt(claims.UserID, 10, 64)
+	if err != nil {
+		return 0, nil
+	}
+	return id, nil
 }

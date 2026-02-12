@@ -1,389 +1,616 @@
 /**
- * Advanced Order Entry Panel
- * Supports Market, Limit, Stop, and Stop-Limit orders with SL/TP
+ * Order Entry / Trade Ticket
+ * Professional MT5-style order placement form
  */
 
-import { useState, useEffect } from 'react';
-import { api } from '../services/api';
-import type { MarginPreview, LotCalculation } from '../services/api';
-import { DollarSign, TrendingUp, AlertCircle, Calculator } from 'lucide-react';
-import { RoutingIndicator } from './RoutingIndicator';
-
-export type OrderType = 'MARKET' | 'LIMIT' | 'STOP' | 'STOP_LIMIT';
-export type OrderSide = 'BUY' | 'SELL';
+import { useState, useEffect, useMemo } from 'react';
+import {
+  TrendingUp,
+  TrendingDown,
+  Calculator,
+  AlertTriangle,
+  Info,
+  X,
+  Clock,
+  Calendar,
+} from 'lucide-react';
+import { useTradeSettings } from '../store/useSettingsStore';
+import { useAppStore } from '../store/useAppStore';
+import { API_ENDPOINTS } from '../config/api';
 
 interface OrderEntryProps {
   symbol: string;
-  currentBid?: number;
-  currentAsk?: number;
-  accountId: number;
-  balance: number;
+  onClose: () => void;
   onOrderPlaced?: () => void;
 }
 
-export function OrderEntry({
-  symbol,
-  currentBid = 0,
-  currentAsk = 0,
-  accountId,
-  onOrderPlaced,
-}: OrderEntryProps) {
-  const [orderType, setOrderType] = useState<OrderType>('MARKET');
-  const [side, setSide] = useState<OrderSide>('BUY');
-  const [volume, setVolume] = useState(0.01);
-  const [price, setPrice] = useState(0);
-  const [triggerPrice, setTriggerPrice] = useState(0);
-  const [sl, setSl] = useState(0);
-  const [tp, setTp] = useState(0);
-  const [loading, setLoading] = useState(false);
+type OrderType =
+  | 'Market'
+  | 'Buy Limit'
+  | 'Sell Limit'
+  | 'Buy Stop'
+  | 'Sell Stop'
+  | 'Buy Stop Limit'
+  | 'Sell Stop Limit';
+
+type ExpiryType = 'GTC' | 'Today' | 'Specified';
+
+type PipsMode = 'price' | 'pips';
+
+const LOT_PRESETS = [0.01, 0.1, 0.5, 1.0, 5.0, 10.0];
+
+export default function OrderEntry({ symbol, onClose, onOrderPlaced }: OrderEntryProps) {
+  const tradeSettings = useTradeSettings();
+  const { ticks, account } = useAppStore();
+
+  // Current prices from ticks
+  const currentTick = ticks[symbol];
+  const currentBid = currentTick?.bid || 0;
+  const currentAsk = currentTick?.ask || 0;
+
+  // Order parameters
+  const [orderType, setOrderType] = useState<OrderType>('Market');
+  const [volume, setVolume] = useState(tradeSettings.defaultVolume);
+  const [price, setPrice] = useState('');
+  const [stopLoss, setStopLoss] = useState('');
+  const [takeProfit, setTakeProfit] = useState('');
+  const [slMode, setSlMode] = useState<PipsMode>('price');
+  const [tpMode, setTpMode] = useState<PipsMode>('price');
+  const [expiry, setExpiry] = useState<ExpiryType>('GTC');
+  const [expiryDate, setExpiryDate] = useState('');
+  const [expiryTime, setExpiryTime] = useState('23:59');
+  const [comment, setComment] = useState('');
+
+  // UI state
+  const [isPlacing, setIsPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Risk calculator
-  const [riskPercent, setRiskPercent] = useState(1);
-  const [slPips, setSlPips] = useState(20);
-  const [showRiskCalc, setShowRiskCalc] = useState(false);
-  const [lotCalc, setLotCalc] = useState<LotCalculation | null>(null);
+  // Determine if JPY pair (different pip size)
+  const isJPY = symbol.includes('JPY');
+  const pipSize = isJPY ? 0.01 : 0.0001;
+  const pipMultiplier = isJPY ? 100 : 10000;
 
-  // Margin preview
-  const [marginPreview, setMarginPreview] = useState<MarginPreview | null>(null);
+  // Check if order type is pending
+  const isPendingOrder = orderType !== 'Market';
 
-  // Auto-fill price for limit/stop orders
+  // Auto-fill price for pending orders
   useEffect(() => {
-    if (orderType === 'LIMIT' || orderType === 'STOP' || orderType === 'STOP_LIMIT') {
-      const basePrice = side === 'BUY' ? currentAsk : currentBid;
-      if (!price || price === 0) {
-        setPrice(basePrice);
-      }
-      if ((orderType === 'STOP' || orderType === 'STOP_LIMIT') && (!triggerPrice || triggerPrice === 0)) {
-        setTriggerPrice(basePrice);
+    if (isPendingOrder && !price) {
+      if (orderType.includes('Buy')) {
+        setPrice(currentAsk.toFixed(isJPY ? 3 : 5));
+      } else {
+        setPrice(currentBid.toFixed(isJPY ? 3 : 5));
       }
     }
-  }, [orderType, side, currentBid, currentAsk]);
+  }, [orderType, currentBid, currentAsk, isJPY, isPendingOrder, price]);
 
-  // Fetch margin preview when volume changes
-  useEffect(() => {
-    if (volume > 0 && symbol) {
-      const timer = setTimeout(() => {
-        api.risk
-          .previewMargin(symbol, volume, side)
-          .then(setMarginPreview)
-          .catch(() => setMarginPreview(null));
-      }, 500);
+  // Calculate spread
+  const spread = currentAsk - currentBid;
+  const spreadPips = spread * pipMultiplier;
 
-      return () => clearTimeout(timer);
-    }
-  }, [volume, symbol, side]);
-
-  // Calculate recommended lot size from risk
-  const calculateLot = async () => {
-    if (!slPips || slPips <= 0) {
-      setError('Enter Stop Loss in pips first');
-      return;
-    }
-
-    try {
-      const result = await api.risk.calculateLot(symbol, riskPercent, slPips);
-      setLotCalc(result);
-      setVolume(result.recommendedLot);
-      setShowRiskCalc(true);
-    } catch (err: any) {
-      setError(err.message || 'Failed to calculate lot size');
-    }
+  // Convert pips to price
+  const pipsToPrice = (pips: number, basePrice: number, direction: 'above' | 'below'): number => {
+    const priceChange = pips * pipSize;
+    return direction === 'above' ? basePrice + priceChange : basePrice - priceChange;
   };
 
-  const handlePlaceOrder = async () => {
+  // Convert price to pips
+  const priceToPips = (priceValue: number, basePrice: number): number => {
+    return Math.abs((priceValue - basePrice) / pipSize);
+  };
+
+  // Get entry price for calculations
+  const entryPrice = useMemo(() => {
+    if (orderType === 'Market') {
+      return orderType.includes('Buy') ? currentAsk : currentBid;
+    }
+    return parseFloat(price) || 0;
+  }, [orderType, price, currentBid, currentAsk]);
+
+  // Calculate SL price
+  const slPrice = useMemo(() => {
+    if (!stopLoss) return null;
+    const slValue = parseFloat(stopLoss);
+    if (isNaN(slValue)) return null;
+
+    if (slMode === 'pips') {
+      const isBuy = orderType.includes('Buy');
+      return pipsToPrice(slValue, entryPrice, isBuy ? 'below' : 'above');
+    }
+    return slValue;
+  }, [stopLoss, slMode, entryPrice, orderType, pipSize]);
+
+  // Calculate TP price
+  const tpPrice = useMemo(() => {
+    if (!takeProfit) return null;
+    const tpValue = parseFloat(takeProfit);
+    if (isNaN(tpValue)) return null;
+
+    if (tpMode === 'pips') {
+      const isBuy = orderType.includes('Buy');
+      return pipsToPrice(tpValue, entryPrice, isBuy ? 'above' : 'below');
+    }
+    return tpValue;
+  }, [takeProfit, tpMode, entryPrice, orderType, pipSize]);
+
+  // Risk calculator
+  const riskCalc = useMemo(() => {
+    // Mock values - in production, fetch from account settings
+    const leverage = (account as any)?.leverage || 100;
+    const accountCurrency = 'USD';
+    const contractSize = 100000; // Standard lot
+
+    // Calculate margin required
+    const margin = (volume * contractSize * entryPrice) / leverage;
+
+    // Calculate pip value (USD per pip for 1 lot)
+    const pipValue = (contractSize * pipSize) * volume;
+
+    // Calculate potential loss/profit
+    let potentialLoss = 0;
+    let potentialProfit = 0;
+
+    if (slPrice) {
+      const slPips = priceToPips(slPrice, entryPrice);
+      potentialLoss = slPips * pipValue;
+    }
+
+    if (tpPrice) {
+      const tpPips = priceToPips(tpPrice, entryPrice);
+      potentialProfit = tpPips * pipValue;
+    }
+
+    return {
+      margin,
+      pipValue,
+      potentialLoss,
+      potentialProfit,
+    };
+  }, [volume, entryPrice, slPrice, tpPrice, pipSize, account]);
+
+  // Handle volume preset click
+  const handleVolumePreset = (preset: number) => {
+    setVolume(preset);
+  };
+
+  // Handle order placement
+  const handlePlaceOrder = async (side: 'BUY' | 'SELL') => {
+    if (isPlacing) return;
+
     setError(null);
-    setLoading(true);
+    setIsPlacing(true);
 
     try {
-      if (orderType === 'MARKET') {
-        await api.orders.placeMarketOrder({
-          accountId,
-          symbol,
-          side,
-          volume,
-          sl: sl || undefined,
-          tp: tp || undefined,
-        });
-      } else if (orderType === 'LIMIT') {
-        await api.orders.placeLimitOrder({
-          symbol,
-          side,
-          volume,
-          price,
-          sl: sl || undefined,
-          tp: tp || undefined,
-        });
-      } else if (orderType === 'STOP') {
-        await api.orders.placeStopOrder({
-          symbol,
-          side,
-          volume,
-          triggerPrice,
-          sl: sl || undefined,
-          tp: tp || undefined,
-        });
-      } else if (orderType === 'STOP_LIMIT') {
-        await api.orders.placeStopLimitOrder({
-          symbol,
-          side,
-          volume,
-          triggerPrice,
-          limitPrice: price,
-          sl: sl || undefined,
-          tp: tp || undefined,
-        });
+      // Validate inputs
+      if (volume <= 0) {
+        throw new Error('Volume must be greater than 0');
       }
 
-      // Reset form and notify parent
-      setVolume(0.01);
-      setSl(0);
-      setTp(0);
-      setPrice(0);
-      setTriggerPrice(0);
+      if (isPendingOrder && !price) {
+        throw new Error('Price is required for pending orders');
+      }
+
+      // Build order data
+      const orderData: any = {
+        symbol,
+        side,
+        volume,
+        type: orderType,
+      };
+
+      // Add price for pending orders
+      if (isPendingOrder) {
+        orderData.price = parseFloat(price);
+      }
+
+      // Add SL/TP if provided
+      if (slPrice) {
+        orderData.stopLoss = slPrice;
+      }
+      if (tpPrice) {
+        orderData.takeProfit = tpPrice;
+      }
+
+      // Add expiry for pending orders
+      if (isPendingOrder && expiry !== 'GTC') {
+        if (expiry === 'Today') {
+          const today = new Date();
+          today.setHours(23, 59, 59, 999);
+          orderData.expiry = today.toISOString();
+        } else if (expiry === 'Specified' && expiryDate) {
+          const expiryDateTime = new Date(`${expiryDate}T${expiryTime}`);
+          orderData.expiry = expiryDateTime.toISOString();
+        }
+      }
+
+      // Add comment if provided
+      if (comment.trim()) {
+        orderData.comment = comment.trim().slice(0, 64);
+      }
+
+      // Add deviation for market orders
+      if (orderType === 'Market') {
+        orderData.deviation = tradeSettings.defaultDeviation;
+      }
+
+      // Call API
+      const endpoint = orderType === 'Market'
+        ? API_ENDPOINTS.order
+        : API_ENDPOINTS.orders;
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('jwt_token')}`,
+        },
+        body: JSON.stringify(orderData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Order placement failed');
+      }
+
+      // Success
       onOrderPlaced?.();
+      onClose();
     } catch (err: any) {
-      setError(err.message || 'Order failed');
+      console.error('Order placement failed:', err);
+      setError(err.message || 'Failed to place order');
+      setTimeout(() => setError(null), 5000);
     } finally {
-      setLoading(false);
+      setIsPlacing(false);
     }
   };
 
   return (
-    <div className="flex flex-col gap-3 p-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-zinc-300">Order Entry</h3>
-        <span className="text-xs text-zinc-500">{symbol}</span>
-      </div>
-
-      {/* Error Display */}
-      {error && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded text-xs text-red-400">
-          <AlertCircle size={14} />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* Order Type Selector */}
-      <div className="flex gap-1 p-1 bg-zinc-800/50 rounded">
-        {(['MARKET', 'LIMIT', 'STOP', 'STOP_LIMIT'] as OrderType[]).map((type) => (
-          <button
-            key={type}
-            onClick={() => setOrderType(type)}
-            className={`flex-1 px-2 py-1 text-xs font-medium rounded transition-colors ${
-              orderType === type
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                : 'text-zinc-500 hover:text-zinc-300'
-            }`}
-          >
-            {type.replace('_', '-')}
-          </button>
-        ))}
-      </div>
-
-      {/* Side Selector */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => setSide('BUY')}
-          className={`flex-1 px-4 py-2 rounded font-medium text-sm transition-colors ${
-            side === 'BUY'
-              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-              : 'bg-emerald-500/5 text-emerald-600 border border-emerald-500/10 hover:bg-emerald-500/10'
-          }`}
-        >
-          BUY {currentAsk > 0 && <span className="font-mono ml-1">{currentAsk.toFixed(5)}</span>}
-        </button>
-        <button
-          onClick={() => setSide('SELL')}
-          className={`flex-1 px-4 py-2 rounded font-medium text-sm transition-colors ${
-            side === 'SELL'
-              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-              : 'bg-red-500/5 text-red-600 border border-red-500/10 hover:bg-red-500/10'
-          }`}
-        >
-          SELL {currentBid > 0 && <span className="font-mono ml-1">{currentBid.toFixed(5)}</span>}
-        </button>
-      </div>
-
-      {/* Volume Input */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs text-zinc-500 font-medium">Volume (Lots)</label>
-        <input
-          type="number"
-          step={0.01}
-          min={0.01}
-          value={volume}
-          onChange={(e) => setVolume(parseFloat(e.target.value) || 0)}
-          className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm font-mono text-zinc-200 focus:outline-none focus:border-emerald-500/50"
-        />
-      </div>
-
-      {/* Price Inputs (for Limit/Stop orders) */}
-      {(orderType === 'LIMIT' || orderType === 'STOP_LIMIT') && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-zinc-500 font-medium">
-            {orderType === 'STOP_LIMIT' ? 'Limit Price' : 'Price'}
-          </label>
-          <input
-            type="number"
-            step={0.00001}
-            value={price}
-            onChange={(e) => setPrice(parseFloat(e.target.value) || 0)}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm font-mono text-zinc-200 focus:outline-none focus:border-emerald-500/50"
-          />
-        </div>
-      )}
-
-      {(orderType === 'STOP' || orderType === 'STOP_LIMIT') && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-zinc-500 font-medium">Trigger Price (Stop)</label>
-          <input
-            type="number"
-            step={0.00001}
-            value={triggerPrice}
-            onChange={(e) => setTriggerPrice(parseFloat(e.target.value) || 0)}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm font-mono text-zinc-200 focus:outline-none focus:border-emerald-500/50"
-          />
-        </div>
-      )}
-
-      {/* SL/TP Inputs */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-zinc-500 font-medium">Stop Loss</label>
-          <input
-            type="number"
-            step={0.00001}
-            value={sl}
-            onChange={(e) => setSl(parseFloat(e.target.value) || 0)}
-            placeholder="Optional"
-            className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm font-mono text-zinc-200 focus:outline-none focus:border-red-500/50"
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-zinc-500 font-medium">Take Profit</label>
-          <input
-            type="number"
-            step={0.00001}
-            value={tp}
-            onChange={(e) => setTp(parseFloat(e.target.value) || 0)}
-            placeholder="Optional"
-            className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm font-mono text-zinc-200 focus:outline-none focus:border-emerald-500/50"
-          />
-        </div>
-      </div>
-
-      {/* Risk Calculator Toggle */}
-      <button
-        onClick={() => setShowRiskCalc(!showRiskCalc)}
-        className="flex items-center justify-center gap-2 px-3 py-2 bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-400 transition-colors"
-      >
-        <Calculator size={14} />
-        {showRiskCalc ? 'Hide' : 'Show'} Risk Calculator
-      </button>
-
-      {/* Risk Calculator */}
-      {showRiskCalc && (
-        <div className="flex flex-col gap-2 p-3 bg-zinc-800/30 rounded border border-zinc-700">
-          <div className="flex items-center gap-2 text-xs text-zinc-400">
-            <TrendingUp size={12} />
-            <span className="font-medium">Position Sizing</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-zinc-500">Risk %</label>
-              <input
-                type="number"
-                step={0.1}
-                min={0.1}
-                max={10}
-                value={riskPercent}
-                onChange={(e) => setRiskPercent(parseFloat(e.target.value) || 1)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm font-mono text-zinc-200 focus:outline-none focus:border-emerald-500/50"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-zinc-500">SL (pips)</label>
-              <input
-                type="number"
-                step={1}
-                min={1}
-                value={slPips}
-                onChange={(e) => setSlPips(parseFloat(e.target.value) || 20)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm font-mono text-zinc-200 focus:outline-none focus:border-emerald-500/50"
-              />
-            </div>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-[#1e1e1e] border border-zinc-700 rounded-lg shadow-2xl w-[480px] max-h-[90vh] overflow-y-auto custom-scrollbar">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 bg-[#252525] border-b border-zinc-700">
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-bold text-zinc-200">New Order</h3>
+            <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 text-xs font-mono font-bold">
+              {symbol}
+            </span>
           </div>
           <button
-            onClick={calculateLot}
-            className="w-full px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded text-xs font-medium transition-colors"
+            onClick={onClose}
+            className="p-1 rounded hover:bg-zinc-700 text-zinc-400"
           >
-            Calculate Lot Size
+            <X size={16} />
           </button>
-          {lotCalc && (
-            <div className="flex flex-col gap-1 text-xs">
-              <div className="flex justify-between text-zinc-400">
-                <span>Recommended:</span>
-                <span className="font-mono text-emerald-400">{lotCalc.recommendedLot.toFixed(2)} lots</span>
+        </div>
+
+        {/* Content */}
+        <div className="p-4 space-y-4">
+          {/* Error Display */}
+          {error && (
+            <div className="px-3 py-2 bg-rose-500/10 border border-rose-500/20 rounded text-xs text-rose-400 flex items-center gap-2">
+              <AlertTriangle size={14} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {/* Current Prices */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-[#252525] border border-zinc-700/50 rounded p-3">
+              <div className="text-xs text-zinc-500 mb-1">Bid</div>
+              <div className="text-lg font-mono font-bold text-rose-400">
+                {currentBid.toFixed(isJPY ? 3 : 5)}
               </div>
-              <div className="flex justify-between text-zinc-500">
-                <span>Risk Amount:</span>
-                <span className="font-mono">${lotCalc.riskAmount.toFixed(2)}</span>
+            </div>
+            <div className="bg-[#252525] border border-zinc-700/50 rounded p-3">
+              <div className="text-xs text-zinc-500 mb-1">Ask</div>
+              <div className="text-lg font-mono font-bold text-blue-400">
+                {currentAsk.toFixed(isJPY ? 3 : 5)}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-zinc-500">
+            <span>Spread:</span>
+            <span className="font-mono text-zinc-400">{spreadPips.toFixed(1)} pips</span>
+          </div>
+
+          {/* Order Type */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-2">Order Type</label>
+            <select
+              value={orderType}
+              onChange={(e) => setOrderType(e.target.value as OrderType)}
+              className="w-full px-3 py-2 bg-[#252525] border border-zinc-700 rounded text-zinc-300 text-sm focus:outline-none focus:border-blue-500"
+            >
+              <option value="Market">Market Execution</option>
+              <option value="Buy Limit">Buy Limit</option>
+              <option value="Sell Limit">Sell Limit</option>
+              <option value="Buy Stop">Buy Stop</option>
+              <option value="Sell Stop">Sell Stop</option>
+              <option value="Buy Stop Limit">Buy Stop Limit</option>
+              <option value="Sell Stop Limit">Sell Stop Limit</option>
+            </select>
+          </div>
+
+          {/* Volume */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-2">Volume (Lots)</label>
+            <input
+              type="number"
+              step={0.01}
+              min={0.01}
+              value={volume}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val) && val >= 0.01) {
+                  setVolume(val);
+                }
+              }}
+              className="w-full px-3 py-2 bg-[#252525] border border-zinc-700 rounded text-zinc-300 text-sm font-mono focus:outline-none focus:border-blue-500"
+            />
+            {/* Lot Presets */}
+            <div className="flex flex-wrap gap-2 mt-2">
+              {LOT_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  onClick={() => handleVolumePreset(preset)}
+                  className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                    volume === preset
+                      ? 'bg-blue-500/30 text-blue-400 border border-blue-500/50'
+                      : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 border border-zinc-700'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Price (for pending orders) */}
+          {isPendingOrder && (
+            <div>
+              <label className="block text-xs text-zinc-400 mb-2">Price</label>
+              <input
+                type="number"
+                step={pipSize}
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                className="w-full px-3 py-2 bg-[#252525] border border-zinc-700 rounded text-zinc-300 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder={currentAsk.toFixed(isJPY ? 3 : 5)}
+              />
+            </div>
+          )}
+
+          {/* Stop Loss */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-2">Stop Loss (Optional)</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                step={slMode === 'pips' ? 1 : pipSize}
+                value={stopLoss}
+                onChange={(e) => setStopLoss(e.target.value)}
+                className="flex-1 px-3 py-2 bg-[#252525] border border-zinc-700 rounded text-zinc-300 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder={slMode === 'pips' ? 'Pips' : 'Price'}
+              />
+              <button
+                onClick={() => setSlMode(slMode === 'price' ? 'pips' : 'price')}
+                className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded text-xs text-zinc-300 font-medium whitespace-nowrap"
+              >
+                {slMode === 'price' ? 'Price' : 'Pips'}
+              </button>
+            </div>
+            {slPrice && slMode === 'pips' && (
+              <div className="text-xs text-zinc-500 mt-1">
+                = {slPrice.toFixed(isJPY ? 3 : 5)}
+              </div>
+            )}
+          </div>
+
+          {/* Take Profit */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-2">Take Profit (Optional)</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                step={tpMode === 'pips' ? 1 : pipSize}
+                value={takeProfit}
+                onChange={(e) => setTakeProfit(e.target.value)}
+                className="flex-1 px-3 py-2 bg-[#252525] border border-zinc-700 rounded text-zinc-300 text-sm font-mono focus:outline-none focus:border-blue-500"
+                placeholder={tpMode === 'pips' ? 'Pips' : 'Price'}
+              />
+              <button
+                onClick={() => setTpMode(tpMode === 'price' ? 'pips' : 'price')}
+                className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded text-xs text-zinc-300 font-medium whitespace-nowrap"
+              >
+                {tpMode === 'price' ? 'Price' : 'Pips'}
+              </button>
+            </div>
+            {tpPrice && tpMode === 'pips' && (
+              <div className="text-xs text-zinc-500 mt-1">
+                = {tpPrice.toFixed(isJPY ? 3 : 5)}
+              </div>
+            )}
+          </div>
+
+          {/* Expiry (for pending orders) */}
+          {isPendingOrder && (
+            <div>
+              <label className="block text-xs text-zinc-400 mb-2">Expiry</label>
+              <div className="space-y-2">
+                <select
+                  value={expiry}
+                  onChange={(e) => setExpiry(e.target.value as ExpiryType)}
+                  className="w-full px-3 py-2 bg-[#252525] border border-zinc-700 rounded text-zinc-300 text-sm focus:outline-none focus:border-blue-500"
+                >
+                  <option value="GTC">Good Till Cancelled (GTC)</option>
+                  <option value="Today">Today</option>
+                  <option value="Specified">Specified Date/Time</option>
+                </select>
+
+                {expiry === 'Specified' && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <input
+                        type="date"
+                        value={expiryDate}
+                        onChange={(e) => setExpiryDate(e.target.value)}
+                        className="w-full px-3 py-2 bg-[#252525] border border-zinc-700 rounded text-zinc-300 text-xs focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="time"
+                        value={expiryTime}
+                        onChange={(e) => setExpiryTime(e.target.value)}
+                        className="w-full px-3 py-2 bg-[#252525] border border-zinc-700 rounded text-zinc-300 text-xs focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Comment */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-2">Comment (Optional, max 64 chars)</label>
+            <input
+              type="text"
+              maxLength={64}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              className="w-full px-3 py-2 bg-[#252525] border border-zinc-700 rounded text-zinc-300 text-sm focus:outline-none focus:border-blue-500"
+              placeholder="Order comment..."
+            />
+            <div className="text-xs text-zinc-600 text-right mt-1">
+              {comment.length}/64
+            </div>
+          </div>
+
+          {/* Risk Calculator */}
+          <div className="bg-[#252525] border border-zinc-700/50 rounded p-3">
+            <div className="flex items-center gap-2 mb-3">
+              <Calculator size={14} className="text-blue-400" />
+              <h4 className="text-xs font-bold text-zinc-300">Risk Calculator</h4>
+            </div>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Required Margin:</span>
+                <span className="text-zinc-300 font-mono font-semibold">
+                  ${riskCalc.margin.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Pip Value:</span>
+                <span className="text-zinc-300 font-mono font-semibold">
+                  ${riskCalc.pipValue.toFixed(2)}
+                </span>
+              </div>
+              {riskCalc.potentialLoss > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Potential Loss (SL):</span>
+                  <span className="text-rose-400 font-mono font-semibold">
+                    -${riskCalc.potentialLoss.toFixed(2)}
+                  </span>
+                </div>
+              )}
+              {riskCalc.potentialProfit > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Potential Profit (TP):</span>
+                  <span className="text-emerald-400 font-mono font-semibold">
+                    +${riskCalc.potentialProfit.toFixed(2)}
+                  </span>
+                </div>
+              )}
+              {riskCalc.potentialProfit > 0 && riskCalc.potentialLoss > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Risk/Reward Ratio:</span>
+                  <span className="text-blue-400 font-mono font-semibold">
+                    1:{(riskCalc.potentialProfit / riskCalc.potentialLoss).toFixed(2)}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* One-Click Mode Info */}
+          {tradeSettings.oneClickTrading && orderType === 'Market' && (
+            <div className="flex items-start gap-2 px-3 py-2 bg-yellow-500/10 border border-yellow-500/20 rounded text-xs text-yellow-400">
+              <Info size={14} className="flex-shrink-0 mt-0.5" />
+              <span>One-click mode is enabled. Orders will be placed immediately.</span>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="grid grid-cols-2 gap-3 pt-2">
+            {orderType === 'Market' ? (
+              <>
+                {/* SELL Button */}
+                <button
+                  onClick={() => handlePlaceOrder('SELL')}
+                  disabled={isPlacing || volume <= 0}
+                  className="flex flex-col items-center justify-center px-4 py-3 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-600/30 disabled:cursor-not-allowed text-white rounded-lg transition-colors group"
+                >
+                  <TrendingDown size={18} className="mb-1 group-hover:scale-110 transition-transform" />
+                  <span className="text-sm font-bold">SELL</span>
+                  <span className="text-xs font-mono mt-0.5 opacity-90">
+                    {currentBid.toFixed(isJPY ? 3 : 5)}
+                  </span>
+                </button>
+
+                {/* BUY Button */}
+                <button
+                  onClick={() => handlePlaceOrder('BUY')}
+                  disabled={isPlacing || volume <= 0}
+                  className="flex flex-col items-center justify-center px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/30 disabled:cursor-not-allowed text-white rounded-lg transition-colors group"
+                >
+                  <TrendingUp size={18} className="mb-1 group-hover:scale-110 transition-transform" />
+                  <span className="text-sm font-bold">BUY</span>
+                  <span className="text-xs font-mono mt-0.5 opacity-90">
+                    {currentAsk.toFixed(isJPY ? 3 : 5)}
+                  </span>
+                </button>
+              </>
+            ) : (
+              <>
+                {/* PLACE SELL ORDER Button */}
+                {orderType.includes('Sell') && (
+                  <button
+                    onClick={() => handlePlaceOrder('SELL')}
+                    disabled={isPlacing || volume <= 0 || !price}
+                    className="col-span-2 flex items-center justify-center gap-2 px-4 py-3 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-600/30 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-bold"
+                  >
+                    <TrendingDown size={18} />
+                    <span>PLACE SELL ORDER</span>
+                  </button>
+                )}
+
+                {/* PLACE BUY ORDER Button */}
+                {orderType.includes('Buy') && (
+                  <button
+                    onClick={() => handlePlaceOrder('BUY')}
+                    disabled={isPlacing || volume <= 0 || !price}
+                    className="col-span-2 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/30 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-bold"
+                  >
+                    <TrendingUp size={18} />
+                    <span>PLACE BUY ORDER</span>
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Status Indicator */}
+          {isPlacing && (
+            <div className="text-center">
+              <div className="text-xs text-blue-400 font-medium animate-pulse">
+                Placing order...
               </div>
             </div>
           )}
         </div>
-      )}
-
-      {/* Margin Preview */}
-      {marginPreview && (
-        <div className="flex flex-col gap-1 p-2 bg-zinc-800/30 rounded border border-zinc-700 text-xs">
-          <div className="flex items-center gap-2 text-zinc-400 mb-1">
-            <DollarSign size={12} />
-            <span className="font-medium">Margin Required</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-zinc-500">Required:</span>
-            <span className="font-mono text-zinc-300">${marginPreview.requiredMargin.toFixed(2)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-zinc-500">Free After:</span>
-            <span className={`font-mono ${marginPreview.canTrade ? 'text-emerald-400' : 'text-red-400'}`}>
-              ${marginPreview.freeMarginAfter.toFixed(2)}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-zinc-500">Margin Level:</span>
-            <span className={`font-mono ${marginPreview.marginLevelAfter >= 100 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {marginPreview.marginLevelAfter.toFixed(0)}%
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Routing Decision Preview */}
-      {volume > 0 && (
-        <RoutingIndicator
-          symbol={symbol}
-          volume={volume}
-          accountId={accountId.toString()}
-          side={side}
-        />
-      )}
-
-      {/* Place Order Button */}
-      <button
-        onClick={handlePlaceOrder}
-        disabled={loading || !volume || volume <= 0}
-        className={`w-full px-4 py-3 rounded font-semibold text-sm transition-all ${
-          side === 'BUY'
-            ? 'bg-emerald-500 hover:bg-emerald-600 text-black disabled:bg-emerald-500/30'
-            : 'bg-red-500 hover:bg-red-600 text-white disabled:bg-red-500/30'
-        } disabled:cursor-not-allowed`}
-      >
-        {loading ? 'Placing Order...' : `${orderType} ${side} ${volume} Lots`}
-      </button>
+      </div>
     </div>
   );
 }

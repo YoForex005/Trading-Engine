@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { API_BASE_URL, buildApiUrl } from '../config/api';
 
 interface OrderType {
     value: string;
@@ -56,7 +57,7 @@ export function AdvancedOrderPanel({ symbol, currentPrice, onOrderPlaced }: Orde
         const slPips = parseFloat(sl);
         if (slPips <= 0) return;
 
-        fetch(`http://localhost:7999/risk/calculate-lot?symbol=${symbol}&riskPercent=${riskPercent}&slPips=${slPips}`)
+        fetch(`${API_BASE_URL}/risk/calculate-lot?symbol=${symbol}&riskPercent=${riskPercent}&slPips=${slPips}`)
             .then(res => res.json())
             .then(data => {
                 if (data.lotSize) {
@@ -74,7 +75,7 @@ export function AdvancedOrderPanel({ symbol, currentPrice, onOrderPlaced }: Orde
             return;
         }
 
-        fetch(`http://localhost:7999/risk/margin-preview?symbol=${symbol}&volume=${volume}&side=${side}`)
+        fetch(`${API_BASE_URL}/risk/margin-preview?symbol=${symbol}&volume=${volume}&side=${side}`)
             .then(res => res.json())
             .then(data => setMarginPreview(data))
             .catch(() => setMarginPreview(null));
@@ -119,7 +120,7 @@ export function AdvancedOrderPanel({ symbol, currentPrice, onOrderPlaced }: Orde
             if (sl) body.sl = parseFloat(sl);
             if (tp) body.tp = parseFloat(tp);
 
-            const res = await fetch(`http://localhost:7999${endpoint}`, {
+            const res = await fetch(`${API_BASE_URL}${endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),

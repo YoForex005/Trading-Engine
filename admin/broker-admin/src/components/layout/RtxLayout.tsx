@@ -3,17 +3,20 @@ import TopToolbar from './TopToolbar';
 import Navigator from './Navigator';
 import BottomToolbox from './BottomToolbox';
 import MarketWatch from '../dashboard/MarketWatch';
+import { ChartLayout } from '../dashboard/ChartGrid';
 
 interface RtxLayoutProps {
     children: React.ReactNode;
     onNavigate?: (viewId: string) => void;
+    chartLayout?: ChartLayout;
+    onLayoutChange?: (layout: ChartLayout) => void;
 }
 
-export default function RtxLayout({ children, onNavigate }: RtxLayoutProps) {
+export default function RtxLayout({ children, onNavigate, chartLayout, onLayoutChange }: RtxLayoutProps) {
     return (
         <div className="flex flex-col h-screen w-screen bg-charcoal-950 text-xs text-gray-200 overflow-hidden font-sans">
             {/* Top Section: Toolbar */}
-            <TopToolbar />
+            <TopToolbar chartLayout={chartLayout} onLayoutChange={onLayoutChange} onNavigate={onNavigate} />
 
             {/* Middle Section: Navigator + MarketWatch + Main Config */}
             <div className="flex flex-1 overflow-hidden">

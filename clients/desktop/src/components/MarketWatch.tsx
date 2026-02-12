@@ -1,18 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import { useMarketDataStore } from '../store/useMarketDataStore';
 import { marketApi } from '../services/api';
+import { MarketWatchContextMenu } from './MarketWatchContextMenu';
+import { SymbolInfo } from './SymbolInfo';
 
 interface MarketWatchProps {
     onSelectSymbol: (symbol: string) => void;
     selectedSymbol: string;
     watchlist?: string[];
+    onOpenOrderEntry?: (symbol: string) => void;
 }
 
-export const MarketWatch: React.FC<MarketWatchProps> = ({ onSelectSymbol, selectedSymbol, watchlist }) => {
+export const MarketWatch: React.FC<MarketWatchProps> = ({
+    onSelectSymbol,
+    selectedSymbol,
+    watchlist,
+    onOpenOrderEntry
+}) => {
     const symbolData = useMarketDataStore(state => state.symbolData);
     const [symbols, setSymbols] = useState<string[]>([]);
+    const [hiddenSymbols, setHiddenSymbols] = useState<Set<string>>(new Set());
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [contextMenu, setContextMenu] = useState<{ visible: boolean; x: number; y: number; symbol: string } | null>(null);
+    const [columnVisibility, setColumnVisibility] = useState({
+        spread: true,
+        highLow: true,
+        time: true
+    });
+    const [symbolInfoDialog, setSymbolInfoDialog] = useState<{ isOpen: boolean; symbol: string }>({ isOpen: false, symbol: '' });
 
     // Fetch symbols from API on mount
     useEffect(() => {
@@ -46,8 +62,58 @@ export const MarketWatch: React.FC<MarketWatchProps> = ({ onSelectSymbol, select
         }
     }, [watchlist]);
 
-    // Use the fetched symbols or the provided watchlist
-    const symbolsToShow = symbols;
+    // Use the fetched symbols or the provided watchlist, excluding hidden symbols
+    const symbolsToShow = symbols.filter(s => !hiddenSymbols.has(s));
+
+    const handleContextMenu = (e: React.MouseEvent, symbol: string) => {
+        e.preventDefault();
+        setContextMenu({
+            visible: true,
+            x: e.clientX,
+            y: e.clientY,
+            symbol
+        });
+    };
+
+    const handleNewOrder = (symbol: string) => {
+        if (onOpenOrderEntry) {
+            onOpenOrderEntry(symbol);
+        } else {
+            alert(`Order entry for ${symbol} - not yet implemented`);
+        }
+    };
+
+    const handleChartWindow = (symbol: string) => {
+        onSelectSymbol(symbol);
+    };
+
+    const handleTickChart = (symbol: string) => {
+        alert(`Tick chart for ${symbol} - not yet implemented`);
+    };
+
+    const handleDepthOfMarket = (symbol: string) => {
+        const event = new CustomEvent('openDepthOfMarket', { detail: { symbol } });
+        window.dispatchEvent(event);
+    };
+
+    const handleSymbolSpecification = (symbol: string) => {
+        setSymbolInfoDialog({ isOpen: true, symbol });
+    };
+
+    const handleHideSymbol = (symbol: string) => {
+        setHiddenSymbols(prev => new Set([...prev, symbol]));
+    };
+
+    const handleShowAllSymbols = () => {
+        setHiddenSymbols(new Set());
+    };
+
+    const handleToggleColumn = (column: string) => {
+        setColumnVisibility(prev => ({
+            ...prev,
+            [column]: !prev[column as keyof typeof prev]
+        }));
+    };
 
     return (
         <div className="market-watch bg-[#131722] border-r border-[#363c4e] flex flex-col w-64 h-full">
@@ -89,7 +155,10 @@ export const MarketWatch: React.FC<MarketWatchProps> = ({ onSelectSymbol, select
                             <tr className="text-gray-500 font-normal">
                                 <th className="text-left p-2 pl-3">Symbol</th>
                                 <th className="text-right p-2">Bid</th>
-                                <th className="text-right p-2 pr-3">Ask</th>
+                                <th className="text-right p-2">Ask</th>
+                                {columnVisibility.spread && <th className="text-right p-2">Spread</th>}
+                                {columnVisibility.highLow && <th className="text-right p-2">High/Low</th>}
+                                {columnVisibility.time && <th className="text-right p-2 pr-3">Time</th>}
                             </tr>
                         </thead>
                         <tbody>
@@ -101,16 +170,23 @@ export const MarketWatch: React.FC<MarketWatchProps> = ({ onSelectSymbol, select
                                 // Ideally compare with previous tick
                                 const prev = data?.previousTick;
                                 const bidColor = quote && prev && quote.bid > prev.bid ? 'text-[#26a69a]' : (quote && prev && quote.bid < prev.bid ? 'text-[#ef5350]' : 'text-[#d1d4dc]');
+                                const spread = quote ? ((quote.ask - quote.bid) * 10000).toFixed(1) : '---';
+                                const high = (quote as any)?.high || (quote as any)?.high24h || 0;
+                                const low = (quote as any)?.low || (quote as any)?.low24h || 0;
+                                const time = quote ? new Date(quote.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '---';
 
                                 return (
                                     <tr
                                         key={symbol}
                                         onClick={() => onSelectSymbol(symbol)}
+                                        onContextMenu={(e) => handleContextMenu(e, symbol)}
                                         className={`cursor-pointer hover:bg-[#2a2e39] transition-colors ${selectedSymbol === symbol ? 'bg-[#2a2e39]' : ''}`}
                                     >
-                                        <td className="p-2 pl-3 py-1.5 flex items-center gap-1.5">
-                                            <span className={`w-1.5 h-1.5 rounded-full ${bidColor === 'text-[#26a69a]' ? 'bg-[#26a69a]' : bidColor === 'text-[#ef5350]' ? 'bg-[#ef5350]' : 'bg-gray-500'}`}></span>
-                                            <span className="text-[#d1d4dc] font-medium">{symbol}</span>
+                                        <td className="p-2 pl-3 py-1.5">
+                                            <div className="flex items-center gap-1.5">
+                                                <span className={`w-1.5 h-1.5 rounded-full ${bidColor === 'text-[#26a69a]' ? 'bg-[#26a69a]' : bidColor === 'text-[#ef5350]' ? 'bg-[#ef5350]' : 'bg-gray-500'}`}></span>
+                                                <span className="text-[#d1d4dc] font-medium">{symbol}</span>
+                                            </div>
                                         </td>
                                         <td className={`text-right p-2 py-1.5 ${bidColor}`}>
                                             {quote ? quote.bid.toFixed(5) : '---'}
@@ -118,6 +194,21 @@ export const MarketWatch: React.FC<MarketWatchProps> = ({ onSelectSymbol, select
                                         <td className={`text-right p-2 py-1.5 text-[#d1d4dc]`}>
                                             {quote ? quote.ask.toFixed(5) : '---'}
                                         </td>
+                                        {columnVisibility.spread && (
+                                            <td className="text-right p-2 py-1.5 text-[#d1d4dc]">
+                                                {spread}
+                                            </td>
+                                        )}
+                                        {columnVisibility.highLow && (
+                                            <td className="text-right p-2 py-1.5 text-[#d1d4dc] text-[10px]">
+                                                {high ? `${high.toFixed(5)}/${low.toFixed(5)}` : '---'}
+                                            </td>
+                                        )}
+                                        {columnVisibility.time && (
+                                            <td className="text-right p-2 py-1.5 pr-3 text-gray-500 text-[10px]">
+                                                {time}
+                                            </td>
+                                        )}
                                     </tr>
                                 );
                             })}
@@ -125,6 +216,33 @@ export const MarketWatch: React.FC<MarketWatchProps> = ({ onSelectSymbol, select
                     </table>
                 )}
             </div>
+
+            {/* Context Menu */}
+            {contextMenu && (
+                <MarketWatchContextMenu
+                    visible={contextMenu.visible}
+                    x={contextMenu.x}
+                    y={contextMenu.y}
+                    symbol={contextMenu.symbol}
+                    onNewOrder={handleNewOrder}
+                    onChartWindow={handleChartWindow}
+                    onTickChart={handleTickChart}
+                    onDepthOfMarket={handleDepthOfMarket}
+                    onSymbolSpecification={handleSymbolSpecification}
+                    onHideSymbol={handleHideSymbol}
+                    onShowAllSymbols={handleShowAllSymbols}
+                    onToggleColumn={handleToggleColumn}
+                    onClose={() => setContextMenu(null)}
+                    columnVisibility={columnVisibility}
+                />
+            )}
+
+            {/* Symbol Info Dialog */}
+            <SymbolInfo
+                symbol={symbolInfoDialog.symbol}
+                isOpen={symbolInfoDialog.isOpen}
+                onClose={() => setSymbolInfoDialog({ isOpen: false, symbol: '' })}
+            />
         </div>
     );
 };

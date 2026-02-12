@@ -38,6 +38,14 @@ HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
   clip: vi.fn(),
 })) as any
 
+// Mock Canvas toBlob and toDataURL
+HTMLCanvasElement.prototype.toBlob = vi.fn((callback) => {
+  const blob = new Blob(['fake image data'], { type: 'image/png' })
+  callback(blob)
+}) as any
+
+HTMLCanvasElement.prototype.toDataURL = vi.fn(() => 'data:image/png;base64,fake') as any
+
 // Mock Audio API for alerts
 global.Audio = vi.fn(() => ({
   play: vi.fn(() => Promise.resolve()),

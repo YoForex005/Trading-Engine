@@ -81,7 +81,7 @@ class CommandBusImpl implements CommandBus {
     }
 
     const typeHandlers = this.handlers.get(type)!;
-    typeHandlers.add(handler as CommandHandler);
+    typeHandlers.add(handler as any);
 
     if (process.env.NODE_ENV === 'development') {
       console.log(
@@ -93,7 +93,7 @@ class CommandBusImpl implements CommandBus {
     return () => {
       const handlers = this.handlers.get(type);
       if (handlers) {
-        handlers.delete(handler as CommandHandler);
+        handlers.delete(handler as any);
 
         if (process.env.NODE_ENV === 'development') {
           console.log(

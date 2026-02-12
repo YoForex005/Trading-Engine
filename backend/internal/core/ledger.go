@@ -31,6 +31,7 @@ type Ledger struct {
 	entries  map[int64][]LedgerEntry // accountID -> entries
 	nextID   int64
 	balances map[int64]float64 // accountID -> balance cache
+	engine   *Engine            // Reference to engine for persistence
 }
 
 // NewLedger creates a new ledger
@@ -40,6 +41,11 @@ func NewLedger() *Ledger {
 		balances: make(map[int64]float64),
 		nextID:   1,
 	}
+}
+
+// SetEngine sets the engine reference for persistence
+func (l *Ledger) SetEngine(e *Engine) {
+	l.engine = e
 }
 
 // Deposit adds funds to an account
@@ -73,6 +79,16 @@ func (l *Ledger) Deposit(accountID int64, amount float64, method, ref, descripti
 	l.nextID++
 
 	l.entries[accountID] = append(l.entries[accountID], entry)
+
+	// Persist to database
+	if l.engine != nil {
+		if err := l.engine.persistLedgerEntry(&entry); err != nil {
+			log.Printf("[Ledger] ERROR: Failed to persist deposit entry: %v", err)
+		}
+		if err := l.engine.persistBalance(accountID, newBalance); err != nil {
+			log.Printf("[Ledger] ERROR: Failed to persist balance: %v", err)
+		}
+	}
 
 	log.Printf("[Ledger] DEPOSIT: Account #%d +%.2f via %s | Balance: %.2f", accountID, amount, method, newBalance)
 	return &entry, nil
@@ -114,6 +130,16 @@ func (l *Ledger) Withdraw(accountID int64, amount float64, method, ref, descript
 
 	l.entries[accountID] = append(l.entries[accountID], entry)
 
+	// Persist to database
+	if l.engine != nil {
+		if err := l.engine.persistLedgerEntry(&entry); err != nil {
+			log.Printf("[Ledger] ERROR: Failed to persist withdraw entry: %v", err)
+		}
+		if err := l.engine.persistBalance(accountID, newBalance); err != nil {
+			log.Printf("[Ledger] ERROR: Failed to persist balance: %v", err)
+		}
+	}
+
 	log.Printf("[Ledger] WITHDRAW: Account #%d -%.2f via %s | Balance: %.2f", accountID, amount, method, newBalance)
 	return &entry, nil
 }
@@ -149,6 +175,16 @@ func (l *Ledger) Adjust(accountID int64, amount float64, description, adminID st
 	l.nextID++
 
 	l.entries[accountID] = append(l.entries[accountID], entry)
+
+	// Persist to database
+	if l.engine != nil {
+		if err := l.engine.persistLedgerEntry(&entry); err != nil {
+			log.Printf("[Ledger] ERROR: Failed to persist adjustment entry: %v", err)
+		}
+		if err := l.engine.persistBalance(accountID, newBalance); err != nil {
+			log.Printf("[Ledger] ERROR: Failed to persist balance: %v", err)
+		}
+	}
 
 	log.Printf("[Ledger] ADJUSTMENT: Account #%d %+.2f | Balance: %.2f", accountID, amount, newBalance)
 	return &entry, nil

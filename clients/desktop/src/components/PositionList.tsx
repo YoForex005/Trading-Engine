@@ -15,7 +15,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import type { Position } from '../store/useAppStore';
 
-const API_BASE = 'http://localhost:7999';
+import { API_BASE_URL as API_BASE } from '../config/api';
 
 export const PositionList = () => {
   const { positions, ticks, accountId } = useAppStore();

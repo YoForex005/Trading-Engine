@@ -107,7 +107,7 @@ export interface AdminAccount {
 // API Configuration
 // ============================================
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:7999';
+import { API_BASE_URL } from '../config/api';
 const DEFAULT_TIMEOUT = 10000; // 10 seconds
 
 // ============================================

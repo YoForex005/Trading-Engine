@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Terminal, Lock, Server, ArrowRight, Activity } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { API_BASE_URL } from '../config/api';
 
 interface LoginProps {
     onLogin: (accountId: string) => void;
@@ -8,7 +9,8 @@ interface LoginProps {
 
 export function Login({ onLogin }: LoginProps) {
     const [loading, setLoading] = useState(false);
-    const [server, setServer] = useState('localhost:7999');
+    const defaultServer = API_BASE_URL.replace('http://', '').replace('https://', '');
+    const [server, setServer] = useState(defaultServer);
     const setAuthenticated = useAppStore(state => state.setAuthenticated);
     const setAuthToken = useAppStore(state => state.setAuthToken);
 
@@ -25,7 +27,7 @@ export function Login({ onLogin }: LoginProps) {
             const accountId = username;
 
             // Note: Dynamic server selection is used. In production, use proper environment handling
-            if (server !== 'localhost:7999') {
+            if (server !== defaultServer) {
                 console.log('Using server:', server);
             }
 

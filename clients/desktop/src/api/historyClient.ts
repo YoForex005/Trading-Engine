@@ -4,8 +4,8 @@
  */
 
 import type { TickData, DateRange, SymbolDataInfo, DownloadChunk } from '../types/history';
+import { API_BASE_URL } from '../config/api';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:7999';
 const CHUNK_SIZE = 5000; // Ticks per chunk
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // ms

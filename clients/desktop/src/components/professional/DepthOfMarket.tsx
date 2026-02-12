@@ -6,6 +6,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Layers, TrendingUp, TrendingDown } from 'lucide-react';
 import type { MarketDepth, MarketDepthEntry } from '../../types/trading';
+import { buildApiUrl } from '../../config/api';
 
 type DepthOfMarketProps = {
   symbol: string;
@@ -25,7 +26,7 @@ export const DepthOfMarket = ({ symbol, depth = 20 }: DepthOfMarketProps) => {
     const fetchDepth = async () => {
       try {
         const response = await fetch(
-          `http://localhost:7999/api/market-depth?symbol=${symbol}&depth=${selectedDepth}`
+          buildApiUrl(`/api/market-depth?symbol=${symbol}&depth=${selectedDepth}`)
         );
 
         if (response.ok) {

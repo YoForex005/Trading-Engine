@@ -32,30 +32,30 @@ function OverviewTab({ onEdit }: { onEdit: (trade: any) => void }) {
     };
 
     const getActions = (trade: any): ContextAction[] => [
-        { label: 'New Order', onClick: () => console.log('New Order') },
-        { label: 'Close Position', onClick: () => console.log('Close') },
-        { label: 'Modify or Cancel', onClick: () => console.log('Modify') },
-        { label: 'Activate', onClick: () => console.log('Activate') },
+        { label: 'New Order', onClick: () => {} },
+        { label: 'Close Position', onClick: () => {} },
+        { label: 'Modify or Cancel', onClick: () => {} },
+        { label: 'Activate', onClick: () => {} },
         { separator: true, label: '' },
         { label: 'Edit', onClick: () => onEdit(trade) },
-        { label: 'Delete', danger: true, onClick: () => console.log('Delete') },
+        { label: 'Delete', danger: true, onClick: () => {} },
         { separator: true, label: '' },
         {
             label: 'Volumes',
             hasSubmenu: true,
             submenu: [
-                { label: 'Lots', onClick: () => console.log('Lots') },
-                { label: 'Amounts', onClick: () => console.log('Amounts') }
+                { label: 'Lots', onClick: () => {} },
+                { label: 'Amounts', onClick: () => {} }
             ]
         },
-        { label: 'Profit', hasSubmenu: true, submenu: [{ label: 'Points', onClick: () => console.log('Points') }, { label: 'Term Currency', onClick: () => console.log('Term') }] },
-        { label: 'Report', hasSubmenu: true, submenu: [{ label: 'Open XML', onClick: () => console.log('XML') }] },
+        { label: 'Profit', hasSubmenu: true, submenu: [{ label: 'Points', onClick: () => {} }, { label: 'Term Currency', onClick: () => {} }] },
+        { label: 'Report', hasSubmenu: true, submenu: [{ label: 'Open XML', onClick: () => {} }] },
         { separator: true, label: '' },
-        { label: 'Show Milliseconds', onClick: () => console.log('Millis') },
-        { label: 'Auto Arrange', onClick: () => console.log('Auto') },
-        { label: 'Grid', checked: true, onClick: () => console.log('Grid') },
+        { label: 'Show Milliseconds', onClick: () => {} },
+        { label: 'Auto Arrange', onClick: () => {} },
+        { label: 'Grid', checked: true, onClick: () => {} },
         { separator: true, label: '' },
-        { label: 'Columns', onClick: () => console.log('Cols') },
+        { label: 'Columns', onClick: () => {} },
     ];
 
     return (

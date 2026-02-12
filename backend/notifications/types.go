@@ -1,59 +1,44 @@
 package notifications
 
 import (
+	"context"
 	"time"
 )
 
-// NotificationType represents the type of notification
-type NotificationType string
+// Severity levels for notifications
+type Severity string
 
 const (
-	// Trading Events
-	NotifOrderExecuted      NotificationType = "order_executed"
-	NotifPositionClosed     NotificationType = "position_closed"
-	NotifMarginCallWarning  NotificationType = "margin_call_warning"
-	NotifStopOut            NotificationType = "stop_out"
-	NotifPriceMovement      NotificationType = "price_movement"
-
-	// Account Events
-	NotifBalanceChange      NotificationType = "balance_change"
-	NotifDepositReceived    NotificationType = "deposit_received"
-	NotifWithdrawalComplete NotificationType = "withdrawal_complete"
-
-	// Security Events
-	NotifLoginNewDevice     NotificationType = "login_new_device"
-	NotifPasswordChanged    NotificationType = "password_changed"
-	NotifSecurityAlert      NotificationType = "security_alert"
-
-	// System Events
-	NotifTradingHoursChange NotificationType = "trading_hours_change"
-	NotifSystemMaintenance  NotificationType = "system_maintenance"
-	NotifNewsAlert          NotificationType = "news_alert"
+	SeverityInfo     Severity = "info"
+	SeverityWarning  Severity = "warning"
+	SeverityError    Severity = "error"
+	SeverityCritical Severity = "critical"
 )
 
-// NotificationChannel represents delivery channel
+// Category types for notifications
+type Category string
+
+const (
+	CategoryTrading  Category = "trading"
+	CategoryAccount  Category = "account"
+	CategorySecurity Category = "security"
+	CategorySystem   Category = "system"
+)
+
+// NotificationChannel represents delivery channels
 type NotificationChannel string
 
 const (
-	ChannelEmail    NotificationChannel = "email"
-	ChannelSMS      NotificationChannel = "sms"
-	ChannelPush     NotificationChannel = "push"
-	ChannelInApp    NotificationChannel = "in_app"
-	ChannelWebhook  NotificationChannel = "webhook"
-	ChannelTelegram NotificationChannel = "telegram"
+	ChannelWebSocket   NotificationChannel = "websocket"
+	ChannelEmail       NotificationChannel = "email"
+	ChannelBrowserPush NotificationChannel = "browser_push"
+	ChannelSMS         NotificationChannel = "sms"
+	ChannelPush        NotificationChannel = "push"
+	ChannelWebhook     NotificationChannel = "webhook"
+	ChannelInApp       NotificationChannel = "in_app"
 )
 
-// Priority levels for notifications
-type Priority string
-
-const (
-	PriorityCritical Priority = "critical"
-	PriorityHigh     Priority = "high"
-	PriorityNormal   Priority = "normal"
-	PriorityLow      Priority = "low"
-)
-
-// DeliveryStatus tracks notification delivery
+// DeliveryStatus represents the status of a notification delivery attempt
 type DeliveryStatus string
 
 const (
@@ -62,108 +47,192 @@ const (
 	StatusDelivered DeliveryStatus = "delivered"
 	StatusFailed    DeliveryStatus = "failed"
 	StatusRetrying  DeliveryStatus = "retrying"
-	StatusCancelled DeliveryStatus = "cancelled"
 )
 
-// Notification represents a notification to be sent
+// Priority represents the priority level of a notification
+type Priority string
+
+const (
+	PriorityLow      Priority = "low"
+	PriorityNormal   Priority = "normal"
+	PriorityHigh     Priority = "high"
+	PriorityCritical Priority = "critical"
+)
+
+// NotificationType is a type alias for notification type strings
+type NotificationType = string
+
+// Notification type constants
+const (
+	NotifMarginCallWarning NotificationType = "margin_call_warning"
+	NotifStopOut           NotificationType = "stop_out"
+	NotifSecurityAlert     NotificationType = "security_alert"
+	NotifOrderExecuted     NotificationType = "order_executed"
+	NotifPositionClosed    NotificationType = "position_closed"
+	NotifLoginNewDevice    NotificationType = "login_new_device"
+	NotifBalanceChange     NotificationType = "balance_change"
+	NotifPriceMovement     NotificationType = "price_movement"
+	NotifNewsAlert         NotificationType = "news_alert"
+	NotifTradingHoursChange NotificationType = "trading_hours_change"
+	NotifSystemMaintenance NotificationType = "system_maintenance"
+)
+
+// Notification represents a user notification
 type Notification struct {
 	ID          string                 `json:"id"`
-	UserID      string                 `json:"user_id"`
-	Type        NotificationType       `json:"type"`
-	Priority    Priority               `json:"priority"`
-	Subject     string                 `json:"subject"`
+	UserID      string                 `json:"userId"`
+	Type        NotificationType       `json:"type"` // e.g., "order_filled", "margin_warning", "login_alert"
+	Severity    Severity               `json:"severity"`
+	Category    Category               `json:"category"`
+	Priority    Priority               `json:"priority,omitempty"`
+	Title       string                 `json:"title"`
+	Subject     string                 `json:"subject,omitempty"`
 	Message     string                 `json:"message"`
-	Data        map[string]interface{} `json:"data"`
-	Channels    []NotificationChannel  `json:"channels"`
-	CreatedAt   time.Time              `json:"created_at"`
-	ScheduledAt *time.Time             `json:"scheduled_at,omitempty"`
-	ExpiresAt   *time.Time             `json:"expires_at,omitempty"`
-	Metadata    map[string]string      `json:"metadata,omitempty"`
+	Data        map[string]interface{} `json:"data,omitempty"`        // Additional structured data
+	ActionItems []ActionItem           `json:"actionItems,omitempty"` // Optional actions user can take
+	Channels    []NotificationChannel  `json:"channels,omitempty"`    // Delivery channels
+	Read        bool                   `json:"read"`
+	CreatedAt   int64                  `json:"createdAt"` // Unix timestamp
 }
 
-// DeliveryRecord tracks the delivery of a notification through a specific channel
+// ActionItem represents an actionable item in a notification
+type ActionItem struct {
+	Label string `json:"label"` // e.g., "View Order", "Add Funds"
+	URL   string `json:"url"`   // e.g., "/orders/123", "/account/deposit"
+	Type  string `json:"type"`  // e.g., "primary", "secondary", "danger"
+}
+
+// DeliveryRecord tracks notification delivery across channels
 type DeliveryRecord struct {
 	ID             string              `json:"id"`
-	NotificationID string              `json:"notification_id"`
-	UserID         string              `json:"user_id"`
+	NotificationID string              `json:"notificationId"`
+	UserID         string              `json:"userId"`
 	Channel        NotificationChannel `json:"channel"`
 	Status         DeliveryStatus      `json:"status"`
 	Attempts       int                 `json:"attempts"`
-	LastAttemptAt  *time.Time          `json:"last_attempt_at,omitempty"`
-	DeliveredAt    *time.Time          `json:"delivered_at,omitempty"`
 	Error          string              `json:"error,omitempty"`
-	ProviderID     string              `json:"provider_id,omitempty"` // External provider message ID
-	CreatedAt      time.Time           `json:"created_at"`
-	UpdatedAt      time.Time           `json:"updated_at"`
+	ProviderID     string              `json:"providerId,omitempty"`
+	SentAt         int64               `json:"sentAt,omitempty"`          // Unix timestamp (legacy)
+	DeliveredAt    *time.Time          `json:"deliveredAt,omitempty"`
+	LastAttemptAt  *time.Time          `json:"lastAttemptAt,omitempty"`
+	CreatedAt      time.Time           `json:"createdAt_record"`
+	UpdatedAt      time.Time           `json:"updatedAt"`
 }
 
-// UserPreferences stores notification preferences per user
+// RateLimitConfig holds rate limit configuration for a notification channel
+type RateLimitConfig struct {
+	Channel      NotificationChannel
+	MaxPerMinute int
+	MaxPerHour   int
+	MaxPerDay    int
+}
+
+// RetryConfig holds configuration for notification retry logic
+type RetryConfig struct {
+	MaxAttempts     int
+	InitialDelay    time.Duration
+	MaxDelay        time.Duration
+	BackoffFactor   float64
+	RetryableErrors []string
+}
+
+// DeliveryStore interface for persisting delivery records
+type DeliveryStore interface {
+	Save(ctx context.Context, record *DeliveryRecord) error
+}
+
+// UserPreferences holds a user's notification preferences
 type UserPreferences struct {
-	UserID       string                         `json:"user_id"`
-	Preferences  map[NotificationType]ChannelPreference `json:"preferences"`
-	QuietHours   *QuietHours                    `json:"quiet_hours,omitempty"`
-	Locale       string                         `json:"locale"`
-	Timezone     string                         `json:"timezone"`
-	UnsubscribeAll bool                          `json:"unsubscribe_all"`
-	UpdatedAt    time.Time                      `json:"updated_at"`
+	UserID         string                                `json:"userId"`
+	Preferences    map[NotificationType]ChannelPreference `json:"preferences"`
+	Locale         string                                `json:"locale"`
+	Timezone       string                                `json:"timezone"`
+	UnsubscribeAll bool                                  `json:"unsubscribeAll"`
+	QuietHours     *QuietHours                           `json:"quietHours,omitempty"`
+	UpdatedAt      time.Time                             `json:"updatedAt"`
 }
 
-// ChannelPreference defines which channels are enabled for a notification type
+// ChannelPreference defines how a notification type should be delivered
 type ChannelPreference struct {
-	Enabled  bool                    `json:"enabled"`
-	Channels []NotificationChannel   `json:"channels"`
-	MinimumPriority Priority         `json:"minimum_priority"`
+	Enabled         bool                  `json:"enabled"`
+	Channels        []NotificationChannel `json:"channels"`
+	MinimumPriority Priority              `json:"minimumPriority"`
 }
 
-// QuietHours defines when to suppress non-critical notifications
+// QuietHours defines a period during which non-critical notifications are suppressed
 type QuietHours struct {
 	Enabled   bool   `json:"enabled"`
-	StartTime string `json:"start_time"` // HH:MM format
-	EndTime   string `json:"end_time"`   // HH:MM format
+	StartTime string `json:"startTime"` // HH:MM format
+	EndTime   string `json:"endTime"`   // HH:MM format
 	Timezone  string `json:"timezone"`
 }
 
-// Template represents a notification template
-type Template struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Type        NotificationType       `json:"type"`
-	Channel     NotificationChannel    `json:"channel"`
-	Locale      string                 `json:"locale"`
-	Subject     string                 `json:"subject,omitempty"`
-	Body        string                 `json:"body"`
-	HTMLBody    string                 `json:"html_body,omitempty"`
-	Variables   []string               `json:"variables"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	IsActive    bool                   `json:"is_active"`
-	Version     int                    `json:"version"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+// UserContacts holds contact information for a user across channels
+type UserContacts struct {
+	UserID       string   `json:"userId"`
+	Email        string   `json:"email"`
+	Phone        string   `json:"phone,omitempty"`
+	DeviceTokens []string `json:"deviceTokens,omitempty"`
 }
 
-// BatchNotification groups multiple notifications for efficient delivery
-type BatchNotification struct {
-	ID            string          `json:"id"`
-	UserID        string          `json:"user_id"`
-	Channel       NotificationChannel `json:"channel"`
-	Notifications []Notification  `json:"notifications"`
-	CreatedAt     time.Time       `json:"created_at"`
-	ScheduledAt   time.Time       `json:"scheduled_at"`
+// NotificationTemplate for common notification types
+type NotificationTemplate struct {
+	Type     string
+	Severity Severity
+	Category Category
+	Title    string
+	Message  string // Can contain placeholders like {symbol}, {price}
 }
 
-// RateLimitConfig defines rate limiting rules
-type RateLimitConfig struct {
-	Channel     NotificationChannel `json:"channel"`
-	MaxPerMinute int               `json:"max_per_minute"`
-	MaxPerHour   int               `json:"max_per_hour"`
-	MaxPerDay    int               `json:"max_per_day"`
-}
-
-// RetryConfig defines retry behavior for failed notifications
-type RetryConfig struct {
-	MaxAttempts     int           `json:"max_attempts"`
-	InitialDelay    time.Duration `json:"initial_delay"`
-	MaxDelay        time.Duration `json:"max_delay"`
-	BackoffFactor   float64       `json:"backoff_factor"`
-	RetryableErrors []string      `json:"retryable_errors"`
+// Common notification templates
+var Templates = map[string]NotificationTemplate{
+	"order_filled": {
+		Type:     "order_filled",
+		Severity: SeverityInfo,
+		Category: CategoryTrading,
+		Title:    "Order Filled",
+		Message:  "Your {orderType} order for {volume} lots of {symbol} was filled at {price}",
+	},
+	"margin_warning": {
+		Type:     "margin_warning",
+		Severity: SeverityWarning,
+		Category: CategoryAccount,
+		Title:    "Margin Level Warning",
+		Message:  "Your margin level is at {level}%. Please add funds to avoid liquidation.",
+	},
+	"margin_call": {
+		Type:     "margin_call",
+		Severity: SeverityCritical,
+		Category: CategoryAccount,
+		Title:    "Margin Call",
+		Message:  "URGENT: Your margin level is critically low at {level}%. Add funds immediately to prevent position closure.",
+	},
+	"login_alert": {
+		Type:     "login_alert",
+		Severity: SeverityWarning,
+		Category: CategorySecurity,
+		Title:    "New Login Detected",
+		Message:  "Login from {location} at {time}. If this wasn't you, secure your account immediately.",
+	},
+	"position_closed": {
+		Type:     "position_closed",
+		Severity: SeverityInfo,
+		Category: CategoryTrading,
+		Title:    "Position Closed",
+		Message:  "Your {symbol} position was closed. P/L: {pnl}",
+	},
+	"stop_loss_triggered": {
+		Type:     "stop_loss_triggered",
+		Severity: SeverityWarning,
+		Category: CategoryTrading,
+		Title:    "Stop Loss Triggered",
+		Message:  "Stop loss triggered for {symbol} at {price}. Position closed with P/L: {pnl}",
+	},
+	"take_profit_triggered": {
+		Type:     "take_profit_triggered",
+		Severity: SeverityInfo,
+		Category: CategoryTrading,
+		Title:    "Take Profit Triggered",
+		Message:  "Take profit triggered for {symbol} at {price}. Position closed with P/L: {pnl}",
+	},
 }

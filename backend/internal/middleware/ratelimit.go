@@ -260,6 +260,23 @@ func (rl *RateLimiter) getClientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+// getClientIP extracts the client IP from the request (standalone version).
+func getClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if ip, _, err := net.SplitHostPort(xff); err == nil {
+			return ip
+		}
+		return xff
+	}
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+	if ip, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return ip
+	}
+	return r.RemoteAddr
+}
+
 // KeyBasedRateLimiter allows rate limiting by custom keys (user ID, API key, etc.)
 type KeyBasedRateLimiter struct {
 	config    RateLimitConfig

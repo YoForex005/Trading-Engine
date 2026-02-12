@@ -244,11 +244,38 @@ func (v *ProductionValidator) checkSecuritySettings() {
 		v.errors = append(v.errors, "JWT_SECRET must be set in production")
 	} else if len(v.config.JWT.Secret) < 32 {
 		v.errors = append(v.errors, "JWT_SECRET must be at least 32 characters in production")
+	} else {
+		// Check for weak/default secrets
+		weakSecrets := []string{
+			"super_secret_dev_key_do_not_use_in_prod",
+			"secret",
+			"password",
+			"12345678",
+			"changeme",
+		}
+		for _, weak := range weakSecrets {
+			if v.config.JWT.Secret == weak {
+				v.errors = append(v.errors, "JWT_SECRET is using a weak/default value - must use strong random secret in production")
+				break
+			}
+		}
+
+		// Check entropy (should not be all same character or simple patterns)
+		if isWeakSecret(v.config.JWT.Secret) {
+			v.errors = append(v.errors, "JWT_SECRET has low entropy - use a cryptographically random secret (e.g., openssl rand -base64 64)")
+		}
 	}
 
 	// Admin password must be set
 	if v.config.Admin.Password == "" {
 		v.errors = append(v.errors, "ADMIN_PASSWORD_HASH must be set in production")
+	} else {
+		// Verify it's a bcrypt hash (starts with $2a$, $2b$, or $2y$)
+		if !strings.HasPrefix(v.config.Admin.Password, "$2a$") &&
+			!strings.HasPrefix(v.config.Admin.Password, "$2b$") &&
+			!strings.HasPrefix(v.config.Admin.Password, "$2y$") {
+			v.errors = append(v.errors, "ADMIN_PASSWORD_HASH must be a bcrypt hash (generate with: htpasswd -bnBC 12 \"\" \"YourPassword\" | tr -d ':\\n')")
+		}
 	}
 
 	// Master encryption key must be set
@@ -258,10 +285,89 @@ func (v *ProductionValidator) checkSecuritySettings() {
 		v.errors = append(v.errors, "MASTER_ENCRYPTION_KEY must be at least 32 characters")
 	}
 
+	// CORS configuration must not use wildcards in production
+	for _, origin := range v.config.CORS.AllowedOrigins {
+		if origin == "*" {
+			v.errors = append(v.errors, "CORS wildcard (*) is not allowed in production - use specific domains in ALLOWED_ORIGINS")
+			break
+		}
+	}
+
+	// Check for secure CORS origins (should use HTTPS in production)
+	for _, origin := range v.config.CORS.AllowedOrigins {
+		if strings.HasPrefix(origin, "http://") && !strings.Contains(origin, "localhost") {
+			v.warnings = append(v.warnings, "CORS origin uses HTTP instead of HTTPS: "+origin)
+		}
+	}
+
 	// Database SSL should be enabled in production
 	if v.config.Database.SSLMode == "disable" {
 		v.warnings = append(v.warnings, "Database SSL is disabled - consider enabling for production")
 	}
+}
+
+// isWeakSecret checks if a secret has low entropy
+func isWeakSecret(secret string) bool {
+	// Check for repeated characters (e.g., "aaaaaaaaaa")
+	if len(secret) > 0 {
+		allSame := true
+		first := secret[0]
+		for i := 1; i < len(secret); i++ {
+			if secret[i] != first {
+				allSame = false
+				break
+			}
+		}
+		if allSame {
+			return true
+		}
+	}
+
+	// Check for simple patterns
+	simplePatterns := []string{
+		"123456",
+		"abcdef",
+		"qwerty",
+		"password",
+	}
+	lowerSecret := strings.ToLower(secret)
+	for _, pattern := range simplePatterns {
+		if strings.Contains(lowerSecret, pattern) {
+			return true
+		}
+	}
+
+	// Check character diversity (should have uppercase, lowercase, numbers, symbols)
+	hasUpper, hasLower, hasDigit, hasSpecial := false, false, false, false
+	for _, c := range secret {
+		switch {
+		case c >= 'A' && c <= 'Z':
+			hasUpper = true
+		case c >= 'a' && c <= 'z':
+			hasLower = true
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		default:
+			hasSpecial = true
+		}
+	}
+
+	// Require at least 3 out of 4 character types
+	diversity := 0
+	if hasUpper {
+		diversity++
+	}
+	if hasLower {
+		diversity++
+	}
+	if hasDigit {
+		diversity++
+	}
+	if hasSpecial {
+		diversity++
+	}
+
+	return diversity < 3
 }
 
 // printValidationSummary prints the validation results

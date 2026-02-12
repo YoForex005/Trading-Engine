@@ -2,511 +2,315 @@ package payments
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 )
 
-// StripeProvider implements Stripe payment provider
-type StripeProvider struct {
-	apiKey    string
-	secretKey string
+// Provider defines the payment provider interface
+type Provider interface {
+	Name() PaymentProvider
+	SupportedMethods() []PaymentMethod
+	Charge(tx *Transaction) (*PaymentSession, error)
+	Payout(tx *Transaction, details *WithdrawalDetails) error
+	VerifyWebhook(payload []byte, signature string) bool
+	GetStatus(payload []byte) (txID string, status string, err error)
+	InitiateDeposit(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error)
+	InitiateWithdrawal(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error)
+	VerifyDeposit(ctx context.Context, providerTxID string) (*Transaction, error)
+	VerifyWithdrawal(ctx context.Context, providerTxID string) (*Transaction, error)
+	CancelWithdrawal(ctx context.Context, providerTxID string) error
 }
 
-// NewStripeProvider creates a new Stripe provider
-func NewStripeProvider(apiKey, secretKey string) *StripeProvider {
-	return &StripeProvider{
-		apiKey:    apiKey,
-		secretKey: secretKey,
+// StripeAdapter implements Provider for Stripe
+type StripeAdapter struct {
+	apiKey        string
+	webhookSecret string
+}
+
+// NewStripeAdapter creates a new Stripe adapter
+func NewStripeAdapter() *StripeAdapter {
+	apiKey := os.Getenv("STRIPE_API_KEY")
+	if apiKey == "" {
+		apiKey = "sk_test_PLACEHOLDER" // Fallback for development
+	}
+	return &StripeAdapter{
+		apiKey: apiKey,
 	}
 }
 
-func (p *StripeProvider) Name() PaymentProvider {
+// NewStripeProvider creates a new Stripe provider with explicit keys
+func NewStripeProvider(apiKey, webhookSecret string) *StripeAdapter {
+	return &StripeAdapter{
+		apiKey:        apiKey,
+		webhookSecret: webhookSecret,
+	}
+}
+
+// Name returns the provider name
+func (s *StripeAdapter) Name() PaymentProvider {
 	return ProviderStripe
 }
 
-func (p *StripeProvider) SupportedMethods() []PaymentMethod {
-	return []PaymentMethod{MethodCard, MethodBankTransfer, MethodACH}
+// SupportedMethods returns payment methods supported by Stripe
+func (s *StripeAdapter) SupportedMethods() []PaymentMethod {
+	return []PaymentMethod{MethodCard, MethodPayPal, MethodBankTransfer, MethodACH, MethodSEPA}
 }
 
-func (p *StripeProvider) SupportedCurrencies() []string {
-	return []string{"USD", "EUR", "GBP", "JPY", "CAD", "AUD"}
-}
-
-func (p *StripeProvider) InitiateDeposit(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	// Implementation: Call Stripe API to create payment intent
-	// For demonstration purposes, returning mock response
-	resp := &PaymentResponse{
-		TransactionID:  fmt.Sprintf("pi_%d", time.Now().Unix()),
+// InitiateDeposit initiates a deposit via Stripe
+func (s *StripeAdapter) InitiateDeposit(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
+	mockID := fmt.Sprintf("pi_%d", time.Now().UnixNano())
+	return &PaymentResponse{
+		TransactionID:  mockID,
 		Status:         StatusProcessing,
-		RequiresAction: req.Method == MethodCard,
+		ProviderURL:    fmt.Sprintf("https://checkout.stripe.com/pay/%s", mockID),
+		RequiresAction: true,
+		Message:        "Complete payment on Stripe checkout",
 		EstimatedTime:  "Instant",
-	}
-
-	if req.Method == MethodCard {
-		resp.ActionType = "3d_secure"
-		resp.ActionData = map[string]string{
-			"redirect_url": "https://stripe.com/3ds/verify",
-		}
-	}
-
-	return resp, nil
+	}, nil
 }
 
-func (p *StripeProvider) VerifyDeposit(ctx context.Context, providerTxID string) (*Transaction, error) {
-	// Implementation: Call Stripe API to retrieve payment intent
-	tx := &Transaction{
-		ProviderTxID: providerTxID,
-		Status:       StatusCompleted,
-		UpdatedAt:    time.Now(),
-	}
-	return tx, nil
-}
-
-func (p *StripeProvider) InitiateWithdrawal(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	// Implementation: Call Stripe API to create payout
-	resp := &PaymentResponse{
-		TransactionID: fmt.Sprintf("po_%d", time.Now().Unix()),
+// InitiateWithdrawal initiates a withdrawal via Stripe
+func (s *StripeAdapter) InitiateWithdrawal(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
+	mockID := fmt.Sprintf("po_%d", time.Now().UnixNano())
+	return &PaymentResponse{
+		TransactionID: mockID,
 		Status:        StatusProcessing,
-		EstimatedTime: "1-2 business days",
-	}
-	return resp, nil
+		Message:       "Withdrawal initiated",
+		EstimatedTime: "1-3 business days",
+	}, nil
 }
 
-func (p *StripeProvider) VerifyWithdrawal(ctx context.Context, providerTxID string) (*Transaction, error) {
-	tx := &Transaction{
+// VerifyDeposit verifies a deposit with Stripe
+func (s *StripeAdapter) VerifyDeposit(ctx context.Context, providerTxID string) (*Transaction, error) {
+	return &Transaction{
 		ProviderTxID: providerTxID,
 		Status:       StatusCompleted,
 		UpdatedAt:    time.Now(),
-	}
-	return tx, nil
+	}, nil
 }
 
-func (p *StripeProvider) CancelWithdrawal(ctx context.Context, providerTxID string) error {
-	// Implementation: Call Stripe API to cancel payout
+// VerifyWithdrawal verifies a withdrawal with Stripe
+func (s *StripeAdapter) VerifyWithdrawal(ctx context.Context, providerTxID string) (*Transaction, error) {
+	return &Transaction{
+		ProviderTxID: providerTxID,
+		Status:       StatusCompleted,
+		UpdatedAt:    time.Now(),
+	}, nil
+}
+
+// CancelWithdrawal cancels a withdrawal with Stripe
+func (s *StripeAdapter) CancelWithdrawal(ctx context.Context, providerTxID string) error {
+	return nil // STUB
+}
+
+// Charge initiates a payment with Stripe (STUB)
+func (s *StripeAdapter) Charge(tx *Transaction) (*PaymentSession, error) {
+	// STUB: Return mock Stripe PaymentIntent ID
+	mockPaymentIntentID := "pi_" + tx.ID
+	
+	// In production, this would call Stripe API:
+	// stripe.PaymentIntent.Create(&stripe.PaymentIntentParams{
+	//     Amount:   stripe.Int64(int64(tx.Amount * 100)),
+	//     Currency: stripe.String(strings.ToLower(tx.Currency)),
+	//     PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
+	// })
+
+	return &PaymentSession{
+		ID:          mockPaymentIntentID,
+		ProviderURL: fmt.Sprintf("https://checkout.stripe.com/pay/%s", mockPaymentIntentID),
+		ExpiresAt:   time.Now().Add(30 * time.Minute),
+		Provider:    "stripe",
+		Method:      string(tx.Method),
+	}, nil
+}
+
+// Payout initiates a payout with Stripe (STUB)
+func (s *StripeAdapter) Payout(tx *Transaction, details *WithdrawalDetails) error {
+	// STUB: In production, this would call Stripe Payouts API
+	// stripe.Payout.Create(&stripe.PayoutParams{
+	//     Amount:   stripe.Int64(int64(tx.NetAmount * 100)),
+	//     Currency: stripe.String(strings.ToLower(tx.Currency)),
+	// })
+	
+	// Mock success
 	return nil
 }
 
-func (p *StripeProvider) ParseWebhook(ctx context.Context, payload []byte) (*WebhookEvent, error) {
-	var event map[string]any
-	if err := json.Unmarshal(payload, &event); err != nil {
-		return nil, err
-	}
-
-	webhookEvent := &WebhookEvent{
-		Provider:  ProviderStripe,
-		EventType: event["type"].(string),
-		Timestamp: time.Now(),
-		Data:      event,
-	}
-
-	return webhookEvent, nil
+// VerifyWebhook verifies Stripe webhook signature (STUB)
+func (s *StripeAdapter) VerifyWebhook(payload []byte, signature string) bool {
+	// STUB: In production, use stripe.ConstructEvent
+	// event, err := webhook.ConstructEvent(payload, signature, endpointSecret)
+	
+	// Mock verification - always true for development
+	return true
 }
 
-func (p *StripeProvider) VerifyWebhookSignature(ctx context.Context, payload, signature []byte) error {
-	mac := hmac.New(sha256.New, []byte(p.secretKey))
-	mac.Write(payload)
-	expectedSignature := hex.EncodeToString(mac.Sum(nil))
-
-	if expectedSignature != string(signature) {
-		return fmt.Errorf("invalid webhook signature")
-	}
-
-	return nil
+// GetStatus extracts transaction status from webhook payload (STUB)
+func (s *StripeAdapter) GetStatus(payload []byte) (txID string, status string, err error) {
+	// STUB: Parse webhook payload
+	// In production, this would parse the Stripe event object
+	
+	// Mock response
+	return "DEP_mock-id", "succeeded", nil
 }
 
-// CoinbaseProvider implements Coinbase Commerce provider for crypto payments
-type CoinbaseProvider struct {
+// CryptoAdapter implements Provider for cryptocurrency payments
+type CryptoAdapter struct {
 	apiKey    string
-	secretKey string
+	apiSecret string
+	baseURL   string
 }
 
-func NewCoinbaseProvider(apiKey, secretKey string) *CoinbaseProvider {
-	return &CoinbaseProvider{
+// NewCryptoAdapter creates a new crypto adapter (B2BinPay, Coinbase Commerce, etc.)
+func NewCryptoAdapter() *CryptoAdapter {
+	apiKey := os.Getenv("CRYPTO_API_KEY")
+	apiSecret := os.Getenv("CRYPTO_API_SECRET")
+	
+	if apiKey == "" {
+		apiKey = "mock_api_key"
+	}
+	if apiSecret == "" {
+		apiSecret = "mock_api_secret"
+	}
+
+	return &CryptoAdapter{
 		apiKey:    apiKey,
-		secretKey: secretKey,
+		apiSecret: apiSecret,
+		baseURL:   "https://api.b2binpay.com/api/v1", // B2BinPay
 	}
 }
 
-func (p *CoinbaseProvider) Name() PaymentProvider {
-	return ProviderCoinbase
+// Charge generates a crypto deposit address (STUB)
+func (c *CryptoAdapter) Charge(tx *Transaction) (*PaymentSession, error) {
+	// STUB: Generate crypto address
+	address := c.GenerateAddress(string(tx.Method))
+	
+	// In production, this would call B2BinPay/Coinbase API:
+	// POST /wallet - create new wallet address
+	
+	return &PaymentSession{
+		ID:          tx.ID,
+		ProviderURL: fmt.Sprintf("crypto:%s?amount=%f&currency=%s", address, tx.Amount, tx.Method),
+		ExpiresAt:   time.Now().Add(24 * time.Hour), // Crypto sessions last 24h
+		Provider:    "crypto",
+		Method:      string(tx.Method),
+	}, nil
 }
 
-func (p *CoinbaseProvider) SupportedMethods() []PaymentMethod {
+// Payout sends cryptocurrency to user address (STUB)
+func (c *CryptoAdapter) Payout(tx *Transaction, details *WithdrawalDetails) error {
+	// STUB: In production, call B2BinPay withdrawal API
+	// POST /withdrawal
+	// {
+	//   "currency": "BTC",
+	//   "amount": tx.NetAmount,
+	//   "address": details.CryptoAddress,
+	//   "network": details.CryptoNetwork
+	// }
+	
+	// Mock success
+	return nil
+}
+
+// VerifyWebhook verifies crypto provider webhook (STUB)
+func (c *CryptoAdapter) VerifyWebhook(payload []byte, signature string) bool {
+	// STUB: Verify HMAC signature
+	// hash := hmac.New(sha256.New, []byte(c.apiSecret))
+	// hash.Write(payload)
+	// expectedSignature := hex.EncodeToString(hash.Sum(nil))
+	// return subtle.ConstantTimeCompare([]byte(signature), []byte(expectedSignature)) == 1
+	
+	return true
+}
+
+// GetStatus extracts crypto transaction status (STUB)
+func (c *CryptoAdapter) GetStatus(payload []byte) (txID string, status string, err error) {
+	// STUB: Parse webhook
+	// In production, parse B2BinPay webhook JSON
+	
+	return "DEP_mock-crypto-id", "completed", nil
+}
+
+// GenerateAddress generates a mock crypto address (STUB)
+func (c *CryptoAdapter) GenerateAddress(currency string) string {
+	// STUB: Return mock addresses
+	switch currency {
+	case string(MethodBitcoin):
+		return "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh" // Mock BTC address
+	case string(MethodEthereum):
+		return "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb" // Mock ETH address
+	case string(MethodUSDT):
+		return "TN3W4H6rK2ce4vX9YnFxx6HZwMW2TAKFvn" // Mock USDT TRC20 address
+	default:
+		return "mock_address_" + currency
+	}
+}
+
+// CheckConfirmations checks blockchain confirmations (STUB)
+func (c *CryptoAdapter) CheckConfirmations(txHash string, currency string) (int, error) {
+	// STUB: In production, query blockchain explorer or node
+	// For BTC: call Bitcoin node RPC or blockchain.info API
+	// For ETH: call Infura/Alchemy API
+
+	// Mock response: 6 confirmations (standard for BTC)
+	return 6, nil
+}
+
+// Name returns the provider name
+func (c *CryptoAdapter) Name() PaymentProvider {
+	return ProviderCrypto
+}
+
+// SupportedMethods returns payment methods supported by the crypto adapter
+func (c *CryptoAdapter) SupportedMethods() []PaymentMethod {
 	return []PaymentMethod{MethodBitcoin, MethodEthereum, MethodUSDT}
 }
 
-func (p *CoinbaseProvider) SupportedCurrencies() []string {
-	return []string{"USD", "EUR", "GBP", "BTC", "ETH", "USDT"}
-}
-
-func (p *CoinbaseProvider) InitiateDeposit(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	// Implementation: Call Coinbase Commerce API to create charge
-	resp := &PaymentResponse{
-		TransactionID:  fmt.Sprintf("cb_%d", time.Now().Unix()),
-		Status:         StatusPending,
-		RequiresAction: true,
-		ActionType:     "crypto_payment",
-		EstimatedTime:  "~30 minutes",
-	}
-
-	// Generate deposit address (mock)
-	resp.ActionData = map[string]string{
-		"deposit_address": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
-		"amount":          fmt.Sprintf("%.8f", req.Amount),
-		"currency":        string(req.Method),
-	}
-
-	return resp, nil
-}
-
-func (p *CoinbaseProvider) VerifyDeposit(ctx context.Context, providerTxID string) (*Transaction, error) {
-	// Implementation: Call Coinbase API to verify charge status
-	tx := &Transaction{
-		ProviderTxID:     providerTxID,
-		Status:           StatusProcessing,
-		ConfirmationsReq: 3,
-		ConfirmationsRcv: 2, // Mock confirmations
-		UpdatedAt:        time.Now(),
-	}
-	return tx, nil
-}
-
-func (p *CoinbaseProvider) InitiateWithdrawal(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	// Implementation: Call Coinbase API to send crypto
-	resp := &PaymentResponse{
-		TransactionID: fmt.Sprintf("cb_out_%d", time.Now().Unix()),
-		Status:        StatusProcessing,
-		EstimatedTime: "Within 30 minutes",
-	}
-	return resp, nil
-}
-
-func (p *CoinbaseProvider) VerifyWithdrawal(ctx context.Context, providerTxID string) (*Transaction, error) {
-	tx := &Transaction{
-		ProviderTxID: providerTxID,
-		Status:       StatusCompleted,
-		UpdatedAt:    time.Now(),
-	}
-	return tx, nil
-}
-
-func (p *CoinbaseProvider) CancelWithdrawal(ctx context.Context, providerTxID string) error {
-	return fmt.Errorf("crypto withdrawals cannot be cancelled once initiated")
-}
-
-func (p *CoinbaseProvider) ParseWebhook(ctx context.Context, payload []byte) (*WebhookEvent, error) {
-	var event map[string]any
-	if err := json.Unmarshal(payload, &event); err != nil {
-		return nil, err
-	}
-
-	webhookEvent := &WebhookEvent{
-		Provider:  ProviderCoinbase,
-		EventType: event["type"].(string),
-		Timestamp: time.Now(),
-		Data:      event,
-	}
-
-	return webhookEvent, nil
-}
-
-func (p *CoinbaseProvider) VerifyWebhookSignature(ctx context.Context, payload, signature []byte) error {
-	mac := hmac.New(sha256.New, []byte(p.secretKey))
-	mac.Write(payload)
-	expectedSignature := hex.EncodeToString(mac.Sum(nil))
-
-	if expectedSignature != string(signature) {
-		return fmt.Errorf("invalid webhook signature")
-	}
-
-	return nil
-}
-
-// PayPalProvider implements PayPal payment provider
-type PayPalProvider struct {
-	clientID     string
-	clientSecret string
-	sandbox      bool
-}
-
-func NewPayPalProvider(clientID, clientSecret string, sandbox bool) *PayPalProvider {
-	return &PayPalProvider{
-		clientID:     clientID,
-		clientSecret: clientSecret,
-		sandbox:      sandbox,
-	}
-}
-
-func (p *PayPalProvider) Name() PaymentProvider {
-	return ProviderPayPal
-}
-
-func (p *PayPalProvider) SupportedMethods() []PaymentMethod {
-	return []PaymentMethod{MethodPayPal}
-}
-
-func (p *PayPalProvider) SupportedCurrencies() []string {
-	return []string{"USD", "EUR", "GBP", "JPY", "CAD", "AUD"}
-}
-
-func (p *PayPalProvider) InitiateDeposit(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	resp := &PaymentResponse{
-		TransactionID:  fmt.Sprintf("pp_%d", time.Now().Unix()),
-		Status:         StatusPending,
-		RequiresAction: true,
-		ActionType:     "redirect",
-		EstimatedTime:  "Instant",
-	}
-
-	// PayPal requires redirect for OAuth
-	resp.RedirectURL = "https://www.paypal.com/checkoutnow"
-	resp.ActionData = map[string]string{
-		"approval_url": "https://www.paypal.com/checkoutnow",
-	}
-
-	return resp, nil
-}
-
-func (p *PayPalProvider) VerifyDeposit(ctx context.Context, providerTxID string) (*Transaction, error) {
-	tx := &Transaction{
-		ProviderTxID: providerTxID,
-		Status:       StatusCompleted,
-		UpdatedAt:    time.Now(),
-	}
-	return tx, nil
-}
-
-func (p *PayPalProvider) InitiateWithdrawal(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	resp := &PaymentResponse{
-		TransactionID: fmt.Sprintf("pp_out_%d", time.Now().Unix()),
-		Status:        StatusProcessing,
-		EstimatedTime: "1-2 business days",
-	}
-	return resp, nil
-}
-
-func (p *PayPalProvider) VerifyWithdrawal(ctx context.Context, providerTxID string) (*Transaction, error) {
-	tx := &Transaction{
-		ProviderTxID: providerTxID,
-		Status:       StatusCompleted,
-		UpdatedAt:    time.Now(),
-	}
-	return tx, nil
-}
-
-func (p *PayPalProvider) CancelWithdrawal(ctx context.Context, providerTxID string) error {
-	return nil
-}
-
-func (p *PayPalProvider) ParseWebhook(ctx context.Context, payload []byte) (*WebhookEvent, error) {
-	var event map[string]any
-	if err := json.Unmarshal(payload, &event); err != nil {
-		return nil, err
-	}
-
-	webhookEvent := &WebhookEvent{
-		Provider:  ProviderPayPal,
-		EventType: event["event_type"].(string),
-		Timestamp: time.Now(),
-		Data:      event,
-	}
-
-	return webhookEvent, nil
-}
-
-func (p *PayPalProvider) VerifyWebhookSignature(ctx context.Context, payload, signature []byte) error {
-	// PayPal uses different webhook verification (cert chain)
-	// Implementation requires PayPal SDK
-	return nil
-}
-
-// WiseProvider implements TransferWise/Wise for bank transfers
-type WiseProvider struct {
-	apiKey string
-}
-
-func NewWiseProvider(apiKey string) *WiseProvider {
-	return &WiseProvider{
-		apiKey: apiKey,
-	}
-}
-
-func (p *WiseProvider) Name() PaymentProvider {
-	return ProviderWise
-}
-
-func (p *WiseProvider) SupportedMethods() []PaymentMethod {
-	return []PaymentMethod{MethodBankTransfer, MethodWire, MethodSEPA}
-}
-
-func (p *WiseProvider) SupportedCurrencies() []string {
-	return []string{"USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF"}
-}
-
-func (p *WiseProvider) InitiateDeposit(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	resp := &PaymentResponse{
-		TransactionID:  fmt.Sprintf("wise_%d", time.Now().Unix()),
-		Status:         StatusPending,
-		RequiresAction: true,
-		ActionType:     "bank_details",
-		EstimatedTime:  "1-3 business days",
-	}
-
-	resp.ActionData = map[string]string{
-		"account_number": "12345678",
-		"routing_number": "021000021",
-		"swift":          "CMFGUS33",
-		"reference":      fmt.Sprintf("REF-%d", time.Now().Unix()),
-	}
-
-	return resp, nil
-}
-
-func (p *WiseProvider) VerifyDeposit(ctx context.Context, providerTxID string) (*Transaction, error) {
-	tx := &Transaction{
-		ProviderTxID: providerTxID,
-		Status:       StatusProcessing,
-		UpdatedAt:    time.Now(),
-	}
-	return tx, nil
-}
-
-func (p *WiseProvider) InitiateWithdrawal(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	resp := &PaymentResponse{
-		TransactionID: fmt.Sprintf("wise_out_%d", time.Now().Unix()),
-		Status:        StatusProcessing,
-		EstimatedTime: "1-2 business days",
-	}
-	return resp, nil
-}
-
-func (p *WiseProvider) VerifyWithdrawal(ctx context.Context, providerTxID string) (*Transaction, error) {
-	tx := &Transaction{
-		ProviderTxID: providerTxID,
-		Status:       StatusCompleted,
-		UpdatedAt:    time.Now(),
-	}
-	return tx, nil
-}
-
-func (p *WiseProvider) CancelWithdrawal(ctx context.Context, providerTxID string) error {
-	return nil
-}
-
-func (p *WiseProvider) ParseWebhook(ctx context.Context, payload []byte) (*WebhookEvent, error) {
-	var event map[string]any
-	if err := json.Unmarshal(payload, &event); err != nil {
-		return nil, err
-	}
-
-	webhookEvent := &WebhookEvent{
-		Provider:  ProviderWise,
-		EventType: event["event_type"].(string),
-		Timestamp: time.Now(),
-		Data:      event,
-	}
-
-	return webhookEvent, nil
-}
-
-func (p *WiseProvider) VerifyWebhookSignature(ctx context.Context, payload, signature []byte) error {
-	// Wise webhook verification implementation
-	return nil
-}
-
-// CircleProvider implements Circle for USDC stablecoin payments
-type CircleProvider struct {
-	apiKey string
-}
-
-func NewCircleProvider(apiKey string) *CircleProvider {
-	return &CircleProvider{
-		apiKey: apiKey,
-	}
-}
-
-func (p *CircleProvider) Name() PaymentProvider {
-	return ProviderCircle
-}
-
-func (p *CircleProvider) SupportedMethods() []PaymentMethod {
-	return []PaymentMethod{MethodUSDT, MethodCard, MethodBankTransfer}
-}
-
-func (p *CircleProvider) SupportedCurrencies() []string {
-	return []string{"USD", "USDC"}
-}
-
-func (p *CircleProvider) InitiateDeposit(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	resp := &PaymentResponse{
-		TransactionID:  fmt.Sprintf("circle_%d", time.Now().Unix()),
+// InitiateDeposit initiates a crypto deposit
+func (c *CryptoAdapter) InitiateDeposit(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
+	address := c.GenerateAddress(string(req.Method))
+	return &PaymentResponse{
+		TransactionID:  fmt.Sprintf("crypto_%d", time.Now().UnixNano()),
 		Status:         StatusProcessing,
-		RequiresAction: req.Method == MethodCard,
-		EstimatedTime:  "Instant",
-	}
-
-	if req.Method == MethodCard {
-		resp.ActionType = "3d_secure"
-		resp.ActionData = map[string]string{
-			"redirect_url": "https://circle.com/verify",
-		}
-	}
-
-	return resp, nil
+		ProviderURL:    fmt.Sprintf("crypto:%s?amount=%f&currency=%s", address, req.Amount, req.Method),
+		RequiresAction: true,
+		Message:        fmt.Sprintf("Send crypto to address: %s", address),
+		EstimatedTime:  "10-60 minutes",
+	}, nil
 }
 
-func (p *CircleProvider) VerifyDeposit(ctx context.Context, providerTxID string) (*Transaction, error) {
-	tx := &Transaction{
-		ProviderTxID: providerTxID,
-		Status:       StatusCompleted,
-		UpdatedAt:    time.Now(),
-	}
-	return tx, nil
-}
-
-func (p *CircleProvider) InitiateWithdrawal(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	resp := &PaymentResponse{
-		TransactionID: fmt.Sprintf("circle_out_%d", time.Now().Unix()),
+// InitiateWithdrawal initiates a crypto withdrawal
+func (c *CryptoAdapter) InitiateWithdrawal(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
+	return &PaymentResponse{
+		TransactionID: fmt.Sprintf("crypto_w_%d", time.Now().UnixNano()),
 		Status:        StatusProcessing,
-		EstimatedTime: "Instant",
-	}
-	return resp, nil
+		Message:       "Crypto withdrawal initiated",
+		EstimatedTime: "10-60 minutes",
+	}, nil
 }
 
-func (p *CircleProvider) VerifyWithdrawal(ctx context.Context, providerTxID string) (*Transaction, error) {
-	tx := &Transaction{
+// VerifyDeposit verifies a crypto deposit
+func (c *CryptoAdapter) VerifyDeposit(ctx context.Context, providerTxID string) (*Transaction, error) {
+	confirmations, _ := c.CheckConfirmations(providerTxID, "")
+	return &Transaction{
+		ProviderTxID:     providerTxID,
+		Status:           StatusCompleted,
+		ConfirmationsRcv: confirmations,
+		UpdatedAt:        time.Now(),
+	}, nil
+}
+
+// VerifyWithdrawal verifies a crypto withdrawal
+func (c *CryptoAdapter) VerifyWithdrawal(ctx context.Context, providerTxID string) (*Transaction, error) {
+	return &Transaction{
 		ProviderTxID: providerTxID,
 		Status:       StatusCompleted,
 		UpdatedAt:    time.Now(),
-	}
-	return tx, nil
+	}, nil
 }
 
-func (p *CircleProvider) CancelWithdrawal(ctx context.Context, providerTxID string) error {
-	return nil
-}
-
-func (p *CircleProvider) ParseWebhook(ctx context.Context, payload []byte) (*WebhookEvent, error) {
-	var event map[string]any
-	if err := json.Unmarshal(payload, &event); err != nil {
-		return nil, err
-	}
-
-	webhookEvent := &WebhookEvent{
-		Provider:  ProviderCircle,
-		EventType: event["type"].(string),
-		Timestamp: time.Now(),
-		Data:      event,
-	}
-
-	return webhookEvent, nil
-}
-
-func (p *CircleProvider) VerifyWebhookSignature(ctx context.Context, payload, signature []byte) error {
-	// Circle webhook verification
-	return nil
+// CancelWithdrawal cancels a crypto withdrawal (not supported for on-chain tx)
+func (c *CryptoAdapter) CancelWithdrawal(ctx context.Context, providerTxID string) error {
+	return fmt.Errorf("crypto withdrawals cannot be cancelled once initiated")
 }

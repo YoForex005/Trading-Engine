@@ -76,6 +76,12 @@ type DatabaseConfig struct {
 	SSLMode  string
 }
 
+// ConnectionString returns a PostgreSQL connection string
+func (d *DatabaseConfig) ConnectionString() string {
+	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		d.Host, d.Port, d.User, d.Password, d.Name, d.SSLMode)
+}
+
 type RedisConfig struct {
 	Host     string
 	Port     string

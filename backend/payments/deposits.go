@@ -8,7 +8,7 @@ import (
 
 // DepositService handles deposit processing
 type DepositService struct {
-	gateway    Gateway
+	gateway    *Gateway
 	providers  map[PaymentProvider]Provider
 	fraud      FraudDetector
 	limits     LimitsChecker
@@ -17,7 +17,7 @@ type DepositService struct {
 
 // NewDepositService creates a new deposit service
 func NewDepositService(
-	gateway Gateway,
+	gateway *Gateway,
 	providers map[PaymentProvider]Provider,
 	fraud FraudDetector,
 	limits LimitsChecker,

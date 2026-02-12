@@ -15,6 +15,7 @@ import {
   AlertCircle,
   RefreshCw,
 } from 'lucide-react';
+import { API_ENDPOINTS, buildApiUrl } from '../config/api';
 
 // Type definitions for routing rules
 type RoutingAction = 'A-Book' | 'B-Book' | 'Partial' | 'Reject';
@@ -57,7 +58,7 @@ export const RoutingRulesPanel = () => {
   const fetchRules = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:7999/api/routing/rules');
+      const response = await fetch(API_ENDPOINTS.admin.routingRules);
       if (response.ok) {
         const data = await response.json();
         setRules(Array.isArray(data) ? data : []);
@@ -72,7 +73,7 @@ export const RoutingRulesPanel = () => {
 
   const fetchLiquidityProviders = async () => {
     try {
-      const response = await fetch('http://localhost:7999/api/routing/liquidity-providers');
+      const response = await fetch(buildApiUrl('/api/routing/liquidity-providers'));
       if (response.ok) {
         const data = await response.json();
         setLiquidityProviders(Array.isArray(data) ? data : []);
@@ -86,8 +87,8 @@ export const RoutingRulesPanel = () => {
     try {
       const method = rule.id ? 'PUT' : 'POST';
       const endpoint = rule.id
-        ? `http://localhost:7999/api/routing/rules/${rule.id}`
-        : 'http://localhost:7999/api/routing/rules';
+        ? `${API_ENDPOINTS.admin.routingRules}/${rule.id}`
+        : API_ENDPOINTS.admin.routingRules;
 
       const response = await fetch(endpoint, {
         method,
@@ -113,7 +114,7 @@ export const RoutingRulesPanel = () => {
     if (!confirm('Are you sure you want to delete this rule?')) return;
 
     try {
-      const response = await fetch(`http://localhost:7999/api/routing/rules/${id}`, {
+      const response = await fetch(`${API_ENDPOINTS.admin.routingRules}/${id}`, {
         method: 'DELETE',
       });
 
@@ -130,7 +131,7 @@ export const RoutingRulesPanel = () => {
 
   const reorderRules = async (reorderedRules: RoutingRule[]) => {
     try {
-      const response = await fetch('http://localhost:7999/api/routing/rules/reorder', {
+      const response = await fetch(buildApiUrl('/api/routing/rules/reorder'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

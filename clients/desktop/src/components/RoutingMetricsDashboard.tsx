@@ -88,7 +88,7 @@ export const RoutingMetricsDashboard = ({ className = '' }: RoutingMetricsDashbo
   const confidenceChart = useRef<IChartApi | null>(null);
 
   // API base URL
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:7999';
+  import { API_BASE_URL as API_BASE, WS_ENDPOINTS } from '../config/api';
 
   // ============================================
   // Data Fetching
@@ -150,7 +150,7 @@ export const RoutingMetricsDashboard = ({ className = '' }: RoutingMetricsDashbo
   useEffect(() => {
     if (!accountId || !autoRefresh) return;
 
-    const ws = getWebSocketService('ws://localhost:7999/ws');
+    const ws = getWebSocketService(WS_ENDPOINTS.general);
     ws.connect();
 
     const unsubscribe = ws.subscribe('routing_decisions', (data: RoutingDecision) => {

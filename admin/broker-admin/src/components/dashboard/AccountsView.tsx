@@ -59,10 +59,33 @@ export default function AccountsView() {
         search: ''
     });
 
-    // Initial Column State - Load from localStorage or defaults
+    // Initial Column State - Load from localStorage or defaults (SSR-safe)
     const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(() => {
+        if (typeof window === 'undefined') {
+            // SSR: return defaults
+            return {
+                login: true, name: true, group: true, leverage: true, balance: true,
+                credit: true, equity: true, margin: true, freeMargin: true, marginLevel: true,
+                profit: true, floatingPL: true, swap: true, status: true, country: true,
+                email: true, comment: true,
+                // Hidden by default
+                commission: false, currency: false, flags: false,
+                phone: false, regTime: false, lastAccess: false, lastIP: false,
+                mqID: false, agentAccount: false, bankAccount: false,
+                leadSource: false, leadCampaign: false
+            };
+        }
+
+        // Client-side: try to load from localStorage
         const saved = localStorage.getItem('mt5-accounts-columns');
-        if (saved) return JSON.parse(saved);
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch {
+                // Invalid JSON, use defaults
+            }
+        }
+
         return {
             login: true, name: true, group: true, leverage: true, balance: true,
             credit: true, equity: true, margin: true, freeMargin: true, marginLevel: true,
@@ -131,9 +154,11 @@ export default function AccountsView() {
         setContextMenu({ x: e.clientX, y: e.clientY, account: acc });
     };
 
-    // Persist column config
+    // Persist column config (client-side only)
     useEffect(() => {
-        localStorage.setItem('mt5-accounts-columns', JSON.stringify(visibleColumns));
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('mt5-accounts-columns', JSON.stringify(visibleColumns));
+        }
     }, [visibleColumns]);
 
     const toggleColumn = (key: string) => {
@@ -182,50 +207,50 @@ export default function AccountsView() {
     };
 
     const getMenuActions = (acc: any): ContextAction[] => [
-        { label: 'New Account', onClick: () => console.log('New'), shortcut: 'Ctrl+Shift+N' },
-        { label: 'Account Details', onClick: () => console.log('Details'), shortcut: 'Enter' },
+        { label: 'New Account', onClick: () => {}, shortcut: 'Ctrl+Shift+N' },
+        { label: 'Account Details', onClick: () => {}, shortcut: 'Enter' },
         {
             label: 'Bulk Operations',
             hasSubmenu: true,
             submenu: [
-                { label: 'Charges', onClick: () => console.log('Charges') },
-                { label: 'Check Balance', onClick: () => console.log('Check Balance') },
-                { label: 'Fix Balance', onClick: () => console.log('Fix Balance') },
-                { label: 'Fix Personal Data', onClick: () => console.log('Fix Data') },
-                { label: 'Bulk Closing', onClick: () => console.log('Closing') },
-                { label: 'Bulk Payments', onClick: () => console.log('Payments') },
-                { label: 'Split Positions', onClick: () => console.log('Split') },
+                { label: 'Charges', onClick: () => {} },
+                { label: 'Check Balance', onClick: () => {} },
+                { label: 'Fix Balance', onClick: () => {} },
+                { label: 'Fix Personal Data', onClick: () => {} },
+                { label: 'Bulk Closing', onClick: () => {} },
+                { label: 'Bulk Payments', onClick: () => {} },
+                { label: 'Split Positions', onClick: () => {} },
             ]
         },
-        { label: 'Internal Mail / Email', onClick: () => console.log('Mail') },
-        { label: 'Push Notification / SMS', onClick: () => console.log('Push'), separator: true },
+        { label: 'Internal Mail / Email', onClick: () => {} },
+        { label: 'Push Notification / SMS', onClick: () => {}, separator: true },
 
         {
             label: 'Select By',
             hasSubmenu: true,
             submenu: [
-                { label: 'Group', onClick: () => console.log('Sel Group') },
-                { label: 'Country', onClick: () => console.log('Sel Country') },
-                { label: 'Custom', onClick: () => console.log('Sel Custom') },
+                { label: 'Group', onClick: () => {} },
+                { label: 'Country', onClick: () => {} },
+                { label: 'Custom', onClick: () => {} },
             ]
         },
-        { label: 'Filter', onClick: () => console.log('Filter'), hasSubmenu: true, submenu: [{ label: 'Advanced Filter', onClick: () => { } }] },
+        { label: 'Filter', onClick: () => {}, hasSubmenu: true, submenu: [{ label: 'Advanced Filter', onClick: () => { } }] },
         {
             label: 'Copy As',
             hasSubmenu: true,
             submenu: [
-                { label: 'Copy to Clipboard', onClick: () => console.log('Copy') },
-                { label: 'CSV', onClick: () => console.log('CSV') },
-                { label: 'HTML', onClick: () => console.log('HTML') },
+                { label: 'Copy to Clipboard', onClick: () => {} },
+                { label: 'CSV', onClick: () => {} },
+                { label: 'HTML', onClick: () => {} },
             ]
         },
-        { label: 'Export', onClick: () => console.log('Export') },
-        { label: 'Import', onClick: () => console.log('Import') },
-        { label: 'Find', onClick: () => console.log('Find'), shortcut: 'Ctrl+F', separator: true },
+        { label: 'Export', onClick: () => {} },
+        { label: 'Import', onClick: () => {} },
+        { label: 'Find', onClick: () => {}, shortcut: 'Ctrl+F', separator: true },
 
-        { label: 'Auto Scroll', onClick: () => console.log('Auto Scroll') },
-        { label: 'Auto Arrange', onClick: () => console.log('Auto Arrange'), shortcut: 'A', checked: true },
-        { label: 'Grid', onClick: () => console.log('Grid'), shortcut: 'G', checked: true, separator: true },
+        { label: 'Auto Scroll', onClick: () => {} },
+        { label: 'Auto Arrange', onClick: () => {}, shortcut: 'A', checked: true },
+        { label: 'Grid', onClick: () => {}, shortcut: 'G', checked: true, separator: true },
 
         {
             label: 'Columns',
@@ -388,7 +413,7 @@ export default function AccountsView() {
                                                 <span className="flex-1">{group}</span>
                                                 <span className="text-[#666] bg-[#252526] px-1 rounded-sm text-[9px]">{count}</span>
                                             </div>
-                                            {isExpanded && groupedAccounts[group]?.map(acc => (
+                                            {isExpanded && groupedAccounts[group]?.map((acc: any) => (
                                                 <div
                                                     key={acc.id}
                                                     onClick={(e) => handleRowClick(e, acc.id)}

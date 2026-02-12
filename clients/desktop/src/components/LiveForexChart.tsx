@@ -2,6 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { createChart, ColorType } from 'lightweight-charts';
 import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts';
 import './LiveForexChart.css';
+import { API_BASE_URL as API_BASE, WS_ENDPOINTS } from '../config/api';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 interface OHLCCandle {
     time: number; // UNIX timestamp
@@ -27,7 +29,7 @@ const TIMEFRAMES = [
     { label: '1D', value: '1d' }
 ];
 
-const API_BASE = 'http://localhost:7999';
+// API_BASE imported from config
 
 interface LiveForexChartProps {
     initialSymbol?: string;
@@ -105,15 +107,7 @@ export const LiveForexChart: React.FC<LiveForexChartProps> = ({
         fetchOHLCData();
     }, [selectedSymbol, selectedTimeframe]);
 
-    // WebSocket connection for live updates
-    useEffect(() => {
-        connectWebSocket();
-        return () => {
-            if (wsRef.current) {
-                wsRef.current.close();
-            }
-        };
-    }, [selectedSymbol]);
+    // WebSocket connection handled by useWebSocket hook and subscribe useEffect above
 
     const fetchOHLCData = async () => {
         try {
@@ -166,63 +160,42 @@ export const LiveForexChart: React.FC<LiveForexChartProps> = ({
         }
     };
 
-    const connectWebSocket = () => {
-        // Close existing connection
-        if (wsRef.current) {
-            wsRef.current.close();
-        }
+    // Use centralized WebSocket with auto-reconnection
+    const { subscribe } = useWebSocket({
+        url: WS_ENDPOINTS.general,
+        autoConnect: true,
+    });
 
-        try {
-            const ws = new WebSocket(`ws://localhost:7999/ws`);
+    // Subscribe to tick messages for selected symbol
+    useEffect(() => {
+        const unsubscribe = subscribe('*', (message: any) => {
+            try {
+                const data = message;
 
-            ws.onopen = () => {
-                console.log(`[WebSocket] Connected for ${selectedSymbol}`);
-                // Subscribe to symbol
-                ws.send(JSON.stringify({
-                    type: 'subscribe',
-                    symbol: selectedSymbol,
-                }));
-            };
+                if (data.type === 'tick' && data.symbol === selectedSymbol) {
+                    setCurrentPrice({
+                        bid: data.bid,
+                        ask: data.ask,
+                        spread: data.spread || (data.ask - data.bid),
+                    });
 
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-
-                    if (data.type === 'tick' && data.symbol === selectedSymbol) {
-                        setCurrentPrice({
-                            bid: data.bid,
-                            ask: data.ask,
-                            spread: data.spread || (data.ask - data.bid),
-                        });
-
-                        // Update latest candle close price
-                        setOhlc(prev => ({
-                            ...prev,
-                            close: (data.bid + data.ask) / 2,
-                            high: Math.max(prev.high, (data.bid + data.ask) / 2),
-                            low: Math.min(prev.low, (data.bid + data.ask) / 2),
-                        }));
-                    }
-                } catch (err) {
-                    console.error('Error parsing WebSocket message:', err);
+                    // Update latest candle close price
+                    setOhlc(prev => ({
+                        ...prev,
+                        close: (data.bid + data.ask) / 2,
+                        high: Math.max(prev.high, (data.bid + data.ask) / 2),
+                        low: Math.min(prev.low, (data.bid + data.ask) / 2),
+                    }));
                 }
-            };
+            } catch (err) {
+                console.error('Error parsing WebSocket message:', err);
+            }
+        });
 
-            ws.onerror = (error) => {
-                console.error('[WebSocket] Error:', error);
-            };
-
-            ws.onclose = () => {
-                console.log('[WebSocket] Disconnected');
-                // Reconnect after 3 seconds
-                setTimeout(() => connectWebSocket(), 3000);
-            };
-
-            wsRef.current = ws;
-        } catch (err) {
-            console.error('Error connecting WebSocket:', err);
-        }
-    };
+        return () => {
+            unsubscribe();
+        };
+    }, [selectedSymbol, subscribe]);
 
     const handleSymbolChange = (symbol: string) => {
         setSelectedSymbol(symbol);

@@ -20,6 +20,8 @@ const (
 	TF_H1  Timeframe = "H1"
 	TF_H4  Timeframe = "H4"
 	TF_D1  Timeframe = "D1"
+	TF_W1  Timeframe = "W1"
+	TF_MN1 Timeframe = "MN1"
 )
 
 // TimeframeSeconds returns the duration of a timeframe in seconds
@@ -37,6 +39,10 @@ func TimeframeSeconds(tf Timeframe) int64 {
 		return 14400
 	case TF_D1:
 		return 86400
+	case TF_W1:
+		return 604800 // 7 days
+	case TF_MN1:
+		return 2592000 // 30 days (approximate)
 	default:
 		return 60
 	}
@@ -54,7 +60,7 @@ type OHLCCache struct {
 // NewOHLCCache creates a new OHLC cache
 func NewOHLCCache(timeframes []Timeframe) *OHLCCache {
 	if len(timeframes) == 0 {
-		timeframes = []Timeframe{TF_M1, TF_M5, TF_H1, TF_D1}
+		timeframes = []Timeframe{TF_M1, TF_M5, TF_H1, TF_D1, TF_W1, TF_MN1}
 	}
 
 	cache := &OHLCCache{
@@ -91,8 +97,28 @@ func (c *OHLCCache) UpdateFromTick(symbol string, bid, ask float64, timestamp ti
 
 	// Update each timeframe
 	for _, tf := range c.timeframes {
-		tfSecs := TimeframeSeconds(tf)
-		candleTime := (ts / tfSecs) * tfSecs
+		var candleTime int64
+
+		// Special alignment for W1 and MN1
+		if tf == TF_W1 {
+			// Align to Monday 00:00 UTC
+			utc := timestamp.UTC()
+			weekday := int(utc.Weekday())
+			if weekday == 0 {
+				weekday = 7 // Treat Sunday as day 7
+			}
+			daysToMonday := weekday - 1
+			monday := utc.AddDate(0, 0, -daysToMonday)
+			candleTime = time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, time.UTC).Unix()
+		} else if tf == TF_MN1 {
+			// Align to 1st of month 00:00 UTC
+			utc := timestamp.UTC()
+			candleTime = time.Date(utc.Year(), utc.Month(), 1, 0, 0, 0, 0, time.UTC).Unix()
+		} else {
+			// Standard alignment
+			tfSecs := TimeframeSeconds(tf)
+			candleTime = (ts / tfSecs) * tfSecs
+		}
 
 		currentBar := c.currentBars[symbol][tf]
 
@@ -326,14 +352,34 @@ func (c *OHLCCache) RebuildFromTicks(symbol string, ticks []Tick) {
 
 	// Build bars for each timeframe
 	for _, tf := range c.timeframes {
-		tfSecs := TimeframeSeconds(tf)
 		barMap := make(map[int64]*OHLC)
 		var candleTimes []int64
 
 		for _, tick := range ticks {
 			price := (tick.Bid + tick.Ask) / 2
-			ts := tick.Timestamp.Unix()
-			candleTime := (ts / tfSecs) * tfSecs
+			var candleTime int64
+
+			// Special alignment for W1 and MN1
+			if tf == TF_W1 {
+				// Align to Monday 00:00 UTC
+				utc := tick.Timestamp.UTC()
+				weekday := int(utc.Weekday())
+				if weekday == 0 {
+					weekday = 7 // Treat Sunday as day 7
+				}
+				daysToMonday := weekday - 1
+				monday := utc.AddDate(0, 0, -daysToMonday)
+				candleTime = time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, time.UTC).Unix()
+			} else if tf == TF_MN1 {
+				// Align to 1st of month 00:00 UTC
+				utc := tick.Timestamp.UTC()
+				candleTime = time.Date(utc.Year(), utc.Month(), 1, 0, 0, 0, 0, time.UTC).Unix()
+			} else {
+				// Standard alignment
+				tfSecs := TimeframeSeconds(tf)
+				ts := tick.Timestamp.Unix()
+				candleTime = (ts / tfSecs) * tfSecs
+			}
 
 			if bar, exists := barMap[candleTime]; exists {
 				if price > bar.High {

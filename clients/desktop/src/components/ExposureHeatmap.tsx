@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { getWebSocketService } from '../services/websocket';
+import { WS_ENDPOINTS } from '../config/api';
 
 // ============================================
 // Types
@@ -298,7 +299,7 @@ export const ExposureHeatmap = () => {
 
   useEffect(() => {
     const ws = getWebSocketService(
-      import.meta.env.VITE_WS_URL || 'ws://localhost:7999/ws'
+      WS_ENDPOINTS.general
     );
 
     const unsubscribe = ws.subscribe('exposure-updates', (update: ExposureCell) => {

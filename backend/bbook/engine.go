@@ -165,7 +165,12 @@ type SymbolSpec struct {
 	VolumeStep       float64 `json:"volumeStep"`
 	MarginPercent    float64 `json:"marginPercent"`
 	CommissionPerLot float64 `json:"commissionPerLot"`
-	Disabled         bool    `json:"disabled"` // True if trading/feed is disabled
+	SpreadMarkup     float64 `json:"spreadMarkup"`  // Admin-configured spread markup in points
+	MinSpread        float64 `json:"minSpread"`     // Minimum allowed spread in points
+	MaxSpread        float64 `json:"maxSpread"`     // Maximum allowed spread in points
+	SwapLong         float64 `json:"swapLong"`      // Swap rate for long positions (pips per lot per day)
+	SwapShort        float64 `json:"swapShort"`     // Swap rate for short positions (pips per lot per day)
+	Disabled         bool    `json:"disabled"`      // True if trading/feed is disabled
 }
 
 // NewEngine creates a new B-Book engine
@@ -231,6 +236,14 @@ func (e *Engine) GetSymbols() []*SymbolSpec {
 	return symbols
 }
 
+// GetSymbol returns a specific symbol by name
+func (e *Engine) GetSymbol(symbol string) *SymbolSpec {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	return e.symbols[symbol]
+}
+
 // SetPriceCallback sets the function to get current market prices
 func (e *Engine) SetPriceCallback(fn func(symbol string) (bid, ask float64, ok bool)) {
 	e.priceCallback = fn
@@ -292,6 +305,20 @@ func (e *Engine) GetAccountByUser(userID string) []*Account {
 		}
 	}
 	return accounts
+}
+
+// UpdateAccountBalance updates an account's balance (for swap, commission, etc.)
+func (e *Engine) UpdateAccountBalance(accountID int64, amount float64) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	account, ok := e.accounts[accountID]
+	if !ok {
+		return fmt.Errorf("account %d not found", accountID)
+	}
+
+	account.Balance += amount
+	return nil
 }
 
 // GetAccountSummary computes full account state

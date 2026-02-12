@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/yourusername/trading-engine/backend/tickstore"
+	"github.com/epic1st/rtx/backend/tickstore"
 )
 
 // This is a standalone test program to verify SQLite integration.

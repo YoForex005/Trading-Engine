@@ -4,9 +4,10 @@ import { Plus, Clock } from 'lucide-react';
 import { ContextMenu, type ContextMenuItemConfig } from '../ui/ContextMenu';
 import { useContextMenu, useKeyboardShortcuts } from '../../hooks';
 import { useAppStore } from '../../store/useAppStore';
+import { API_BASE_URL as API_BASE } from '../../config/api';
 
 // API Base URL
-const API_BASE = 'http://localhost:7999';
+// API_BASE imported from config
 
 // Available symbol from API
 interface AvailableSymbol {

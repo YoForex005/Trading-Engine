@@ -7,7 +7,7 @@ import { useState, useMemo } from 'react';
 import { TrendingUp, TrendingDown, DollarSign, Shield, Target } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 
-const API_BASE = 'http://localhost:7999';
+import { API_BASE_URL as API_BASE } from '../config/api';
 
 type OrderType = 'MARKET' | 'LIMIT' | 'STOP' | 'STOP_LIMIT';
 type OrderSide = 'BUY' | 'SELL';

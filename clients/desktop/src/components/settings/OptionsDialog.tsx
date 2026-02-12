@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     X,
     Monitor,
@@ -16,8 +16,12 @@ import {
     Bot,
     Activity,
     Check,
-    AlertTriangle
+    AlertTriangle,
+    Trash2
 } from 'lucide-react';
+import { useSettingsStore, type SettingsState } from '../../store/useSettingsStore';
+import { useAppStore } from '../../store/useAppStore';
+import { NotificationPreferences } from './NotificationPreferences';
 
 interface OptionsDialogProps {
     isOpen: boolean;
@@ -28,15 +32,39 @@ type TabId = 'server' | 'charts' | 'trade' | 'automation' | 'events' | 'notifica
 
 export const OptionsDialog: React.FC<OptionsDialogProps> = ({ isOpen, onClose }) => {
     const [activeTab, setActiveTab] = useState<TabId>('server');
+    const snapshotRef = useRef<SettingsState | null>(null);
+
+    const getSnapshot = useSettingsStore((state) => state.getSnapshot);
+    const restoreSnapshot = useSettingsStore((state) => state.restoreSnapshot);
+
+    // Capture snapshot when dialog opens
+    useEffect(() => {
+        if (isOpen) {
+            snapshotRef.current = getSnapshot();
+        }
+    }, [isOpen, getSnapshot]);
+
+    // Handle Cancel - revert to snapshot
+    const handleCancel = () => {
+        if (snapshotRef.current) {
+            restoreSnapshot(snapshotRef.current);
+        }
+        onClose();
+    };
+
+    // Handle OK - just close (settings already persisted)
+    const handleOK = () => {
+        onClose();
+    };
 
     // Close on Escape
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && isOpen) onClose();
+            if (e.key === 'Escape' && isOpen) handleCancel();
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isOpen, onClose]);
+    }, [isOpen]);
 
     if (!isOpen) return null;
 
@@ -87,7 +115,7 @@ export const OptionsDialog: React.FC<OptionsDialogProps> = ({ isOpen, onClose })
                     {activeTab === 'trade' && <TradeTab />}
                     {activeTab === 'automation' && <AutomationTab />}
                     {activeTab === 'events' && <PlaceholderTab icon={<Activity size={48} />} title="Events" desc="Configure sound notifications and system events." />}
-                    {activeTab === 'notifications' && <PlaceholderTab icon={<Bell size={48} />} title="Notifications" desc="Manage push notifications to RTX5 Mobile." />}
+                    {activeTab === 'notifications' && <NotificationPreferences />}
                     {activeTab === 'email' && <PlaceholderTab icon={<Mail size={48} />} title="Email" desc="SMTP server configuration for alerts." />}
                     {activeTab === 'ftp' && <PlaceholderTab icon={<HardDrive size={48} />} title="FTP" desc="Automated report publishing settings." />}
                     {activeTab === 'community' && <PlaceholderTab icon={<Globe size={48} />} title="RTX5 Community" desc="Login to the proprietary RTX5 ecosystem." />}
@@ -96,10 +124,13 @@ export const OptionsDialog: React.FC<OptionsDialogProps> = ({ isOpen, onClose })
 
                 {/* Footer */}
                 <div className="h-14 bg-[#1e1e1e] border-t border-zinc-700 flex items-center justify-end px-4 gap-3">
-                    <button onClick={onClose} className="px-4 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 rounded transition-colors">
+                    <button onClick={handleCancel} className="px-4 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 rounded transition-colors">
                         Cancel
                     </button>
-                    <button onClick={onClose} className="px-4 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors shadow-sm">
+                    <button onClick={handleOK} className="px-4 py-1.5 text-xs font-medium bg-zinc-700 hover:bg-zinc-600 text-white rounded transition-colors">
+                        Apply
+                    </button>
+                    <button onClick={handleOK} className="px-4 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors shadow-sm">
                         OK
                     </button>
                 </div>
@@ -108,184 +139,423 @@ export const OptionsDialog: React.FC<OptionsDialogProps> = ({ isOpen, onClose })
     );
 };
 
-const ServerTab = () => (
-    <div className="space-y-6 text-xs text-zinc-300">
-        <div className="grid grid-cols-[100px_1fr] gap-4 items-center">
-            <label className="text-right text-zinc-400">Server:</label>
-            <select className="w-full bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 outline-none focus:border-blue-500">
-                <option>FlexyMarkets-Server</option>
-                <option>FlexyMarkets-Demo</option>
-            </select>
+const ServerTab = () => {
+    const server = useSettingsStore((state) => state.server);
+    const updateServerSettings = useSettingsStore((state) => state.updateServerSettings);
 
-            <label className="text-right text-zinc-400">Login:</label>
-            <input type="text" value="900500" readOnly className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 outline-none focus:border-blue-500" />
+    return (
+        <div className="space-y-6 text-xs text-zinc-300">
+            <div className="grid grid-cols-[100px_1fr] gap-4 items-center">
+                <label className="text-right text-zinc-400">Server:</label>
+                <select
+                    value={server.serverName}
+                    onChange={(e) => updateServerSettings({ serverName: e.target.value })}
+                    className="w-full bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 outline-none focus:border-blue-500"
+                >
+                    <option>FlexyMarkets-Server</option>
+                    <option>FlexyMarkets-Demo</option>
+                </select>
 
-            <label className="text-right text-zinc-400">Password:</label>
-            <div className="flex gap-2">
-                <input type="password" value="********" readOnly className="flex-1 bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 outline-none focus:border-blue-500" />
-                <button className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-200">Change</button>
+                <label className="text-right text-zinc-400">Login:</label>
+                <input type="text" value="900500" readOnly className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 outline-none focus:border-blue-500" />
+
+                <label className="text-right text-zinc-400">Password:</label>
+                <div className="flex gap-2">
+                    <input type="password" value="********" readOnly className="flex-1 bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 outline-none focus:border-blue-500" />
+                    <button className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-200">Change</button>
+                </div>
+            </div>
+
+            <div className="ml-[116px] space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={server.proxyEnabled}
+                        onChange={(e) => updateServerSettings({ proxyEnabled: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500 focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span>Enable proxy server</span>
+                    <button className="ml-auto px-3 py-0.5 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700">Proxy...</button>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={server.keepPersonalSettings}
+                        onChange={(e) => updateServerSettings({ keepPersonalSettings: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500 focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span>Keep personal settings and data at startup</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={server.enableNews}
+                        onChange={(e) => updateServerSettings({ enableNews: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500 focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span>Enable news</span>
+                </label>
             </div>
         </div>
+    );
+};
 
-        <div className="ml-[116px] space-y-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" className="rounded bg-zinc-700 border-zinc-600 text-blue-500 focus:ring-0 focus:ring-offset-0" />
-                <span>Enable proxy server</span>
-                <button className="ml-auto px-3 py-0.5 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700">Proxy...</button>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" defaultChecked className="rounded bg-zinc-700 border-zinc-600 text-blue-500 focus:ring-0 focus:ring-offset-0" />
-                <span>Keep personal settings and data at startup</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" defaultChecked className="rounded bg-zinc-700 border-zinc-600 text-blue-500 focus:ring-0 focus:ring-offset-0" />
-                <span>Enable news</span>
-            </label>
-        </div>
-    </div>
-);
+const ChartsTab = () => {
+    const charts = useSettingsStore((state) => state.charts);
+    const updateChartsSettings = useSettingsStore((state) => state.updateChartsSettings);
 
-const ChartsTab = () => (
-    <div className="space-y-4 text-xs text-zinc-300">
-        <div className="space-y-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" defaultChecked className="rounded bg-zinc-700 border-zinc-600 text-blue-500" />
-                <span>Show trade history</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" defaultChecked className="rounded bg-zinc-700 border-zinc-600 text-blue-500" />
-                <span>Show trade levels</span>
-            </label>
-            <div className="ml-6">
-                <select className="w-full bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1">
-                    <option>Enable dragging of trade levels</option>
-                    <option>Disable dragging</option>
+    return (
+        <div className="space-y-4 text-xs text-zinc-300">
+            <div className="space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={charts.showTradeHistory}
+                        onChange={(e) => updateChartsSettings({ showTradeHistory: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500"
+                    />
+                    <span>Show trade history</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={charts.showTradeLevels}
+                        onChange={(e) => updateChartsSettings({ showTradeLevels: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500"
+                    />
+                    <span>Show trade levels</span>
+                </label>
+                <div className="ml-6">
+                    <select
+                        value={charts.tradeLevelsDragging}
+                        onChange={(e) => updateChartsSettings({ tradeLevelsDragging: e.target.value as 'enabled' | 'disabled' })}
+                        className="w-full bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1"
+                    >
+                        <option value="enabled">Enable dragging of trade levels</option>
+                        <option value="disabled">Disable dragging</option>
+                    </select>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={charts.preloadChartData}
+                        onChange={(e) => updateChartsSettings({ preloadChartData: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500"
+                    />
+                    <span>Preload chart data for open positions and orders</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={charts.showObjectPropertiesAfterCreation}
+                        onChange={(e) => updateChartsSettings({ showObjectPropertiesAfterCreation: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500"
+                    />
+                    <span>Show object properties after creation</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={charts.selectObjectAfterCreation}
+                        onChange={(e) => updateChartsSettings({ selectObjectAfterCreation: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500"
+                    />
+                    <span>Select object after creation</span>
+                </label>
+            </div>
+
+            <div className="grid grid-cols-[120px_1fr] gap-4 pt-4 border-t border-zinc-700/50">
+                <label className="text-right text-zinc-400">Magnet sensitivity:</label>
+                <select
+                    value={charts.magnetSensitivity}
+                    onChange={(e) => updateChartsSettings({ magnetSensitivity: parseInt(e.target.value) })}
+                    className="w-20 bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1"
+                >
+                    <option value="5">5</option>
+                    <option value="10">10</option>
+                    <option value="20">20</option>
+                </select>
+
+                <label className="text-right text-zinc-400">Max bars in chart:</label>
+                <select
+                    value={charts.maxBarsInChart}
+                    onChange={(e) => updateChartsSettings({ maxBarsInChart: e.target.value === 'unlimited' ? 'unlimited' : parseInt(e.target.value) })}
+                    className="w-32 bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1"
+                >
+                    <option value="100000">100000</option>
+                    <option value="unlimited">Unlimited</option>
                 </select>
             </div>
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" defaultChecked className="rounded bg-zinc-700 border-zinc-600 text-blue-500" />
-                <span>Preload chart data for open positions and orders</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" className="rounded bg-zinc-700 border-zinc-600 text-blue-500" />
-                <span>Show object properties after creation</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" defaultChecked className="rounded bg-zinc-700 border-zinc-600 text-blue-500" />
-                <span>Select object after creation</span>
-            </label>
         </div>
+    );
+};
 
-        <div className="grid grid-cols-[120px_1fr] gap-4 pt-4 border-t border-zinc-700/50">
-            <label className="text-right text-zinc-400">Magnet sensitivity:</label>
-            <select className="w-20 bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1">
-                <option>10</option>
-                <option>5</option>
-                <option>20</option>
-            </select>
+const TradeTab = () => {
+    const trade = useSettingsStore((state) => state.trade);
+    const updateTradeSettings = useSettingsStore((state) => state.updateTradeSettings);
+    const selectedSymbol = useAppStore((state) => state.selectedSymbol);
 
-            <label className="text-right text-zinc-400">Max bars in chart:</label>
-            <select className="w-32 bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1">
-                <option>100000</option>
-                <option>Unlimited</option>
-            </select>
-        </div>
-    </div>
-);
+    return (
+        <div className="space-y-5 text-xs text-zinc-300">
+            <div className="grid grid-cols-[100px_1fr_1fr] gap-4 items-center">
+                <label className="text-right text-zinc-400">Symbol:</label>
+                <select
+                    value={trade.defaultSymbolMode}
+                    onChange={(e) => updateTradeSettings({ defaultSymbolMode: e.target.value as 'automatic' | 'last-used' })}
+                    className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 focus:border-blue-500"
+                >
+                    <option value="automatic">Automatic</option>
+                    <option value="last-used">Last Used</option>
+                </select>
+                <div className="text-zinc-500 italic">{selectedSymbol || 'EURUSD'}</div>
 
-const TradeTab = () => (
-    <div className="space-y-5 text-xs text-zinc-300">
-        <div className="grid grid-cols-[100px_1fr_1fr] gap-4 items-center">
-            <label className="text-right text-zinc-400">Symbol:</label>
-            <select className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 focus:border-blue-500">
-                <option>Automatic</option>
-                <option>Last Used</option>
-            </select>
-            <div className="text-zinc-500 italic">EURUSD</div>
+                <label className="text-right text-zinc-400">Volume:</label>
+                <select
+                    value={trade.defaultVolumeMode}
+                    onChange={(e) => updateTradeSettings({ defaultVolumeMode: e.target.value as 'last-used' | 'default' })}
+                    className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 focus:border-blue-500"
+                >
+                    <option value="last-used">Last Used</option>
+                    <option value="default">Default</option>
+                </select>
+                <input
+                    type="number"
+                    value={trade.defaultVolume}
+                    onChange={(e) => updateTradeSettings({ defaultVolume: parseFloat(e.target.value) || 0.01 })}
+                    step="0.01"
+                    min="0.01"
+                    className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 w-24"
+                />
 
-            <label className="text-right text-zinc-400">Volume:</label>
-            <select className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 focus:border-blue-500">
-                <option>Last Used</option>
-                <option>Default</option>
-            </select>
-            <input type="number" defaultValue="0.01" className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 w-24" />
+                <label className="text-right text-zinc-400">Deviation:</label>
+                <select
+                    value={trade.defaultDeviationMode}
+                    onChange={(e) => updateTradeSettings({ defaultDeviationMode: e.target.value as 'last-used' | 'default' })}
+                    className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 focus:border-blue-500"
+                >
+                    <option value="last-used">Last Used</option>
+                    <option value="default">Default</option>
+                </select>
+                <input
+                    type="number"
+                    value={trade.defaultDeviation}
+                    onChange={(e) => updateTradeSettings({ defaultDeviation: parseInt(e.target.value) || 0 })}
+                    min="0"
+                    className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 w-24"
+                />
+            </div>
 
-            <label className="text-right text-zinc-400">Deviation:</label>
-            <select className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 focus:border-blue-500">
-                <option>Last Used</option>
-                <option>Default</option>
-            </select>
-            <input type="number" defaultValue="0" className="bg-[#1e1e1e] border border-zinc-700 rounded px-2 py-1.5 w-24" />
-        </div>
-
-        <div className="pt-4 border-t border-zinc-700/50">
-            <label className="flex items-center gap-2 cursor-pointer group">
-                <div className="relative">
-                    <input type="checkbox" className="peer sr-only" />
-                    <div className="w-9 h-5 bg-zinc-700 rounded-full peer peer-checked:bg-blue-600 transition-colors"></div>
-                    <div className="absolute left-1 top-1 w-3 h-3 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
-                </div>
-                <span className="font-medium group-hover:text-white transition-colors">One Click Trading</span>
-            </label>
-            <p className="mt-2 text-zinc-500 ml-11 text-[11px]">
-                Allows performing trade operations with a single mouse click without additional confirmation.
-            </p>
-        </div>
-    </div>
-);
-
-const AutomationTab = () => (
-    <div className="space-y-5 text-xs text-zinc-300">
-        <div className="space-y-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" className="rounded bg-zinc-700 border-zinc-600 text-blue-500" />
-                <span className="font-medium text-zinc-200">Enable automated strategies</span>
-            </label>
-            <div className="ml-6 space-y-2 text-zinc-400">
-                <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" defaultChecked disabled className="rounded bg-zinc-700 border-zinc-600 text-zinc-500 cursor-not-allowed" />
-                    <span>Disable strategies when the account has been changed</span>
+            <div className="pt-4 border-t border-zinc-700/50">
+                <label className="flex items-center gap-2 cursor-pointer group">
+                    <div className="relative">
+                        <input
+                            type="checkbox"
+                            checked={trade.oneClickTrading}
+                            onChange={(e) => updateTradeSettings({ oneClickTrading: e.target.checked })}
+                            className="peer sr-only"
+                        />
+                        <div className="w-9 h-5 bg-zinc-700 rounded-full peer peer-checked:bg-blue-600 transition-colors"></div>
+                        <div className="absolute left-1 top-1 w-3 h-3 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                    </div>
+                    <span className="font-medium group-hover:text-white transition-colors">One Click Trading</span>
                 </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" defaultChecked disabled className="rounded bg-zinc-700 border-zinc-600 text-zinc-500 cursor-not-allowed" />
-                    <span>Disable strategies when the profile has been changed</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" className="rounded bg-zinc-700 border-zinc-600 text-zinc-500" />
-                    <span>Disable strategies when the charts symbol or period has been changed</span>
-                </label>
+                <p className="mt-2 text-zinc-500 ml-11 text-[11px]">
+                    Allows performing trade operations with a single mouse click without additional confirmation.
+                </p>
             </div>
         </div>
+    );
+};
 
-        <div className="space-y-3 pt-4 border-t border-zinc-700/50">
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" defaultChecked className="rounded bg-zinc-700 border-zinc-600 text-blue-500" />
-                <span className="flex items-center gap-2">
-                    External library access (DLL)
-                    <AlertTriangle size={12} className="text-amber-500" />
-                    <span className="text-zinc-500">(potentially dangerous, enable only for trusted applications)</span>
-                </span>
-            </label>
-        </div>
+const AutomationTab = () => {
+    const [newURL, setNewURL] = useState('');
+    const automation = useSettingsStore((state) => state.automation);
+    const updateAutomationSettings = useSettingsStore((state) => state.updateAutomationSettings);
+    const addAllowedURL = useSettingsStore((state) => state.addAllowedURL);
+    const removeAllowedURL = useSettingsStore((state) => state.removeAllowedURL);
 
-        <div className="space-y-2 pt-4 border-t border-zinc-700/50">
-            <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" defaultChecked className="rounded bg-zinc-700 border-zinc-600 text-blue-500" />
-                <span>Allow WebRequest for listed URL:</span>
-            </label>
-            <div className="border border-zinc-700 rounded bg-[#1e1e1e] h-32 overflow-y-auto">
-                <div className="flex items-center gap-2 px-2 py-1.5 border-b border-zinc-800 hover:bg-zinc-800/50">
-                    <Globe size={12} className="text-blue-400" />
-                    <span>https://backend.yoforexai.com</span>
+    const handleAddURL = () => {
+        if (newURL.trim() && newURL.startsWith('http')) {
+            addAllowedURL(newURL.trim());
+            setNewURL('');
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleAddURL();
+        }
+    };
+
+    return (
+        <div className="space-y-5 text-xs text-zinc-300">
+            <div className="space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={automation.enableStrategies}
+                        onChange={(e) => updateAutomationSettings({ enableStrategies: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500"
+                    />
+                    <span className="font-medium text-zinc-200">Enable automated strategies</span>
+                </label>
+                <div className="ml-6 space-y-2 text-zinc-400">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={automation.disableOnAccountChange}
+                            onChange={(e) => updateAutomationSettings({ disableOnAccountChange: e.target.checked })}
+                            disabled={!automation.enableStrategies}
+                            className="rounded bg-zinc-700 border-zinc-600 text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                        <span>Disable strategies when the account has been changed</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={automation.disableOnProfileChange}
+                            onChange={(e) => updateAutomationSettings({ disableOnProfileChange: e.target.checked })}
+                            disabled={!automation.enableStrategies}
+                            className="rounded bg-zinc-700 border-zinc-600 text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                        <span>Disable strategies when the profile has been changed</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={automation.disableOnChartChange}
+                            onChange={(e) => updateAutomationSettings({ disableOnChartChange: e.target.checked })}
+                            disabled={!automation.enableStrategies}
+                            className="rounded bg-zinc-700 border-zinc-600 text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                        <span>Disable strategies when the charts symbol or period has been changed</span>
+                    </label>
                 </div>
-                <div className="flex items-center gap-2 px-2 py-1.5 text-zinc-500 cursor-text hover:bg-zinc-800/50">
-                    <span className="text-emerald-500 font-bold">+</span>
-                    <span className="italic">add new URL like 'https://api.rtx-terminal.com'</span>
+            </div>
+
+            <div className="space-y-3 pt-4 border-t border-zinc-700/50">
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={automation.allowDLL}
+                        onChange={(e) => updateAutomationSettings({ allowDLL: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500"
+                    />
+                    <span className="flex items-center gap-2">
+                        External library access (DLL)
+                        <AlertTriangle size={12} className="text-amber-500" />
+                        <span className="text-zinc-500">(potentially dangerous, enable only for trusted applications)</span>
+                    </span>
+                </label>
+            </div>
+
+            <div className="space-y-2 pt-4 border-t border-zinc-700/50">
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={automation.allowWebRequest}
+                        onChange={(e) => updateAutomationSettings({ allowWebRequest: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500"
+                    />
+                    <span>Allow WebRequest for listed URL:</span>
+                </label>
+                <div className="border border-zinc-700 rounded bg-[#1e1e1e] h-32 overflow-y-auto">
+                    {automation.allowedURLs.map((url, index) => (
+                        <div key={index} className="flex items-center gap-2 px-2 py-1.5 border-b border-zinc-800 hover:bg-zinc-800/50 group">
+                            <Globe size={12} className="text-blue-400" />
+                            <span className="flex-1">{url}</span>
+                            <button
+                                onClick={() => removeAllowedURL(url)}
+                                className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
+                            >
+                                <Trash2 size={12} />
+                            </button>
+                        </div>
+                    ))}
+                    <div className="flex items-center gap-2 px-2 py-1.5">
+                        <span className="text-emerald-500 font-bold">+</span>
+                        <input
+                            type="text"
+                            value={newURL}
+                            onChange={(e) => setNewURL(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            placeholder="https://api.example.com"
+                            className="flex-1 bg-transparent outline-none text-zinc-300 placeholder:text-zinc-600"
+                        />
+                        {newURL && (
+                            <button
+                                onClick={handleAddURL}
+                                className="text-emerald-500 hover:text-emerald-400 text-[10px] font-medium"
+                            >
+                                ADD
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
-);
+    );
+};
+
+const NotificationsTab = () => {
+    const notifications = useSettingsStore((state) => state.notifications);
+    const updateNotificationsSettings = useSettingsStore((state) => state.updateNotificationsSettings);
+
+    return (
+        <div className="space-y-5 text-xs text-zinc-300">
+            <div className="space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={notifications.enablePushNotifications}
+                        onChange={(e) => updateNotificationsSettings({ enablePushNotifications: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500"
+                    />
+                    <span className="font-medium text-zinc-200">Enable push notifications</span>
+                </label>
+                <p className="ml-6 text-zinc-500 text-[11px]">
+                    Send notifications to RTX5 Mobile app for important trading events.
+                </p>
+            </div>
+
+            <div className="space-y-3 pt-4 border-t border-zinc-700/50">
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={notifications.enableSoundAlerts}
+                        onChange={(e) => updateNotificationsSettings({ enableSoundAlerts: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500"
+                    />
+                    <span className="font-medium text-zinc-200">Enable sound alerts</span>
+                </label>
+                <p className="ml-6 text-zinc-500 text-[11px]">
+                    Play audio notifications for order fills, stop-loss hits, and other events.
+                </p>
+            </div>
+
+            <div className="space-y-3 pt-4 border-t border-zinc-700/50">
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={notifications.enableEmailAlerts}
+                        onChange={(e) => updateNotificationsSettings({ enableEmailAlerts: e.target.checked })}
+                        className="rounded bg-zinc-700 border-zinc-600 text-blue-500"
+                    />
+                    <span className="font-medium text-zinc-200">Enable email alerts</span>
+                </label>
+                <p className="ml-6 text-zinc-500 text-[11px]">
+                    Send email notifications for critical account events and margin calls.
+                </p>
+            </div>
+
+            <div className="pt-4 border-t border-zinc-700/50 text-zinc-500">
+                <p className="text-[11px]">
+                    Configure specific notification rules and thresholds in the Events tab.
+                </p>
+            </div>
+        </div>
+    );
+};
 
 const PlaceholderTab = ({ icon, title, desc }: { icon: React.ReactNode, title: string, desc: string }) => (
     <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-50">

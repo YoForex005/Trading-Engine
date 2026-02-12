@@ -222,6 +222,7 @@ func (s *Server) HandlePlaceLimitOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
+		AccountID int64   `json:"accountId,omitempty"`
 		Symbol string  `json:"symbol"`
 		Side   string  `json:"side"`
 		Volume float64 `json:"volume"`
@@ -240,7 +241,7 @@ func (s *Server) HandlePlaceLimitOrder(w http.ResponseWriter, r *http.Request) {
 		side = orders.OrderSideSell
 	}
 
-	order, err := s.orderService.PlaceLimitOrder(req.Symbol, side, req.Volume, req.Price, req.SL, req.TP)
+	order, err := s.orderService.PlaceLimitOrder(req.AccountID, req.Symbol, side, req.Volume, req.Price, req.SL, req.TP)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -261,6 +262,7 @@ func (s *Server) HandlePlaceStopOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
+		AccountID    int64   `json:"accountId,omitempty"`
 		Symbol       string  `json:"symbol"`
 		Side         string  `json:"side"`
 		Volume       float64 `json:"volume"`
@@ -279,7 +281,7 @@ func (s *Server) HandlePlaceStopOrder(w http.ResponseWriter, r *http.Request) {
 		side = orders.OrderSideSell
 	}
 
-	order, err := s.orderService.PlaceStopOrder(req.Symbol, side, req.Volume, req.TriggerPrice, req.SL, req.TP)
+	order, err := s.orderService.PlaceStopOrder(req.AccountID, req.Symbol, side, req.Volume, req.TriggerPrice, req.SL, req.TP)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -300,6 +302,7 @@ func (s *Server) HandlePlaceStopLimitOrder(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req struct {
+		AccountID    int64   `json:"accountId,omitempty"`
 		Symbol       string  `json:"symbol"`
 		Side         string  `json:"side"`
 		Volume       float64 `json:"volume"`
@@ -319,7 +322,7 @@ func (s *Server) HandlePlaceStopLimitOrder(w http.ResponseWriter, r *http.Reques
 		side = orders.OrderSideSell
 	}
 
-	order, err := s.orderService.PlaceStopLimitOrder(req.Symbol, side, req.Volume, req.TriggerPrice, req.LimitPrice, req.SL, req.TP)
+	order, err := s.orderService.PlaceStopLimitOrder(req.AccountID, req.Symbol, side, req.Volume, req.TriggerPrice, req.LimitPrice, req.SL, req.TP)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

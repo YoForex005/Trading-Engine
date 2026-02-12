@@ -12,8 +12,8 @@ import type {
   ListWorkspacesResponse,
   DeleteWorkspaceResponse,
 } from '../types/workspace';
+import { API_BASE_URL } from '../config/api';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:7999';
 const DEFAULT_TIMEOUT = 10000;
 
 class ApiError extends Error {

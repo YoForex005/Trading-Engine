@@ -17,6 +17,17 @@ interface UseWebSocketOptions {
     reconnectInterval?: number;
 }
 
+/**
+ * Get JWT token from localStorage
+ */
+function getAuthToken(): string | null {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('admin_token') ||
+           localStorage.getItem('rtx_token') ||
+           localStorage.getItem('jwt_token') ||
+           null;
+}
+
 export function useWebSocket({ url, token, onMessage, reconnectInterval = 3000 }: UseWebSocketOptions) {
     const [isConnected, setIsConnected] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -24,14 +35,14 @@ export function useWebSocket({ url, token, onMessage, reconnectInterval = 3000 }
     const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const connect = useCallback(() => {
-        // Build URL with token if provided
-        const wsUrl = token ? `${url}?token=${token}` : url;
+        // Build URL with token - try param first, then localStorage
+        const authToken = token || getAuthToken();
+        const wsUrl = authToken ? `${url}?token=${encodeURIComponent(authToken)}` : url;
 
         try {
             const ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
-                console.log('[WS] Connected to', url);
                 setIsConnected(true);
                 setError(null);
             };
@@ -48,14 +59,12 @@ export function useWebSocket({ url, token, onMessage, reconnectInterval = 3000 }
             };
 
             ws.onclose = () => {
-                console.log('[WS] Disconnected');
                 setIsConnected(false);
                 wsRef.current = null;
 
                 // Auto-reconnect
                 if (reconnectInterval > 0) {
                     reconnectTimeoutRef.current = setTimeout(() => {
-                        console.log('[WS] Attempting reconnect...');
                         connect();
                     }, reconnectInterval);
                 }

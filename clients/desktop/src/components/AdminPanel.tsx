@@ -15,6 +15,7 @@ import {
   GitMerge,
 } from 'lucide-react';
 import { RoutingRulesPanel } from './RoutingRulesPanel';
+import { API_ENDPOINTS, buildAdminUrl } from '../config/api';
 
 type ExecutionMode = 'ABOOK' | 'BBOOK';
 
@@ -71,7 +72,7 @@ export const AdminPanel = () => {
   const fetchConfig = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:7999/api/config');
+      const response = await fetch(API_ENDPOINTS.admin.config);
       if (!response.ok) {
         if (response.status === 404) {
           showMessage('error', 'Config endpoint not found (404)');
@@ -92,7 +93,7 @@ export const AdminPanel = () => {
 
   const fetchLiquidityProviders = async () => {
     try {
-      const response = await fetch('http://localhost:7999/admin/lps');
+      const response = await fetch(API_ENDPOINTS.admin.lp);
       if (!response.ok) {
         console.error('Failed to fetch LPs:', response.status);
       } else {
@@ -106,7 +107,7 @@ export const AdminPanel = () => {
 
   const fetchSymbols = async () => {
     try {
-      const response = await fetch('http://localhost:7999/admin/symbols');
+      const response = await fetch(API_ENDPOINTS.admin.symbols);
       if (!response.ok) {
         console.error('Failed to fetch symbols:', response.status);
       } else {
@@ -123,7 +124,7 @@ export const AdminPanel = () => {
 
     setSaving(true);
     try {
-      const response = await fetch('http://localhost:7999/api/config', {
+      const response = await fetch(API_ENDPOINTS.admin.config, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
@@ -150,7 +151,7 @@ export const AdminPanel = () => {
 
   const toggleLP = async (lpName: string) => {
     try {
-      const response = await fetch(`http://localhost:7999/admin/lps/${lpName}/toggle`, {
+      const response = await fetch(buildAdminUrl(`/admin/lps/${lpName}/toggle`), {
         method: 'POST',
       });
 
@@ -172,7 +173,7 @@ export const AdminPanel = () => {
 
   const updateSymbol = async (symbol: string, updates: Partial<SymbolConfig>) => {
     try {
-      const response = await fetch(`http://localhost:7999/admin/symbols/${symbol}`, {
+      const response = await fetch(buildAdminUrl(`/admin/symbols/${symbol}`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),

@@ -3,7 +3,7 @@
  * Integrates historical data caching with live chart display
  */
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TradingChart } from './TradingChart';
 import { useHistoricalData } from '../hooks/useHistoricalData';
 import { Download, AlertCircle, Loader2 } from 'lucide-react';
@@ -26,7 +26,7 @@ export const ChartWithHistory: React.FC<ChartWithHistoryProps> = ({
   symbol,
   currentPrice,
   chartType = 'candlestick',
-  timeframe = '1m',
+  timeframe = 'M1',
   positions = [],
   onClosePosition,
   onModifyPosition,
@@ -37,10 +37,10 @@ export const ChartWithHistory: React.FC<ChartWithHistoryProps> = ({
   const [downloadProgress, setDownloadProgress] = useState(0);
 
   // Calculate default date range (last 7 days)
-  const defaultDateRange = useMemo<DateRange>(() => ({
+  const [defaultDateRange] = useState<DateRange>(() => ({
     from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     to: new Date().toISOString().split('T')[0]
-  }), []);
+  }));
 
   const dateRange = historicalDateRange || defaultDateRange;
 

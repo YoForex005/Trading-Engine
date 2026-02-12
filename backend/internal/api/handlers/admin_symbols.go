@@ -160,8 +160,13 @@ func (h *APIHandler) HandleAdminUpdateSymbol(w http.ResponseWriter, r *http.Requ
 		current.CommissionPerLot = *req.CommissionPerLot
 	}
 
-	// Note: spread_markup is currently not stored in SymbolSpec, but is accepted for future compatibility
-	// It can be implemented in a future update if needed
+	if req.SpreadMarkup != nil {
+		if *req.SpreadMarkup < 0 {
+			http.Error(w, "spread_markup must be non-negative", http.StatusBadRequest)
+			return
+		}
+		current.SpreadMarkup = *req.SpreadMarkup
+	}
 
 	// Update symbol in engine
 	h.engine.UpdateSymbol(current)

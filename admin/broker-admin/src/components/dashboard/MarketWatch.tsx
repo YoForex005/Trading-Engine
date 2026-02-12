@@ -3,9 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ChevronDown, ChevronUp, Plus, X, Search, Settings, RefreshCw } from 'lucide-react';
 import { useWebSocket, MarketTick } from '@/hooks/useWebSocket';
-
-const API_BASE = 'http://localhost:7999';
-const WS_URL = 'ws://localhost:7999/ws';
+import { API_CONFIG } from '@/config/api';
 
 interface SymbolData {
     symbol: string;
@@ -16,6 +14,8 @@ interface SymbolData {
     dailyChangePercent: number;
     lastUpdate: number;
     lp: string;
+    spreadInPoints?: number; // Calculated spread in points
+    spreadStatus?: 'normal' | 'warning' | 'high'; // Spread quality indicator
 }
 
 interface SymbolSpec {
@@ -39,24 +39,27 @@ export default function MarketWatch() {
     const [searchQuery, setSearchQuery] = useState('');
     const [sortColumn, setSortColumn] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+    const [showSpreadColumn, setShowSpreadColumn] = useState(true);
 
-    // Load watchlist from localStorage on mount
+    // Load watchlist from localStorage on mount (client-side only - useEffect is already safe)
     useEffect(() => {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-            try {
-                setWatchlist(JSON.parse(saved));
-            } catch {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                try {
+                    setWatchlist(JSON.parse(saved));
+                } catch {
+                    setWatchlist(DEFAULT_WATCHLIST);
+                }
+            } else {
                 setWatchlist(DEFAULT_WATCHLIST);
             }
-        } else {
-            setWatchlist(DEFAULT_WATCHLIST);
         }
     }, []);
 
-    // Save watchlist to localStorage when it changes
+    // Save watchlist to localStorage when it changes (client-side only)
     useEffect(() => {
-        if (watchlist.length > 0) {
+        if (typeof window !== 'undefined' && watchlist.length > 0) {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(watchlist));
         }
     }, [watchlist]);
@@ -65,16 +68,77 @@ export default function MarketWatch() {
     useEffect(() => {
         async function fetchSymbols() {
             try {
-                const res = await fetch(`${API_BASE}/api/symbols`);
-                if (res.ok) {
-                    const data = await res.json();
-                    setAllSymbols(data.symbols || []);
-                }
+                // Import api dynamically to avoid circular dependencies
+                const { api } = await import('@/services/apiClient');
+                const data = await api.get<{ symbols: SymbolSpec[] }>(API_CONFIG.SYMBOLS);
+                setAllSymbols(data.symbols || []);
             } catch (e) {
                 console.error('Failed to fetch symbols:', e);
             }
         }
         fetchSymbols();
+    }, []);
+
+    // Calculate spread in points based on symbol type
+    const calculateSpreadInPoints = useCallback((symbol: string, bid: number, ask: number) => {
+        const spread = ask - bid;
+
+        // Determine symbol type and apply appropriate multiplier
+        if (/^[A-Z]{6}$/.test(symbol)) {
+            // Standard forex pair (e.g., EURUSD, GBPJPY)
+            if (symbol.includes('JPY')) {
+                // JPY pairs have 3 decimal places (e.g., 123.456)
+                return Math.round(spread * 1000);
+            } else {
+                // Most forex pairs have 5 decimal places (e.g., 1.23456)
+                return Math.round(spread * 100000);
+            }
+        } else if (symbol.startsWith('XAU') || symbol.startsWith('XAG')) {
+            // Precious metals (2 decimal places typically)
+            return Math.round(spread * 100);
+        } else if (symbol.includes('BTC') || symbol.includes('ETH')) {
+            // Crypto (2 decimal places typically)
+            return Math.round(spread * 100);
+        } else {
+            // Indices, commodities (2 decimal places typically)
+            return Math.round(spread * 100);
+        }
+    }, []);
+
+    // Determine typical spread ranges for color coding
+    const getSpreadStatus = useCallback((symbol: string, spreadInPoints: number): 'normal' | 'warning' | 'high' => {
+        // Typical spread thresholds (in points) - these are approximate market standards
+        const typicalSpreads: Record<string, number> = {
+            // Major forex pairs
+            'EURUSD': 10,
+            'GBPUSD': 15,
+            'USDJPY': 10,
+            'USDCHF': 15,
+            'AUDUSD': 15,
+            'USDCAD': 15,
+            'NZDUSD': 20,
+            // Cross pairs
+            'EURJPY': 20,
+            'GBPJPY': 25,
+            'EURGBP': 15,
+            // Precious metals
+            'XAUUSD': 50,
+            'XAGUSD': 30,
+            // Crypto
+            'BTCUSD': 100,
+            'ETHUSD': 50,
+        };
+
+        // Default typical spread if symbol not in list
+        const typicalSpread = typicalSpreads[symbol] || 20;
+
+        if (spreadInPoints <= typicalSpread) {
+            return 'normal'; // Green
+        } else if (spreadInPoints <= typicalSpread * 2) {
+            return 'warning'; // Yellow
+        } else {
+            return 'high'; // Red
+        }
     }, []);
 
     // Handle incoming WebSocket ticks
@@ -91,6 +155,10 @@ export default function MarketWatch() {
                 ? tick.spread
                 : (tick.ask - tick.bid);
 
+            // Calculate spread in points
+            const spreadInPoints = calculateSpreadInPoints(tick.symbol, tick.bid, tick.ask);
+            const spreadStatus = getSpreadStatus(tick.symbol, spreadInPoints);
+
             return {
                 ...prev,
                 [tick.symbol]: {
@@ -98,6 +166,8 @@ export default function MarketWatch() {
                     bid: tick.bid,
                     ask: tick.ask,
                     spread: spread,
+                    spreadInPoints,
+                    spreadStatus,
                     dailyChange: Math.abs(dailyChange) < 0.0001 ? (existing?.dailyChange || 0) : dailyChange,
                     dailyChangePercent: Math.abs(dailyChangePercent) < 0.0001 ? (existing?.dailyChangePercent || 0) : dailyChangePercent,
                     lastUpdate: tick.timestamp,
@@ -105,11 +175,11 @@ export default function MarketWatch() {
                 }
             };
         });
-    }, []);
+    }, [calculateSpreadInPoints, getSpreadStatus]);
 
     // Connect to WebSocket (no auth for now, can add JWT later)
     const { isConnected, error } = useWebSocket({
-        url: WS_URL,
+        url: API_CONFIG.MARKET_WS_URL,
         onMessage: handleTick,
     });
 
@@ -146,6 +216,8 @@ export default function MarketWatch() {
             dailyChangePercent: 0,
             lastUpdate: 0,
             lp: '-',
+            spreadInPoints: 0,
+            spreadStatus: 'normal' as const,
         });
 
         if (!sortColumn) return data;
@@ -180,12 +252,24 @@ export default function MarketWatch() {
         return price.toFixed(isForex ? 5 : 2);
     };
 
-    // Format spread in pips
-    const formatSpread = (spread: number) => {
-        if (!spread || spread === 0) return '-';
-        // Display as integer pips (spread * 10000 for forex pairs)
-        const pips = Math.round(spread * 10000);
-        return pips > 0 ? pips.toString() : '-';
+    // Format spread in points (already calculated)
+    const formatSpreadInPoints = (spreadInPoints: number | undefined) => {
+        if (!spreadInPoints || spreadInPoints === 0) return '-';
+        return spreadInPoints.toString();
+    };
+
+    // Get spread color based on status
+    const getSpreadColor = (status: 'normal' | 'warning' | 'high' | undefined) => {
+        switch (status) {
+            case 'normal':
+                return 'text-[#2ECC71]'; // Green
+            case 'warning':
+                return 'text-[#F39C12]'; // Yellow/Orange
+            case 'high':
+                return 'text-[#E74C3C]'; // Red
+            default:
+                return 'text-[#888]'; // Gray
+        }
     };
 
     return (
@@ -204,13 +288,20 @@ export default function MarketWatch() {
                     ) : (
                         <div className="w-2 h-2 bg-[#E74C3C] rounded-full" title={error || 'Disconnected'} />
                     )}
+                    <button
+                        onClick={() => setShowSpreadColumn(!showSpreadColumn)}
+                        className={`text-[9px] px-1 rounded ${showSpreadColumn ? 'bg-[#3B82F6] text-white' : 'bg-[#444] text-[#888]'} hover:opacity-80`}
+                        title={showSpreadColumn ? 'Hide spread column' : 'Show spread column'}
+                    >
+                        Spread
+                    </button>
                     <RefreshCw size={10} className="text-[#666] hover:text-white cursor-pointer" />
                     <Settings size={10} className="text-[#666] hover:text-white cursor-pointer" />
                 </div>
             </div>
 
             {/* Column Headers */}
-            <div className="grid grid-cols-[1fr_60px_60px_35px_55px] gap-0 bg-[#1E2026] border-b border-[#383A42] text-[#888] text-[9px]">
+            <div className={`grid ${showSpreadColumn ? 'grid-cols-[1fr_55px_55px_45px_55px]' : 'grid-cols-[1fr_60px_60px_55px]'} gap-0 bg-[#1E2026] border-b border-[#383A42] text-[#888] text-[9px]`}>
                 <div className="px-2 py-1 cursor-pointer hover:text-white" onClick={() => handleSort('symbol')}>
                     Symbol {sortColumn === 'symbol' && (sortDirection === 'asc' ? '▲' : '▼')}
                 </div>
@@ -220,9 +311,15 @@ export default function MarketWatch() {
                 <div className="px-1 py-1 text-right cursor-pointer hover:text-white" onClick={() => handleSort('ask')}>
                     Ask
                 </div>
-                <div className="px-1 py-1 text-right cursor-pointer hover:text-white" onClick={() => handleSort('spread')}>
-                    Spr...
-                </div>
+                {showSpreadColumn && (
+                    <div
+                        className="px-1 py-1 text-right cursor-pointer hover:text-white"
+                        onClick={() => handleSort('spreadInPoints')}
+                        title="Sort by spread"
+                    >
+                        Spread {sortColumn === 'spreadInPoints' && (sortDirection === 'asc' ? '▲' : '▼')}
+                    </div>
+                )}
                 <div className="px-1 py-1 text-right cursor-pointer hover:text-white" onClick={() => handleSort('dailyChangePercent')}>
                     Daily C...
                 </div>
@@ -234,14 +331,33 @@ export default function MarketWatch() {
                     const changeColor = data.dailyChangePercent >= 0 ? 'text-[#2ECC71]' : 'text-[#E74C3C]';
                     const bidColor = data.bid > 0 ? 'text-[#E74C3C]' : 'text-[#888]';
                     const askColor = data.ask > 0 ? 'text-[#3B82F6]' : 'text-[#888]';
+                    const spreadColor = getSpreadColor(data.spreadStatus);
 
                     return (
                         <div
                             key={data.symbol}
-                            className="grid grid-cols-[1fr_60px_60px_35px_55px] gap-0 border-b border-[#252526] hover:bg-[#25272E] group"
+                            className={`grid ${showSpreadColumn ? 'grid-cols-[1fr_55px_55px_45px_55px]' : 'grid-cols-[1fr_60px_60px_55px]'} gap-0 border-b border-[#252526] hover:bg-[#25272E] group cursor-pointer`}
+                            onDoubleClick={() => {
+                                // Double-click opens in active/focused chart
+                                const event = new CustomEvent('chart:openSymbol', {
+                                    detail: { symbol: data.symbol, newWindow: false }
+                                });
+                                window.dispatchEvent(event);
+                            }}
                             onContextMenu={(e) => {
                                 e.preventDefault();
-                                removeSymbol(data.symbol);
+                                // Right-click menu: open in new chart or remove
+                                const shouldOpenNewChart = window.confirm(
+                                    `${data.symbol}\n\nClick OK to open in new chart\nClick Cancel to remove from watchlist`
+                                );
+                                if (shouldOpenNewChart) {
+                                    const event = new CustomEvent('chart:openSymbol', {
+                                        detail: { symbol: data.symbol, newWindow: true }
+                                    });
+                                    window.dispatchEvent(event);
+                                } else {
+                                    removeSymbol(data.symbol);
+                                }
                             }}
                         >
                             <div className="px-2 py-1 flex items-center gap-1 text-[#CCC]">
@@ -254,9 +370,11 @@ export default function MarketWatch() {
                             <div className={`px-1 py-1 text-right font-mono ${askColor}`}>
                                 {formatPrice(data.ask, data.symbol)}
                             </div>
-                            <div className="px-1 py-1 text-right font-mono text-[#CCC]">
-                                {formatSpread(data.spread)}
-                            </div>
+                            {showSpreadColumn && (
+                                <div className={`px-1 py-1 text-right font-mono ${spreadColor}`} title={`Spread: ${data.spreadStatus || 'unknown'}`}>
+                                    {formatSpreadInPoints(data.spreadInPoints)}
+                                </div>
+                            )}
                             <div className={`px-1 py-1 text-right font-mono ${changeColor}`}>
                                 {data.dailyChangePercent.toFixed(2)}%
                             </div>

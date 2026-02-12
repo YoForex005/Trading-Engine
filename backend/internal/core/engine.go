@@ -1,6 +1,7 @@
 package core
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -22,7 +23,8 @@ type Account struct {
 	FreeMargin    float64     `json:"freeMargin"`
 	MarginLevel   float64     `json:"marginLevel"`
 	Leverage      float64     `json:"leverage"`
-	MarginMode    string      `json:"marginMode"` // HEDGING or NETTING
+	MarginMode    string      `json:"marginMode"`    // HEDGING or NETTING (deprecated, use PositionMode)
+	PositionMode  string      `json:"positionMode"`  // "hedging" or "netting" - how positions are managed
 	Currency      string      `json:"currency"`
 	Status        string      `json:"status"` // ACTIVE, DISABLED
 	IsDemo        bool        `json:"isDemo"`
@@ -64,6 +66,27 @@ func (e *Engine) UpdateAccount(accountID int64, leverage float64, marginMode str
 	}
 
 	log.Printf("[B-Book] Account %s updated: Leverage=%.0f, Mode=%s", account.AccountNumber, account.Leverage, account.MarginMode)
+	return nil
+}
+
+// UpdatePositionMode updates an account's position mode
+func (e *Engine) UpdatePositionMode(accountID int64, positionMode string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	account, ok := e.accounts[accountID]
+	if !ok {
+		return errors.New("account not found")
+	}
+
+	// Validate position mode
+	if err := ValidatePositionMode(positionMode); err != nil {
+		return err
+	}
+
+	// Update position mode
+	account.PositionMode = positionMode
+	log.Printf("[B-Book] Account %s position mode updated to %s", account.AccountNumber, positionMode)
 	return nil
 }
 
@@ -139,19 +162,27 @@ type AccountSummary struct {
 	OpenPositions int     `json:"openPositions"`
 }
 
+// NotificationSender interface for sending notifications from engine
+type NotificationSender interface {
+	Send(userID, notifType string, data map[string]interface{}) error
+}
+
 // Engine is the B-Book execution engine
 type Engine struct {
-	mu             sync.RWMutex
-	accounts       map[int64]*Account
-	positions      map[int64]*Position
-	orders         map[int64]*Order
-	trades         []Trade
-	symbols        map[string]*SymbolSpec
-	nextPositionID int64
-	nextOrderID    int64
-	nextTradeID    int64
-	priceCallback  func(symbol string) (bid, ask float64, ok bool)
-	ledger         *Ledger
+	mu                  sync.RWMutex
+	accounts            map[int64]*Account
+	positions           map[int64]*Position
+	orders              map[int64]*Order
+	trades              []Trade
+	symbols             map[string]*SymbolSpec
+	nextPositionID      int64
+	nextOrderID         int64
+	nextTradeID         int64
+	priceCallback       func(symbol string) (bid, ask float64, ok bool)
+	ledger              *Ledger
+	db                  *sql.DB // PostgreSQL connection for persistence
+	notificationManager NotificationSender // Notification manager for order events
+	nettingEngine       *NettingEngine     // Netting mode position manager
 }
 
 // SymbolSpec contains symbol specifications
@@ -165,7 +196,12 @@ type SymbolSpec struct {
 	VolumeStep       float64 `json:"volumeStep"`
 	MarginPercent    float64 `json:"marginPercent"`
 	CommissionPerLot float64 `json:"commissionPerLot"`
-	Disabled         bool    `json:"disabled"` // True if trading/feed is disabled
+	SpreadMarkup     float64 `json:"spreadMarkup"`  // Admin-configured spread markup in points
+	MinSpread        float64 `json:"minSpread"`     // Minimum allowed spread in points
+	MaxSpread        float64 `json:"maxSpread"`     // Maximum allowed spread in points
+	SwapLong         float64 `json:"swapLong"`      // Swap rate for long positions (pips per lot per day)
+	SwapShort        float64 `json:"swapShort"`     // Swap rate for short positions (pips per lot per day)
+	Disabled         bool    `json:"disabled"`      // True if trading/feed is disabled
 }
 
 // NewEngine creates a new B-Book engine
@@ -181,6 +217,12 @@ func NewEngine() *Engine {
 		nextTradeID:    1,
 		ledger:         NewLedger(),
 	}
+
+	// Initialize netting engine
+	e.nettingEngine = NewNettingEngine(e)
+
+	// Wire ledger back to engine for persistence
+	e.ledger.SetEngine(e)
 
 	// Load symbols dynamically from tick data directory
 	tickDataDir := "./data/ticks"
@@ -311,6 +353,18 @@ func (e *Engine) CreateAccount(userID, username, password string, isDemo bool) *
 		username = fmt.Sprintf("RTX-%06d", id)
 	}
 
+	// Get default position mode from environment variable
+	defaultPositionMode := os.Getenv("DEFAULT_POSITION_MODE")
+	if defaultPositionMode == "" {
+		defaultPositionMode = string(PositionModeHedging) // Default to hedging if not set
+	}
+
+	// Validate position mode, fallback to hedging if invalid
+	if err := ValidatePositionMode(defaultPositionMode); err != nil {
+		log.Printf("[B-Book] WARNING: Invalid DEFAULT_POSITION_MODE '%s', using hedging", defaultPositionMode)
+		defaultPositionMode = string(PositionModeHedging)
+	}
+
 	account := &Account{
 		ID:            id,
 		AccountNumber: fmt.Sprintf("RTX-%06d", id),
@@ -320,12 +374,20 @@ func (e *Engine) CreateAccount(userID, username, password string, isDemo bool) *
 		Currency:      "USD",
 		Balance:       0,
 		Leverage:      100,
-		MarginMode:    "HEDGING",
+		MarginMode:    "HEDGING", // Deprecated, use PositionMode
+		PositionMode:  defaultPositionMode,
 		Status:        "ACTIVE",
 		IsDemo:        isDemo,
+		CreatedAt:     time.Now().Unix(),
 	}
 
 	e.accounts[id] = account
+
+	// Persist to database
+	if err := e.persistAccount(account); err != nil {
+		log.Printf("[B-Book] ERROR: Failed to persist account to database: %v", err)
+	}
+
 	log.Printf("[B-Book] Created account %s (User: %s, Username: %s)", account.AccountNumber, userID, username)
 	return account
 }
@@ -348,6 +410,18 @@ func (e *Engine) GetAccountByUser(userID string) []*Account {
 		if acc.UserID == userID {
 			accounts = append(accounts, acc)
 		}
+	}
+	return accounts
+}
+
+// GetAllAccounts returns all accounts
+func (e *Engine) GetAllAccounts() []*Account {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	accounts := make([]*Account, 0, len(e.accounts))
+	for _, acc := range e.accounts {
+		accounts = append(accounts, acc)
 	}
 	return accounts
 }
@@ -482,44 +556,77 @@ func (e *Engine) ExecuteMarketOrder(accountID int64, symbol, side string, volume
 	}
 	e.orders[orderID] = order
 
-	// Create position
-	positionID := e.nextPositionID
-	e.nextPositionID++
+	// Position handling: branch based on account's position mode
+	var position *Position
+	var realizedPnL float64
 
-	position := &Position{
-		ID:           positionID,
-		AccountID:    accountID,
-		Symbol:       symbol,
-		Side:         side,
-		Volume:       volume,
-		OpenPrice:    fillPrice,
-		CurrentPrice: fillPrice,
-		OpenTime:     now,
-		SL:           sl,
-		TP:           tp,
-		Commission:   commission,
-		Status:       "OPEN",
+	if account.PositionMode == string(PositionModeNetting) {
+		// NETTING MODE: Use netting engine to adjust or create position
+		var err error
+		position, realizedPnL, err = e.nettingEngine.AdjustPositionUnlocked(accountID, symbol, side, volume, fillPrice, sl, tp, commission)
+		if err != nil {
+			return nil, fmt.Errorf("netting position adjustment failed: %w", err)
+		}
+
+		// If position was fully closed (nil), set order status accordingly
+		if position == nil {
+			order.Status = "CLOSED"
+			log.Printf("[B-Book] NETTING MODE: Position fully closed via opposite order. Realized P&L: %.2f", realizedPnL)
+		} else {
+			order.PositionID = position.ID
+		}
+	} else {
+		// HEDGING MODE (default): Create new position every time
+		positionID := e.nextPositionID
+		e.nextPositionID++
+
+		position = &Position{
+			ID:           positionID,
+			AccountID:    accountID,
+			Symbol:       symbol,
+			Side:         side,
+			Volume:       volume,
+			OpenPrice:    fillPrice,
+			CurrentPrice: fillPrice,
+			OpenTime:     now,
+			SL:           sl,
+			TP:           tp,
+			Commission:   commission,
+			Status:       "OPEN",
+		}
+		e.positions[positionID] = position
+		order.PositionID = positionID
 	}
-	e.positions[positionID] = position
 
-	order.PositionID = positionID
+	// Derive positionID for logging/notifications (position may be nil in netting close)
+	var positionID int64
+	if position != nil {
+		positionID = position.ID
+	}
 
 	// Create trade record
 	tradeID := e.nextTradeID
 	e.nextTradeID++
 
 	trade := Trade{
-		ID:         tradeID,
-		OrderID:    orderID,
-		PositionID: positionID,
-		AccountID:  accountID,
-		Symbol:     symbol,
-		Side:       side,
-		Volume:     volume,
-		Price:      fillPrice,
-		Commission: commission,
-		ExecutedAt: now,
+		ID:          tradeID,
+		OrderID:     orderID,
+		PositionID:  0, // Will be set below if position exists
+		AccountID:   accountID,
+		Symbol:      symbol,
+		Side:        side,
+		Volume:      volume,
+		Price:       fillPrice,
+		RealizedPnL: realizedPnL,
+		Commission:  commission,
+		ExecutedAt:  now,
 	}
+
+	// Set position ID if position exists (may be nil in netting mode if fully closed)
+	if position != nil {
+		trade.PositionID = position.ID
+	}
+
 	e.trades = append(e.trades, trade)
 
 	// Deduct commission from balance
@@ -528,7 +635,59 @@ func (e *Engine) ExecuteMarketOrder(accountID int64, symbol, side string, volume
 		e.ledger.RecordCommission(accountID, -commission, tradeID)
 	}
 
-	log.Printf("[B-Book] EXECUTED: %s %s %.2f lots @ %.5f (Position #%d)", side, symbol, volume, fillPrice, positionID)
+	// Apply realized P&L from netting (if any)
+	if realizedPnL != 0 {
+		account.Balance += realizedPnL
+		log.Printf("[B-Book] Applied realized P&L to balance: %.2f (new balance: %.2f)", realizedPnL, account.Balance)
+	}
+
+	// Persist to database in transaction
+	if e.db != nil {
+		tx, err := e.db.Begin()
+		if err == nil {
+			// Persist order, position, and trade atomically
+			if err := e.persistOrderTx(tx, order); err != nil {
+				tx.Rollback()
+				log.Printf("[B-Book] ERROR: Failed to persist order: %v", err)
+			} else if err := e.persistPositionTx(tx, position); err != nil {
+				tx.Rollback()
+				log.Printf("[B-Book] ERROR: Failed to persist position: %v", err)
+			} else if err := e.persistTradeTx(tx, &trade); err != nil {
+				tx.Rollback()
+				log.Printf("[B-Book] ERROR: Failed to persist trade: %v", err)
+			} else if err := tx.Commit(); err != nil {
+				log.Printf("[B-Book] ERROR: Failed to commit transaction: %v", err)
+			} else {
+				log.Printf("[Persistence] ✓ Position #%d, Order #%d, Trade #%d atomically persisted", positionID, orderID, tradeID)
+			}
+		}
+	}
+
+	// Log execution
+	if position != nil {
+		log.Printf("[B-Book] EXECUTED: %s %s %.2f lots @ %.5f (Position #%d, Mode=%s)",
+			side, symbol, volume, fillPrice, position.ID, account.PositionMode)
+	} else {
+		log.Printf("[B-Book] EXECUTED: %s %s %.2f lots @ %.5f (Position fully closed, Realized P&L: %.2f)",
+			side, symbol, volume, fillPrice, realizedPnL)
+	}
+
+	// Send order filled notification
+	if e.notificationManager != nil {
+		go func() {
+			notifData := map[string]interface{}{
+				"orderId":    fmt.Sprintf("%d", orderID),
+				"positionId": fmt.Sprintf("%d", positionID),
+				"symbol":     symbol,
+				"orderType":  side,
+				"volume":     volume,
+				"price":      fmt.Sprintf("%.5f", fillPrice),
+			}
+			if err := e.notificationManager.Send(account.UserID, "order_filled", notifData); err != nil {
+				log.Printf("[Notifications] Failed to send order_filled notification: %v", err)
+			}
+		}()
+	}
 
 	return position, nil
 }
@@ -606,15 +765,64 @@ func (e *Engine) ClosePosition(positionID int64, closeVolume float64) (*Trade, e
 	e.trades = append(e.trades, trade)
 
 	// Update position
+	closeReason := "MANUAL"
 	if closeVolume >= position.Volume {
 		position.Status = "CLOSED"
 		position.ClosePrice = closePrice
 		position.CloseTime = now
+		position.CloseReason = closeReason
 	} else {
 		position.Volume -= closeVolume
 	}
 
+	// Persist to database
+	if e.db != nil {
+		tx, err := e.db.Begin()
+		if err == nil {
+			// Persist closing trade
+			if err := e.persistTradeTx(tx, &trade); err != nil {
+				tx.Rollback()
+				log.Printf("[B-Book] ERROR: Failed to persist closing trade: %v", err)
+			} else if position.Status == "CLOSED" {
+				// Position fully closed - update status
+				if err := e.closePositionTx(tx, positionID, closePrice, now, closeReason); err != nil {
+					tx.Rollback()
+					log.Printf("[B-Book] ERROR: Failed to close position: %v", err)
+				} else if err := tx.Commit(); err != nil {
+					log.Printf("[B-Book] ERROR: Failed to commit transaction: %v", err)
+				} else {
+					log.Printf("[Persistence] ✓ Position #%d closed, trade #%d atomically persisted", positionID, tradeID)
+				}
+			} else {
+				// Partial close - update volume
+				if err := e.updatePositionTx(tx, position); err != nil {
+					tx.Rollback()
+					log.Printf("[B-Book] ERROR: Failed to update position: %v", err)
+				} else if err := tx.Commit(); err != nil {
+					log.Printf("[B-Book] ERROR: Failed to commit transaction: %v", err)
+				} else {
+					log.Printf("[Persistence] ✓ Partial close: Position #%d volume updated, trade #%d persisted", positionID, tradeID)
+				}
+			}
+		}
+	}
+
 	log.Printf("[B-Book] CLOSED: %s Position #%d %.2f lots @ %.5f | P/L: %.2f", position.Symbol, positionID, closeVolume, closePrice, realizedPnL)
+
+	// Send position closed notification
+	if e.notificationManager != nil {
+		go func() {
+			notifData := map[string]interface{}{
+				"positionId": fmt.Sprintf("%d", positionID),
+				"symbol":     position.Symbol,
+				"price":      fmt.Sprintf("%.5f", closePrice),
+				"pnl":        fmt.Sprintf("%.2f", realizedPnL),
+			}
+			if err := e.notificationManager.Send(account.UserID, "position_closed", notifData); err != nil {
+				log.Printf("[Notifications] Failed to send position_closed notification: %v", err)
+			}
+		}()
+	}
 
 	return &trade, nil
 }
@@ -635,6 +843,11 @@ func (e *Engine) ModifyPosition(positionID int64, sl, tp float64) (*Position, er
 
 	position.SL = sl
 	position.TP = tp
+
+	// Persist to database
+	if err := e.updatePosition(position); err != nil {
+		log.Printf("[B-Book] ERROR: Failed to persist position modification: %v", err)
+	}
 
 	log.Printf("[B-Book] MODIFIED: Position #%d SL: %.5f TP: %.5f", positionID, sl, tp)
 

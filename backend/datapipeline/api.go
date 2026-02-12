@@ -346,6 +346,10 @@ func (h *APIHandler) parseTimeframe(s string) Timeframe {
 		return TF_H4
 	case "1d", "D1":
 		return TF_D1
+	case "1w", "W1":
+		return TF_W1
+	case "1M", "MN1":
+		return TF_MN1
 	default:
 		return TF_M1
 	}

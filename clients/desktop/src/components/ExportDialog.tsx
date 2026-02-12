@@ -11,7 +11,7 @@ interface ExportDialogProps {
 type ExportFormat = 'csv' | 'pdf' | 'json';
 type ExportDataType = 'trades' | 'positions' | 'performance';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:7999';
+import { API_BASE_URL } from '../config/api';
 
 export const ExportDialog = ({ accountId, onClose }: ExportDialogProps) => {
   const [format, setFormat] = useState<ExportFormat>('csv');

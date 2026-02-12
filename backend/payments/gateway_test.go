@@ -186,6 +186,36 @@ func (r *MockRepository) SaveExchangeRate(ctx context.Context, from, to string, 
 	return nil
 }
 
+func (r *MockRepository) ListByUser(userID string) ([]*Transaction, error) {
+	var result []*Transaction
+	for _, tx := range r.transactions {
+		if tx.UserID == userID {
+			result = append(result, tx)
+		}
+	}
+	return result, nil
+}
+
+func (r *MockRepository) UpdateStatus(txID string, status TransactionStatus) error {
+	if tx, ok := r.transactions[txID]; ok {
+		tx.Status = status
+		return nil
+	}
+	return ErrTransactionNotFound
+}
+
+func (r *MockRepository) UpdateProviderTxID(txID string, providerTxID string) error {
+	if tx, ok := r.transactions[txID]; ok {
+		tx.ProviderTxID = providerTxID
+		return nil
+	}
+	return ErrTransactionNotFound
+}
+
+func (r *MockRepository) GetUserVerificationLevelByID(_ string) (int, error) {
+	return 2, nil
+}
+
 type MockFraudDetector struct{}
 
 func (f *MockFraudDetector) CheckDeposit(ctx context.Context, req *PaymentRequest) (*FraudCheck, error) {

@@ -1,0 +1,223 @@
+name: Backend Build & Quality
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-quality.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+
+jobs:
+  build-and-test:
+    name: Build & Quality Checks
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache-dependency-path: backend/go.sum
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build server
+      run: |
+        echo "Building main server..."
+        go build -v -o bin/server ./cmd/server/
+
+        echo "Building migration tool..."
+        go build -v -o bin/migrate ./cmd/migrate/
+
+        echo "Build successful!"
+        ls -lh bin/
+
+    - name: Run go vet
+      run: |
+        echo "Running go vet analysis..."
+        go vet ./...
+
+    - name: Check formatting
+      run: |
+        echo "Checking code formatting..."
+        UNFORMATTED=$(gofmt -l .)
+        if [ -n "$UNFORMATTED" ]; then
+          echo "The following files are not formatted:"
+          echo "$UNFORMATTED"
+          exit 1
+        fi
+        echo "All files are properly formatted."
+
+    - name: Check main.go size
+      run: |
+        echo "Checking main.go size..."
+        MAIN_SIZE=$(wc -l < cmd/server/main.go)
+        echo "main.go size: $MAIN_SIZE lines"
+
+        if [ $MAIN_SIZE -gt 500 ]; then
+          echo "⚠️ WARNING: main.go exceeds 500 lines ($MAIN_SIZE lines)"
+          echo "Please refactor into smaller modules."
+          # Don't fail - just warn
+        else
+          echo "✓ main.go size is acceptable"
+        fi
+
+    - name: Check for debug statements
+      run: |
+        echo "Checking for debug fmt.Println statements..."
+        PRINTLN_COUNT=$(grep -r "fmt.Println" --include="*.go" . | \
+          grep -v "./cmd/migrate" | \
+          grep -v "./cmd/test_e2e" | \
+          grep -v "./logging/examples" | \
+          wc -l || echo 0)
+
+        echo "Found $PRINTLN_COUNT debug statements"
+
+        if [ $PRINTLN_COUNT -gt 0 ]; then
+          echo "⚠️ WARNING: Debug statements found in production code"
+          echo "Run: ./scripts/cleanup_debug_statements.sh"
+          # Don't fail - just warn
+        else
+          echo "✓ No debug statements in production code"
+        fi
+
+    - name: Check for unsafe panics
+      run: |
+        echo "Checking for unsafe panic() calls..."
+        PANIC_COUNT=$(grep -r "panic(" --include="*.go" . | \
+          grep -v "_test.go" | \
+          grep -v "logging/examples" | \
+          wc -l || echo 0)
+
+        echo "Found $PANIC_COUNT panic calls"
+
+        if [ $PANIC_COUNT -gt 0 ]; then
+          echo "⚠️ WARNING: Panic calls found in production code"
+          grep -rn "panic(" --include="*.go" . | \
+            grep -v "_test.go" | \
+            grep -v "logging/examples" || true
+          # Don't fail - just warn
+        else
+          echo "✓ No unsafe panic calls"
+        fi
+
+    - name: Run tests
+      run: |
+        echo "Running unit tests..."
+        go test ./... -v -race -timeout 5m -coverprofile=coverage.out
+
+        echo "Test coverage summary:"
+        go tool cover -func=coverage.out | tail -1
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./backend/coverage.out
+        flags: backend
+        name: backend-coverage
+
+    - name: Check for race conditions
+      run: |
+        echo "Building with race detector..."
+        go build -race -o bin/server-race ./cmd/server/
+        echo "✓ Race detector build successful"
+
+    - name: Run go mod tidy check
+      run: |
+        echo "Checking if go.mod is tidy..."
+        go mod tidy
+        if ! git diff --exit-code go.mod go.sum; then
+          echo "❌ go.mod or go.sum has changes. Please run 'go mod tidy'"
+          exit 1
+        fi
+        echo "✓ go.mod is tidy"
+
+  staticcheck:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+
+    - name: Install staticcheck
+      run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+    - name: Run staticcheck
+      run: staticcheck ./...
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+
+    - name: Run Gosec Security Scanner
+      uses: securego/gosec@master
+      with:
+        args: '-no-fail -fmt json -out gosec-results.json ./...'
+
+    - name: Upload Gosec results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: gosec-results.json
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v4
+      with:
+        version: latest
+        working-directory: backend
+        args: --timeout=5m

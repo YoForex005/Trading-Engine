@@ -23,18 +23,42 @@ type TickStorer interface {
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true
+		origin := r.Header.Get("Origin")
+
+		// Allow same-origin requests (no Origin header)
+		if origin == "" {
+			return true
+		}
+
+		// Get allowed origins from environment variable
+		// Format: ALLOWED_ORIGINS=http://localhost:3000,https://example.com
+		allowedOriginsEnv := os.Getenv("ALLOWED_ORIGINS")
+		if allowedOriginsEnv == "" {
+			// Default allowed origins for development
+			allowedOriginsEnv = "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:8080"
+		}
+
+		allowedOrigins := strings.Split(allowedOriginsEnv, ",")
+		for _, allowed := range allowedOrigins {
+			if strings.TrimSpace(allowed) == origin {
+				return true
+			}
+		}
+
+		log.Printf("[WS] Rejected connection from unauthorized origin: %s", origin)
+		return false
 	},
 }
 
 // Client represents a connected WebSocket client
 type Client struct {
-	conn      *websocket.Conn
-	send      chan []byte
-	symbols   map[string]bool
-	userID    string // JWT user ID
-	accountID string // Associated account ID
-	mu        sync.Mutex
+	conn       *websocket.Conn
+	send       chan []byte
+	symbols    map[string]bool
+	userID     string     // JWT user ID (empty for public clients)
+	accountID  string     // Associated account ID
+	clientType ClientType // public or private
+	mu         sync.Mutex
 }
 
 // Hub maintains the set of active clients and broadcasts messages
@@ -233,13 +257,10 @@ func (h *Hub) BroadcastTick(tick *MarketTick) {
 		return
 	}
 
-	// NON-BLOCKING SEND: If buffer full, drop tick to keep engine running
-	select {
-	case h.broadcast <- data:
-		atomic.AddInt64(&h.ticksBroadcast, 1)
-	default:
-		// Buffer full - drop to prevent blocking (data still stored for history)
-	}
+	// Broadcast market data to ALL clients (public + authenticated)
+	// This uses the new channel-based routing system
+	h.BroadcastMarketData(data)
+	atomic.AddInt64(&h.ticksBroadcast, 1)
 }
 
 // GetLatestPrice returns the latest price for a symbol
@@ -263,6 +284,13 @@ func (h *Hub) SetBBookEngine(engine *core.Engine) {
 // SetAuthService sets the authentication service for validating tokens
 func (h *Hub) SetAuthService(svc *auth.Service) {
 	h.authService = svc
+}
+
+// GetClients returns the current client map (for counting connections)
+func (h *Hub) GetClients() map[*Client]bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.clients
 }
 
 func (h *Hub) Run() {
@@ -417,11 +445,191 @@ func extractAndValidateToken(hub *Hub, r *http.Request) (string, string, error) 
 	return userID, accountID, nil
 }
 
-// BroadcastMessage sends a generic message to all connected clients
+// BroadcastMessage sends a generic message to all connected clients (deprecated - use channel-specific methods)
 func (h *Hub) BroadcastMessage(message []byte) {
 	select {
 	case h.broadcast <- message:
 	default:
 		log.Println("[Hub] Broadcast buffer full, message dropped")
 	}
+}
+
+// BroadcastMarketData sends market data to ALL clients (public + authenticated)
+// Used for: tick data, OHLC updates, market status
+func (h *Hub) BroadcastMarketData(message []byte) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for client := range h.clients {
+		// Send to ALL clients (public and private)
+		select {
+		case client.send <- message:
+		default:
+			// Client buffer full - skip
+		}
+	}
+}
+
+// BroadcastToUser sends private data to a specific user's authenticated connections
+// Used for: position updates, order fills, notifications, account updates
+func (h *Hub) BroadcastToUser(userID string, message []byte) {
+	if userID == "" {
+		return
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	sent := 0
+	for client := range h.clients {
+		// Only send to authenticated clients with matching userID
+		if client.clientType == ClientTypePrivate && client.userID == userID {
+			select {
+			case client.send <- message:
+				sent++
+			default:
+				// Client buffer full - skip
+			}
+		}
+	}
+
+	if sent > 0 {
+		log.Printf("[Hub] Private message sent to user %s (%d connections)", userID, sent)
+	}
+}
+
+// BroadcastToAuthenticated sends message to ALL authenticated clients
+// Used for: system announcements, platform-wide notifications
+func (h *Hub) BroadcastToAuthenticated(message []byte) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	sent := 0
+	for client := range h.clients {
+		// Only send to authenticated clients
+		if client.clientType == ClientTypePrivate {
+			select {
+			case client.send <- message:
+				sent++
+			default:
+				// Client buffer full - skip
+			}
+		}
+	}
+
+	log.Printf("[Hub] Broadcast to authenticated clients (%d recipients)", sent)
+}
+
+// ServeWsMarket handles unauthenticated websocket connections for market data only.
+// This endpoint provides read-only market tick data without requiring authentication.
+// Used for public market data feeds, charts, and price displays.
+func ServeWsMarket(hub *Hub, w http.ResponseWriter, r *http.Request) {
+	log.Printf("[WS-Market] Unauthenticated connection request from %s", r.RemoteAddr)
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("[WS-Market] Upgrade FAILED for %s: %v", r.RemoteAddr, err)
+		return
+	}
+
+	log.Printf("[WS-Market] Upgrade SUCCESS (public/unauthenticated) from %s", r.RemoteAddr)
+
+	client := &Client{
+		conn:       conn,
+		send:       make(chan []byte, 1024), // BUFFERED: Handle bursts
+		symbols:    make(map[string]bool),
+		userID:     "",                        // No user ID for public clients
+		accountID:  "",                        // No account ID for public clients
+		clientType: ClientTypePublic,          // Public client - market data only
+	}
+	hub.register <- client
+
+	// Write pump
+	go func() {
+		defer conn.Close()
+		for message := range client.send {
+			err := conn.WriteMessage(websocket.TextMessage, message)
+			if err != nil {
+				log.Printf("[WS-Market] Write error for anonymous user: %v", err)
+				break
+			}
+		}
+	}()
+
+	// Read pump (handle subscriptions, etc.)
+	go func() {
+		defer func() {
+			hub.unregister <- client
+			conn.Close()
+			log.Printf("[WS-Market] Connection closed for anonymous user from %s", r.RemoteAddr)
+		}()
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				break
+			}
+		}
+	}()
+}
+
+// ServeWsPrivate handles authenticated websocket connections for private data.
+// This endpoint requires JWT authentication and provides:
+// - Market data (ticks, OHLC)
+// - Private data (positions, orders, notifications, account updates)
+func ServeWsPrivate(hub *Hub, w http.ResponseWriter, r *http.Request) {
+	log.Printf("[WS-Private] Connection request from %s", r.RemoteAddr)
+
+	// Validate authentication (required for private endpoint)
+	userID, clientType, err := validateClientAuth(hub, r, true)
+	if err != nil {
+		log.Printf("[WS-Private] Authentication FAILED for %s: %v", r.RemoteAddr, err)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Upgrade to WebSocket
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("[WS-Private] Upgrade FAILED for %s: %v", r.RemoteAddr, err)
+		return
+	}
+
+	log.Printf("[WS-Private] Upgrade SUCCESS for user %s from %s", userID, r.RemoteAddr)
+
+	client := &Client{
+		conn:       conn,
+		send:       make(chan []byte, 1024), // BUFFERED: Handle bursts
+		symbols:    make(map[string]bool),
+		userID:     userID,
+		accountID:  userID, // For now, use userID as accountID
+		clientType: clientType,
+	}
+	hub.register <- client
+
+	// Write pump
+	go func() {
+		defer conn.Close()
+		for message := range client.send {
+			err := conn.WriteMessage(websocket.TextMessage, message)
+			if err != nil {
+				log.Printf("[WS-Private] Write error for user %s: %v", userID, err)
+				break
+			}
+		}
+	}()
+
+	// Read pump (handle subscriptions, etc.)
+	go func() {
+		defer func() {
+			hub.unregister <- client
+			conn.Close()
+			log.Printf("[WS-Private] Connection closed for user %s from %s", userID, r.RemoteAddr)
+		}()
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				break
+			}
+		}
+	}()
 }

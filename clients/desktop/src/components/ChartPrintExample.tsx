@@ -3,7 +3,6 @@
  * Demonstrates how to integrate chart printing functionality
  */
 
-import React from 'react';
 import { Printer } from 'lucide-react';
 import { useChartPrint } from '../hooks/useChartPrint';
 import { PrintSetupDialog } from './dialogs/PrintSetupDialog';
@@ -82,17 +81,17 @@ export function ChartPrintExample({
       </button>
 
       {/* Print Setup Dialog */}
-      <PrintSetupDialog
-        isOpen={showSetupDialog}
-        onClose={closeDialogs}
-        onPrint={handleSetupComplete}
-        accountId={accountId}
-      />
+      {showSetupDialog && (
+        <PrintSetupDialog
+          onConfirm={handleSetupComplete}
+          onCancel={closeDialogs}
+          accountId={accountId}
+        />
+      )}
 
       {/* Print Preview Dialog */}
       {showPreviewDialog && chartData && printPreferences && (
         <PrintPreviewDialog
-          isOpen={showPreviewDialog}
           onClose={closeDialogs}
           chartData={chartData}
           preferences={printPreferences}

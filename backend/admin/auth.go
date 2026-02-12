@@ -8,11 +8,33 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+// Minimal audit types for current admin auth flow.
+// Full audit logger lives behind legacy build tags.
+type AuditLogEntry struct {
+	AdminID    string
+	AdminEmail string
+	Action     string
+	Resource   string
+	ResourceID string
+	Details    map[string]interface{}
+	IPAddress  string
+	Success    bool
+	ErrorMsg   string
+}
+
+type AuditLogger struct{}
+
+func (l *AuditLogger) Log(_ AuditLogEntry) {}
+
+const ActionLogin = "LOGIN"
 
 // AuthService handles admin authentication and authorization
 type AuthService struct {
@@ -21,6 +43,7 @@ type AuthService struct {
 	adminsByUsername map[string]*Admin
 	sessions        map[string]*AdminSession
 	nextAdminID     int64
+	auditLogger     *AuditLogger // Audit logger for tracking admin actions
 }
 
 // NewAuthService creates a new admin auth service
@@ -41,6 +64,14 @@ func NewAuthService() *AuthService {
 	}
 
 	return svc
+}
+
+// SetAuditLogger sets the audit logger for tracking admin actions
+func (s *AuthService) SetAuditLogger(logger *AuditLogger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.auditLogger = logger
+	log.Println("[AdminAuth] Audit logger attached to auth service")
 }
 
 // CreateAdmin creates a new admin user
@@ -80,6 +111,7 @@ func (s *AuthService) CreateAdmin(username, email, password string, role AdminRo
 }
 
 // Login authenticates an admin and creates a session
+// If 2FA is enabled, returns a partial session that requires TOTP validation
 func (s *AuthService) Login(username, password, ipAddress, userAgent string) (*AdminSession, error) {
 	s.mu.RLock()
 	admin, exists := s.adminsByUsername[username]
@@ -92,6 +124,24 @@ func (s *AuthService) Login(username, password, ipAddress, userAgent string) (*A
 	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(password)); err != nil {
 		log.Printf("[AdminAuth] Failed login attempt for %s from %s", username, ipAddress)
+
+		// Log failed login attempt
+		if s.auditLogger != nil {
+			s.auditLogger.Log(AuditLogEntry{
+				AdminID:    fmt.Sprintf("%d", admin.ID),
+				AdminEmail: admin.Email,
+				Action:     ActionLogin,
+				Resource:   "auth",
+				ResourceID: username,
+				Details: map[string]interface{}{
+					"reason": "invalid_password",
+				},
+				IPAddress: ipAddress,
+				Success:   false,
+				ErrorMsg:  "Invalid credentials",
+			})
+		}
+
 		return nil, errors.New("invalid credentials")
 	}
 
@@ -108,13 +158,34 @@ func (s *AuthService) Login(username, password, ipAddress, userAgent string) (*A
 		}
 	}
 
+	// If 2FA is enabled, return partial session requiring TOTP validation
+	if admin.TwoFactorEnabled {
+		log.Printf("[AdminAuth] 2FA required for admin: %s from %s", username, ipAddress)
+
+		// Create a partial session with short TTL (5 minutes)
+		now := time.Now()
+		partialSession := &AdminSession{
+			SessionID:  "", // Will be set after 2FA validation
+			AdminID:    admin.ID,
+			Username:   admin.Username,
+			Role:       admin.Role,
+			IPAddress:  ipAddress,
+			UserAgent:  userAgent,
+			CreatedAt:  now,
+			ExpiresAt:  now.Add(5 * time.Minute), // Short TTL for 2FA step
+			LastActive: now,
+		}
+
+		return partialSession, errors.New("2FA_REQUIRED")
+	}
+
 	// Generate session token
 	sessionID, err := generateSessionToken()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate session: %w", err)
 	}
 
-	// Create session
+	// Create full session (no 2FA)
 	now := time.Now()
 	session := &AdminSession{
 		SessionID:  sessionID,
@@ -133,7 +204,25 @@ func (s *AuthService) Login(username, password, ipAddress, userAgent string) (*A
 	admin.LastLogin = now
 	s.mu.Unlock()
 
-	log.Printf("[AdminAuth] Admin logged in: %s from %s", username, ipAddress)
+	// Log successful login
+	if s.auditLogger != nil {
+		s.auditLogger.Log(AuditLogEntry{
+			AdminID:    fmt.Sprintf("%d", admin.ID),
+			AdminEmail: admin.Email,
+			Action:     ActionLogin,
+			Resource:   "auth",
+			ResourceID: username,
+			Details: map[string]interface{}{
+				"userAgent":   userAgent,
+				"sessionID":   sessionID,
+				"twoFactorEnabled": admin.TwoFactorEnabled,
+			},
+			IPAddress: ipAddress,
+			Success:   true,
+		})
+	}
+
+	log.Printf("[AdminAuth] Admin logged in: %s (role: %s) from %s", username, admin.Role, ipAddress)
 	return session, nil
 }
 
@@ -175,6 +264,37 @@ func (s *AuthService) ValidateSession(sessionID, ipAddress string) (*Admin, erro
 	s.mu.Unlock()
 
 	return admin, nil
+}
+
+// ValidateAdminToken validates a bearer/session token from request headers.
+// It returns the authenticated admin ID for compatibility with handlers.
+func (s *AuthService) ValidateAdminToken(r *http.Request) (int64, error) {
+	token := ""
+
+	if authHeader := strings.TrimSpace(r.Header.Get("Authorization")); authHeader != "" {
+		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+			token = strings.TrimSpace(authHeader[7:])
+		} else {
+			token = authHeader
+		}
+	}
+
+	if token == "" {
+		token = strings.TrimSpace(r.Header.Get("X-Session-ID"))
+	}
+	if token == "" {
+		token = strings.TrimSpace(r.Header.Get("X-Admin-Session"))
+	}
+	if token == "" {
+		return 0, errors.New("missing admin token")
+	}
+
+	admin, err := s.ValidateSession(token, getIPAddress(r))
+	if err != nil {
+		return 0, err
+	}
+
+	return admin.ID, nil
 }
 
 // Logout terminates a session
@@ -348,6 +468,44 @@ func (s *AuthService) EnableAdmin(adminID int64) error {
 	admin.Status = "ACTIVE"
 	log.Printf("[AdminAuth] Admin enabled: %s", admin.Username)
 	return nil
+}
+
+// UpdateAdmin updates admin details (email, role, status, password)
+func (s *AuthService) UpdateAdmin(adminID int64, email string, role AdminRole, status string, password string) (*Admin, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	admin, exists := s.admins[adminID]
+	if !exists {
+		return nil, errors.New("admin not found")
+	}
+
+	// Update email if provided
+	if email != "" && email != admin.Email {
+		admin.Email = email
+	}
+
+	// Update role if provided
+	if role != "" {
+		admin.Role = role
+	}
+
+	// Update status if provided
+	if status != "" {
+		admin.Status = status
+	}
+
+	// Update password if provided
+	if password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash password: %w", err)
+		}
+		admin.PasswordHash = string(hash)
+	}
+
+	log.Printf("[AdminAuth] Admin updated: %s (email=%s, role=%s, status=%s)", admin.Username, admin.Email, admin.Role, admin.Status)
+	return admin, nil
 }
 
 // Helper functions

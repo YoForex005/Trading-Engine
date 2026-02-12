@@ -14,8 +14,12 @@ import { X } from 'lucide-react';
 import { chartManager } from '../services/chartManager';
 import { drawingManager } from '../services/drawingManager';
 import { indicatorManager } from '../services/indicatorManager';
+import { buildApiUrl } from '../config/api';
 import { useAppStore } from '../store/useAppStore';
+import { useTradeSettings, useChartsSettings, useSettingsStore } from '../store/useSettingsStore';
 import { DrawingContextMenu } from './DrawingContextMenu';
+import { ChartContextMenu } from './ChartContextMenu';
+import { OneClickPanel } from './OneClickPanel';
 
 export type ChartType = 'candlestick' | 'heikinAshi' | 'bar' | 'line' | 'area';
 export type Timeframe = 'M1' | 'M5' | 'M15' | 'M30' | 'H1' | 'H4' | 'D1' | 'W1' | 'MN';
@@ -76,12 +80,26 @@ export function TradingChart({
 
     // Get real-time tick data from AppStore (Fast Path)
     const currentTick = useAppStore(state => state.ticks[symbol]);
+    const accountId = useAppStore(state => state.accountId);
+
+    // Get settings from store
+    const tradeSettings = useTradeSettings();
+    const chartsSettings = useChartsSettings();
+    const updateTradeSettings = useSettingsStore((state) => state.updateTradeSettings);
+    const oneClickTrading = tradeSettings.oneClickTrading;
 
     // Legend Data State
     const [legendData, setLegendData] = useState<Partial<OHLC>>({});
 
     // Active tool state for cursor management
     const [activeDrawingType, setActiveDrawingType] = useState<string | null>(null);
+
+    // Chart context menu state
+    const [chartContextMenu, setChartContextMenu] = useState<{ visible: boolean; x: number; y: number } | null>(null);
+
+    // Chart settings state (local UI state only)
+    const [showGrid, setShowGrid] = useState(true);
+    const [showVolumes, setShowVolumes] = useState(true);
 
     // Initialize chart ONCE
     useEffect(() => {
@@ -223,6 +241,32 @@ export function TradingChart({
             handleResize();
             setIsChartReady(true);
 
+            // Handle right-click for chart context menu
+            const handleChartContextMenu = (e: MouseEvent) => {
+                if (!chartContainerRef.current) return;
+
+                // Check if click is on chart background (not on a drawing)
+                const target = e.target as HTMLElement;
+                const isDrawing = target.closest('.drawing-element');
+
+                if (!isDrawing) {
+                    e.preventDefault();
+                    setChartContextMenu({
+                        visible: true,
+                        x: e.clientX,
+                        y: e.clientY
+                    });
+                }
+            };
+
+            chartContainerRef.current.addEventListener('contextmenu', handleChartContextMenu);
+
+            // Close context menu on click elsewhere
+            const handleClickOutside = () => {
+                setChartContextMenu(null);
+            };
+            window.addEventListener('click', handleClickOutside);
+
             // Get canvas reference for export functionality
             // Store the canvas ref globally for SavePictureDialog
             const findCanvas = () => {
@@ -246,6 +290,11 @@ export function TradingChart({
             return () => {
                 // CRITICAL: Set disposed flag FIRST to prevent any pending operations
                 isDisposedRef.current = true;
+
+                if (chartContainerRef.current) {
+                    chartContainerRef.current.removeEventListener('contextmenu', handleChartContextMenu);
+                }
+                window.removeEventListener('click', handleClickOutside);
 
                 resizeObserver.disconnect();
                 setIsChartReady(false);
@@ -415,7 +464,7 @@ export function TradingChart({
             try {
                 // Fetch pre-aggregated OHLC candles (lightweight)
                 // Use limit=1500 to fill a wide screen
-                const res = await fetch(`http://localhost:7999/api/history/ohlc?symbol=${symbol}&timeframe=${timeframe}&limit=1500`);
+                const res = await fetch(buildApiUrl(`/api/history/ohlc?symbol=${symbol}&timeframe=${timeframe}&limit=1500`));
                 console.log('[TradingChart] Fetch response status:', res.status);
 
                 if (!res.ok) {
@@ -762,6 +811,93 @@ export function TradingChart({
         return () => unsubscribers.forEach(unsub => unsub());
     }, []);
 
+    // Keyboard shortcut event listeners
+    useEffect(() => {
+        const handleToggleGrid = () => {
+            setShowGrid((prev) => {
+                const newValue = !prev;
+                if (chartRef.current) {
+                    chartRef.current.applyOptions({
+                        grid: {
+                            vertLines: { visible: newValue },
+                            horzLines: { visible: newValue }
+                        }
+                    });
+                }
+                return newValue;
+            });
+        };
+
+        const handleToggleVolume = () => {
+            setShowVolumes((prev) => {
+                const newValue = !prev;
+                if (volumeSeriesRef.current) {
+                    volumeSeriesRef.current.applyOptions({
+                        visible: newValue
+                    });
+                }
+                return newValue;
+            });
+        };
+
+        const handleToggleOneClick = () => {
+            updateTradeSettings({ oneClickTrading: !oneClickTrading });
+        };
+
+        const handleZoom = (event: CustomEvent) => {
+            if (!chartRef.current) return;
+            const { direction } = event.detail;
+            if (direction === 'in') {
+                chartManager.zoomIn();
+            } else if (direction === 'out') {
+                chartManager.zoomOut();
+            }
+        };
+
+        const handleScroll = (event: CustomEvent) => {
+            if (!chartRef.current) return;
+            const { direction } = event.detail;
+            const timeScale = chartRef.current.timeScale();
+            const visibleRange = timeScale.getVisibleRange();
+            if (!visibleRange) return;
+
+            const barCount = visibleRange.to - visibleRange.from;
+            const scrollAmount = barCount * 0.1; // Scroll by 10% of visible range
+
+            if (direction === 'left') {
+                timeScale.scrollToPosition(-scrollAmount, false);
+            } else if (direction === 'right') {
+                timeScale.scrollToPosition(scrollAmount, false);
+            }
+        };
+
+        const handleUndoDrawing = () => {
+            drawingManager.undoDelete();
+        };
+
+        const handleDeleteDrawing = () => {
+            drawingManager.deleteSelected();
+        };
+
+        window.addEventListener('chart-toggle-grid', handleToggleGrid as EventListener);
+        window.addEventListener('chart-toggle-volume', handleToggleVolume as EventListener);
+        window.addEventListener('toggle-one-click-trading', handleToggleOneClick as EventListener);
+        window.addEventListener('chart-zoom', handleZoom as EventListener);
+        window.addEventListener('chart-scroll', handleScroll as EventListener);
+        window.addEventListener('chart-undo-drawing', handleUndoDrawing as EventListener);
+        window.addEventListener('chart-delete-drawing', handleDeleteDrawing as EventListener);
+
+        return () => {
+            window.removeEventListener('chart-toggle-grid', handleToggleGrid as EventListener);
+            window.removeEventListener('chart-toggle-volume', handleToggleVolume as EventListener);
+            window.removeEventListener('toggle-one-click-trading', handleToggleOneClick as EventListener);
+            window.removeEventListener('chart-zoom', handleZoom as EventListener);
+            window.removeEventListener('chart-scroll', handleScroll as EventListener);
+            window.removeEventListener('chart-undo-drawing', handleUndoDrawing as EventListener);
+            window.removeEventListener('chart-delete-drawing', handleDeleteDrawing as EventListener);
+        };
+    }, [oneClickTrading, updateTradeSettings]);
+
     // Indicator persistence
     useEffect(() => {
         if (!symbol) return;
@@ -845,6 +981,60 @@ export function TradingChart({
         }
     }, [currentTick]);
 
+    // Keyboard shortcut for One-Click Panel (Ctrl+Shift+T)
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+                e.preventDefault();
+                setOneClickTrading(prev => !prev);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
+    // Listen for template load events from ChartTemplateManager
+    useEffect(() => {
+        const handleLoadTemplate = (event: CustomEvent) => {
+            const template = event.detail;
+            console.log('[TradingChart] Loading template from event:', template);
+
+            // Apply grid setting
+            setShowGrid(template.showGrid);
+            if (chartRef.current) {
+                chartRef.current.applyOptions({
+                    grid: {
+                        vertLines: { visible: template.showGrid },
+                        horzLines: { visible: template.showGrid }
+                    }
+                });
+            }
+
+            // Apply volumes setting
+            setShowVolumes(template.showVolume);
+            if (volumeSeriesRef.current) {
+                volumeSeriesRef.current.applyOptions({
+                    visible: template.showVolume
+                });
+            }
+
+            // Apply indicators
+            if (template.indicators && template.indicators.length > 0) {
+                // Clear existing indicators first
+                indicatorManager.clearAll();
+
+                // Add template indicators
+                template.indicators.forEach((indicator: any) => {
+                    indicatorManager.addIndicator(indicator);
+                });
+            }
+        };
+
+        window.addEventListener('loadChartTemplate', handleLoadTemplate as EventListener);
+        return () => window.removeEventListener('loadChartTemplate', handleLoadTemplate as EventListener);
+    }, []);
+
     return (
         <div className="relative w-full h-full bg-white">
             <div
@@ -890,6 +1080,151 @@ export function TradingChart({
 
             {/* Context Menu for Drawings */}
             <DrawingContextMenu onClose={() => { }} />
+
+            {/* One-Click Trading Panel */}
+            {oneClickTrading && currentTick && accountId && (
+                <OneClickPanel
+                    symbol={symbol}
+                    currentBid={currentTick.bid}
+                    currentAsk={currentTick.ask}
+                    accountId={parseInt(accountId)}
+                    onClose={() => setOneClickTrading(false)}
+                    onOrderPlaced={() => {
+                        console.log('Order placed via one-click panel');
+                    }}
+                />
+            )}
+
+            {/* Chart Background Context Menu */}
+            {chartContextMenu && (
+                <ChartContextMenu
+                    visible={chartContextMenu.visible}
+                    x={chartContextMenu.x}
+                    y={chartContextMenu.y}
+                    currentChartType={chartType}
+                    currentTimeframe={timeframe}
+                    onChangeChartType={(type) => {
+                        // Trigger chart type change via props or state update
+                        console.log('Change chart type to:', type);
+                        // Note: This would require lifting chartType state to parent component
+                    }}
+                    onChangeTimeframe={(tf) => {
+                        // Trigger timeframe change via props or state update
+                        console.log('Change timeframe to:', tf);
+                        // Note: This would require lifting timeframe state to parent component
+                    }}
+                    onToggleOneClickTrading={() => {
+                        updateTradeSettings({ oneClickTrading: !oneClickTrading });
+                    }}
+                    onToggleGrid={() => {
+                        setShowGrid(!showGrid);
+                        if (chartRef.current) {
+                            chartRef.current.applyOptions({
+                                grid: {
+                                    vertLines: { visible: !showGrid },
+                                    horzLines: { visible: !showGrid }
+                                }
+                            });
+                        }
+                    }}
+                    onToggleVolumes={() => {
+                        setShowVolumes(!showVolumes);
+                        if (volumeSeriesRef.current) {
+                            volumeSeriesRef.current.applyOptions({
+                                visible: !showVolumes
+                            });
+                        }
+                    }}
+                    onLoadTemplate={(template) => {
+                        console.log('[TradingChart] Loading template:', template.name);
+
+                        // Apply grid setting
+                        setShowGrid(template.showGrid);
+                        if (chartRef.current) {
+                            chartRef.current.applyOptions({
+                                grid: {
+                                    vertLines: { visible: template.showGrid },
+                                    horzLines: { visible: template.showGrid }
+                                }
+                            });
+                        }
+
+                        // Apply volumes setting
+                        setShowVolumes(template.showVolumes);
+                        if (volumeSeriesRef.current) {
+                            volumeSeriesRef.current.applyOptions({
+                                visible: template.showVolumes
+                            });
+                        }
+
+                        // Apply indicators
+                        if (template.indicators && template.indicators.length > 0) {
+                            template.indicators.forEach(indicator => {
+                                indicatorManager.addIndicator(indicator);
+                            });
+                        }
+
+                        // Note: chartType and timeframe changes would require parent component support
+                        // since they're passed as props. For now, we apply what we can locally.
+                        console.log('[TradingChart] Template applied:', {
+                            grid: template.showGrid,
+                            volumes: template.showVolumes,
+                            indicators: template.indicators.length
+                        });
+                    }}
+                    currentIndicators={indicatorManager.getIndicators()}
+                    currentDrawingTools={drawingManager.getDrawings()}
+                    onOpenProperties={() => {
+                        alert('Chart properties dialog not yet implemented');
+                    }}
+                    onSaveAsPicture={async () => {
+                        try {
+                            const chartExporterModule = await import('../services/chartExporter');
+                            const exporter = (chartExporterModule as any).chartExporter || chartExporterModule;
+                            const canvas = chartContainerRef.current?.querySelector('canvas');
+                            if (canvas && exporter && exporter.exportAsPNG) {
+                                exporter.exportAsPNG(canvas, `${symbol}_${timeframe}_chart`);
+                            } else {
+                                // Fallback: manual export
+                                if (canvas) {
+                                    const dataUrl = canvas.toDataURL('image/png');
+                                    const link = document.createElement('a');
+                                    link.download = `${symbol}_${timeframe}_chart.png`;
+                                    link.href = dataUrl;
+                                    link.click();
+                                }
+                            }
+                        } catch (err) {
+                            console.error('Failed to export chart:', err);
+                        }
+                    }}
+                    onPrintChart={async () => {
+                        try {
+                            const chartPrinterModule = await import('../services/chartPrinter');
+                            const printer = (chartPrinterModule as any).chartPrinter || chartPrinterModule.default;
+                            const canvas = chartContainerRef.current?.querySelector('canvas');
+                            if (canvas && printer) {
+                                if (typeof printer.print === 'function') {
+                                    printer.print(canvas, { symbol, timeframe, chartType });
+                                } else if (typeof printer.printChart === 'function') {
+                                    printer.printChart(canvas, { symbol, timeframe, chartType });
+                                } else {
+                                    // Fallback: browser print
+                                    window.print();
+                                }
+                            }
+                        } catch (err) {
+                            console.error('Failed to print chart:', err);
+                            // Fallback: browser print
+                            window.print();
+                        }
+                    }}
+                    onClose={() => setChartContextMenu(null)}
+                    oneClickTrading={oneClickTrading}
+                    showGrid={showGrid}
+                    showVolumes={showVolumes}
+                />
+            )}
 
             {/* Legend - Updated with OHLC */}
             <div className="absolute top-4 left-4 z-10 pointer-events-none font-mono text-zinc-800">

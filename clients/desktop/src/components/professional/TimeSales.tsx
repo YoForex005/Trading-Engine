@@ -4,8 +4,9 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Clock, TrendingUp, TrendingDown, Activity } from 'lucide-react';
+import { Clock, TrendingUp, TrendingDown, Activity, Wifi, WifiOff } from 'lucide-react';
 import type { TimeSalesEntry } from '../../types/trading';
+import { useWebSocket } from '../../hooks/useWebSocket';
 
 type TimeSalesProps = {
   symbol: string;
@@ -17,7 +18,18 @@ export const TimeSales = ({ symbol, maxEntries = 100 }: TimeSalesProps) => {
   const [filter, setFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
   const [isPaused, setIsPaused] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+
+  // Use centralized WebSocket connection
+  const {
+    data: wsData,
+    isConnected,
+    connectionState,
+    isStale,
+    reconnect,
+  } = useWebSocket<{ type: string; symbol: string; price: number; volume: number; side: string; timestamp: number; aggressor?: string }>({
+    channel: `timesales:${symbol}`,
+    autoConnect: true,
+  });
 
   // Auto-scroll to latest entry
   useEffect(() => {
@@ -26,59 +38,25 @@ export const TimeSales = ({ symbol, maxEntries = 100 }: TimeSalesProps) => {
     }
   }, [entries, isPaused]);
 
-  // Connect to WebSocket for time & sales data
+  // Handle WebSocket data updates
   useEffect(() => {
-    if (!symbol) return;
+    if (!wsData || wsData.type !== 'time_sales') return;
 
-    const connectWS = () => {
-      const ws = new WebSocket(`ws://localhost:7999/ws/timesales?symbol=${symbol}`);
-      wsRef.current = ws;
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.type === 'time_sales') {
-            const entry: TimeSalesEntry = {
-              id: `${data.timestamp}-${Math.random()}`,
-              symbol: data.symbol,
-              price: data.price,
-              volume: data.volume,
-              side: data.side,
-              timestamp: data.timestamp,
-              aggressor: data.aggressor,
-            };
-
-            setEntries((prev) => {
-              const updated = [entry, ...prev];
-              return updated.slice(0, maxEntries);
-            });
-          }
-        } catch (error) {
-          console.error('Failed to parse time & sales data:', error);
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error('Time & Sales WebSocket error:', error);
-      };
-
-      ws.onclose = () => {
-        console.log('Time & Sales WebSocket closed');
-        // Attempt reconnect after 3 seconds
-        setTimeout(connectWS, 3000);
-      };
+    const entry: TimeSalesEntry = {
+      id: `${wsData.timestamp}-${Math.random()}`,
+      symbol: wsData.symbol,
+      price: wsData.price,
+      volume: wsData.volume,
+      side: wsData.side,
+      timestamp: wsData.timestamp,
+      aggressor: wsData.aggressor,
     };
 
-    connectWS();
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-    };
-  }, [symbol, maxEntries]);
+    setEntries((prev) => {
+      const updated = [entry, ...prev];
+      return updated.slice(0, maxEntries);
+    });
+  }, [wsData, maxEntries]);
 
   // Filter entries
   const filteredEntries = useMemo(() => {
@@ -109,16 +87,36 @@ export const TimeSales = ({ symbol, maxEntries = 100 }: TimeSalesProps) => {
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4 text-emerald-400" />
             <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wide">Time & Sales</h3>
+            {/* Connection Status Indicator */}
+            {connectionState === 'connected' ? (
+              <Wifi className={`w-3 h-3 ${isStale ? 'text-yellow-500' : 'text-emerald-500'}`} title={isStale ? 'Connection stale' : 'Connected'} />
+            ) : (
+              <WifiOff
+                className={`w-3 h-3 ${connectionState === 'connecting' ? 'text-blue-500 animate-pulse' : 'text-red-500'}`}
+                title={connectionState === 'connecting' ? 'Connecting...' : 'Disconnected'}
+              />
+            )}
           </div>
-          <button
-            onClick={() => setIsPaused(!isPaused)}
-            className={`px-2 py-1 text-[10px] font-medium rounded transition-colors ${isPaused
-              ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
-              }`}
-          >
-            {isPaused ? 'PAUSED' : 'LIVE'}
-          </button>
+          <div className="flex items-center gap-2">
+            {!isConnected && (
+              <button
+                onClick={reconnect}
+                className="px-2 py-1 text-[10px] font-medium rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30"
+                title="Reconnect"
+              >
+                RECONNECT
+              </button>
+            )}
+            <button
+              onClick={() => setIsPaused(!isPaused)}
+              className={`px-2 py-1 text-[10px] font-medium rounded transition-colors ${isPaused
+                ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                }`}
+            >
+              {isPaused ? 'PAUSED' : 'LIVE'}
+            </button>
+          </div>
         </div>
 
         {/* Filters */}

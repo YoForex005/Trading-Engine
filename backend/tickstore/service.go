@@ -58,7 +58,7 @@ func NewTickStore(brokerID string, maxTicksPerSymbol int) *TickStore {
 		filePath:   "data/ticks.json",
 		brokerID:   brokerID,
 		dailyStore: NewDailyStore(brokerID, 30), // Keep 30 days
-		ohlcCache:  NewOHLCCache([]Timeframe{TF_M1, TF_M5, TF_M15, TF_H1, TF_H4, TF_D1}),
+		ohlcCache:  NewOHLCCache([]Timeframe{TF_M1, TF_M5, TF_M15, TF_H1, TF_H4, TF_D1, TF_W1, TF_MN1}),
 	}
 
 	// Ensure data directory exists
@@ -142,6 +142,10 @@ func (ts *TickStore) GetOHLC(symbol string, timeframeSecs int64, limit int) []OH
 		tf = TF_H4
 	case 86400:
 		tf = TF_D1
+	case 604800:
+		tf = TF_W1
+	case 2592000:
+		tf = TF_MN1
 	default:
 		tf = TF_M1
 	}

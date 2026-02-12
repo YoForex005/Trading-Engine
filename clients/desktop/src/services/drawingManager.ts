@@ -4,6 +4,7 @@
  */
 
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
+import { API_ENDPOINTS } from '../config/api';
 
 export type DrawingType = 'trendline' | 'hline' | 'vline' | 'text' | 'channel' | 'fibonacci' | 'shapes';
 
@@ -619,7 +620,7 @@ export class DrawingManager {
     if (!this.currentSymbol) return;
 
     try {
-      const response = await fetch('http://localhost:7999/api/drawings', {
+      const response = await fetch(API_ENDPOINTS.workspace.drawings, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -647,7 +648,7 @@ export class DrawingManager {
 
   async loadFromBackend(symbol: string): Promise<void> {
     try {
-      const response = await fetch(`http://localhost:7999/api/drawings?symbol=${symbol}&accountId=${this.currentAccountId}`);
+      const response = await fetch(`${API_ENDPOINTS.workspace.drawings}?symbol=${symbol}&accountId=${this.currentAccountId}`);
       if (response.ok) {
         const drawings = await response.json();
         // Ensure drawings is always an array, never null or undefined
@@ -664,7 +665,7 @@ export class DrawingManager {
 
   async deleteFromBackend(id: string, symbol: string): Promise<void> {
     try {
-      await fetch(`http://localhost:7999/api/drawings/${id}?symbol=${symbol}&accountId=${this.currentAccountId}`, {
+      await fetch(`${API_ENDPOINTS.workspace.drawings}/${id}?symbol=${symbol}&accountId=${this.currentAccountId}`, {
         method: 'DELETE',
       });
     } catch (error) {

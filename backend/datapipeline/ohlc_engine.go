@@ -17,6 +17,8 @@ const (
 	TF_H1  Timeframe = 3600    // 1 hour
 	TF_H4  Timeframe = 14400   // 4 hours
 	TF_D1  Timeframe = 86400   // 1 day
+	TF_W1  Timeframe = 604800  // 1 week (7 days)
+	TF_MN1 Timeframe = 2592000 // 1 month (30 days, approximate)
 )
 
 // OHLCBar represents a complete OHLC candle
@@ -60,7 +62,7 @@ func NewOHLCEngine(config *PipelineConfig, stats *PipelineStats) *OHLCEngine {
 		stats:       stats,
 		activeBars:  make(map[string]map[Timeframe]*OHLCBar),
 		ohlcChannel: make(chan *OHLCBar, config.OHLCBufferSize),
-		timeframes:  []Timeframe{TF_M1, TF_M5, TF_M15, TF_H1, TF_H4, TF_D1},
+		timeframes:  []Timeframe{TF_M1, TF_M5, TF_M15, TF_H1, TF_H4, TF_D1, TF_W1, TF_MN1},
 	}
 }
 
@@ -71,7 +73,7 @@ func (o *OHLCEngine) Start(ctx context.Context) error {
 	// Start bar closing goroutine (checks for completed bars)
 	go o.barClosingWorker()
 
-	log.Println("[OHLCEngine] Started with timeframes: M1, M5, M15, H1, H4, D1")
+	log.Println("[OHLCEngine] Started with timeframes: M1, M5, M15, H1, H4, D1, W1, MN1")
 	return nil
 }
 
@@ -124,7 +126,19 @@ func (o *OHLCEngine) ProcessTick(tick *NormalizedTick) {
 func (o *OHLCEngine) getOrCreateBar(symbol string, tf Timeframe, timestamp time.Time) *OHLCBar {
 	// Calculate aligned bar start time
 	openTime := o.alignTimestamp(timestamp, tf)
-	closeTime := openTime.Add(time.Duration(tf) * time.Second)
+
+	// Calculate close time based on timeframe
+	var closeTime time.Time
+	if tf == TF_W1 {
+		// Close time is Sunday 23:59:59 (7 days after Monday 00:00)
+		closeTime = openTime.AddDate(0, 0, 7).Add(-1 * time.Second)
+	} else if tf == TF_MN1 {
+		// Close time is last second of the month
+		closeTime = openTime.AddDate(0, 1, 0).Add(-1 * time.Second)
+	} else {
+		// Standard: add timeframe duration
+		closeTime = openTime.Add(time.Duration(tf) * time.Second)
+	}
 
 	// Check if we have an active bar for this period
 	if bar, exists := o.activeBars[symbol][tf]; exists {
@@ -164,6 +178,26 @@ func (o *OHLCEngine) getOrCreateBar(symbol string, tf Timeframe, timestamp time.
 
 // alignTimestamp aligns timestamp to bar boundary
 func (o *OHLCEngine) alignTimestamp(t time.Time, tf Timeframe) time.Time {
+	utc := t.UTC()
+
+	// Special handling for W1 (Weekly) - align to Monday 00:00 UTC
+	if tf == TF_W1 {
+		// Go's time.Weekday() returns Sunday=0, Monday=1
+		weekday := int(utc.Weekday())
+		if weekday == 0 {
+			weekday = 7 // Treat Sunday as day 7
+		}
+		daysToMonday := weekday - 1
+		monday := utc.AddDate(0, 0, -daysToMonday)
+		return time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, time.UTC)
+	}
+
+	// Special handling for MN1 (Monthly) - align to 1st of month 00:00 UTC
+	if tf == TF_MN1 {
+		return time.Date(utc.Year(), utc.Month(), 1, 0, 0, 0, 0, time.UTC)
+	}
+
+	// Standard alignment for minute/hour/day timeframes
 	seconds := int64(tf)
 	unix := t.Unix()
 	aligned := (unix / seconds) * seconds

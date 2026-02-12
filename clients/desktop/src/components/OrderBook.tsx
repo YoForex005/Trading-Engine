@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { TrendingUp, TrendingDown, Layers } from 'lucide-react';
+import { buildApiUrl } from '../config/api';
 
 type OrderBookEntry = {
   price: number;
@@ -40,7 +41,7 @@ export const OrderBook = ({ symbol, currentBid = 0, currentAsk = 0 }: OrderBookP
       setLoading(true);
       try {
         const response = await fetch(
-          `http://localhost:7999/api/orderbook?symbol=${symbol}&depth=${depth}`
+          buildApiUrl(`/api/orderbook?symbol=${symbol}&depth=${depth}`)
         );
 
         if (response.ok) {

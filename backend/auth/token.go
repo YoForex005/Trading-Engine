@@ -2,6 +2,7 @@ package auth
 
 import (
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -33,7 +34,19 @@ func GenerateJWT(user *User) (string, error) {
 
 // GenerateJWTWithSecret creates a new token for a user with a specific secret
 func GenerateJWTWithSecret(user *User, secret []byte) (string, error) {
-	expirationTime := time.Now().Add(24 * time.Hour)
+	// SECURITY: Configurable JWT expiry (default 1 hour in production, 24 hours in dev)
+	// Environment variable: JWT_EXPIRY_HOURS
+	expiryHours := 1 // Default 1 hour for production
+	if envExpiry := os.Getenv("JWT_EXPIRY_HOURS"); envExpiry != "" {
+		if hours, err := strconv.Atoi(envExpiry); err == nil && hours > 0 {
+			expiryHours = hours
+		}
+	} else if os.Getenv("ENVIRONMENT") != "production" {
+		// Allow 24 hours in development for convenience
+		expiryHours = 24
+	}
+
+	expirationTime := time.Now().Add(time.Duration(expiryHours) * time.Hour)
 	claims := &Claims{
 		UserID:   user.ID,
 		Username: user.Username,

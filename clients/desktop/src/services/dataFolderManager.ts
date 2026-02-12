@@ -3,6 +3,8 @@
  * Handles access to user data folder with platform detection (web/desktop/Electron)
  */
 
+import { buildApiUrl } from '../config/api';
+
 export interface DataFolderStructure {
   profiles: string;
   templates: string;
@@ -67,7 +69,7 @@ class DataFolderManager {
     }
 
     try {
-      const response = await fetch('http://localhost:7999/api/user/data-folder', {
+      const response = await fetch(buildApiUrl('/api/user/data-folder'), {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -127,7 +129,7 @@ class DataFolderManager {
       const basePath = await this.getDataFolderPath();
       const targetPath = subfolder ? `${basePath}/${subfolder}` : basePath;
 
-      const response = await fetch(`http://localhost:7999/api/user/data-folder/list?path=${encodeURIComponent(targetPath)}`, {
+      const response = await fetch(buildApiUrl(`/api/user/data-folder/list?path=${encodeURIComponent(targetPath)}`), {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -151,7 +153,7 @@ class DataFolderManager {
    */
   async downloadFile(filePath: string): Promise<Blob | null> {
     try {
-      const response = await fetch(`http://localhost:7999/api/user/data-folder/download?path=${encodeURIComponent(filePath)}`, {
+      const response = await fetch(buildApiUrl(`/api/user/data-folder/download?path=${encodeURIComponent(filePath)}`), {
         method: 'GET',
       });
 
@@ -178,7 +180,7 @@ class DataFolderManager {
       formData.append('file', file);
       formData.append('path', targetPath);
 
-      const response = await fetch('http://localhost:7999/api/user/data-folder/upload', {
+      const response = await fetch(buildApiUrl('/api/user/data-folder/upload'), {
         method: 'POST',
         body: formData,
       });
@@ -199,7 +201,7 @@ class DataFolderManager {
    */
   async deleteFile(filePath: string): Promise<boolean> {
     try {
-      const response = await fetch('http://localhost:7999/api/user/data-folder/delete', {
+      const response = await fetch(buildApiUrl('/api/user/data-folder/delete'), {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -223,7 +225,7 @@ class DataFolderManager {
    */
   async createDirectory(dirPath: string): Promise<boolean> {
     try {
-      const response = await fetch('http://localhost:7999/api/user/data-folder/mkdir', {
+      const response = await fetch(buildApiUrl('/api/user/data-folder/mkdir'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -5,11 +5,13 @@ import { TradingChart } from './components/TradingChart';
 import type { ChartType, Timeframe } from './components/TradingChart';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ChartTabs, type ChartTab } from './components/ChartTabs';
-import { BottomDock } from './components/BottomDock';
+import { Toolbox } from './components/Toolbox';
 import { AlertsContainer } from './components/AlertsContainer';
 import { useAppStore } from './store/useAppStore';
 import { useMarketDataStore } from './store/useMarketDataStore';
 import { terminateWorker } from './services/aggregationWorkerManager';
+import { API_ENDPOINTS, WS_ENDPOINTS } from './config/api';
+import { useWebSocket } from './hooks/useWebSocket';
 
 // Layout Components
 import { TopToolbar } from './components/layout/TopToolbar';
@@ -19,6 +21,7 @@ import { StatusBar } from './components/layout/StatusBar';
 import { OrderPanelDialog } from './components/OrderPanelDialog';
 import { DepthOfMarket } from './components/DepthOfMarket';
 import { SaveWorkspaceDialog } from './components/dialogs/SaveWorkspaceDialog';
+import { AccountPanel } from './components/AccountPanel';
 
 // Services
 import { windowManager, type LayoutMode } from './services/windowManager';
@@ -29,6 +32,14 @@ import { CommandBusProvider } from './contexts/CommandBusContext';
 // Keyboard Shortcuts
 import { KeyboardShortcutProvider } from './contexts/KeyboardShortcutContext';
 import { GlobalShortcuts } from './components/GlobalShortcuts';
+
+// Notifications
+import { useNotifications, generateMockNotifications } from './hooks/useNotifications';
+import { ToastContainer } from './components/notifications/Toast';
+import { useNotificationStore } from './store/useNotificationStore';
+
+// Alerts
+import { useAlertStore } from './store/useAlertStore';
 
 interface Tick {
   symbol: string;
@@ -96,6 +107,8 @@ function App() {
 
   // UI State
   const [showDOM, setShowDOM] = useState(false);
+  const [domSymbol, setDomSymbol] = useState<string>(selectedSymbol);
+  const [showAccountPanel, setShowAccountPanel] = useState(false);
 
   // Multi-Chart State
   const [openCharts, setOpenCharts] = useState<ChartTab[]>([]);
@@ -163,6 +176,14 @@ function App() {
   const [, setLayoutMode] = useState<LayoutMode>('single');
 
   const wsRef = useRef<WebSocket | null>(null);
+  const reconnectCallbackRef = useRef<(() => void) | null>(null);
+
+  // Notifications
+  const { activeToasts } = useNotifications({ wsConnection: wsRef.current });
+  const { addNotification } = useNotificationStore();
+
+  // Alerts
+  const { checkAlerts } = useAlertStore();
 
   // PERFORMANCE FIX: Removed global ticks subscription to prevent root re-renders
   // Access ticks via useAppStore.getState().ticks inside event handlers instead.
@@ -208,18 +229,25 @@ function App() {
     const handleOpenDOM = (e: CustomEvent) => {
       const { symbol } = e.detail;
       console.log('[App] Opening Depth of Market for:', symbol);
-      // TODO: Implement DOM window when DOM component is ready
-      alert(`Depth of Market for ${symbol} - Feature coming soon`);
+      setDomSymbol(symbol);
+      setShowDOM(true);
+    };
+
+    // Account Panel event
+    const handleToggleAccountPanel = () => {
+      setShowAccountPanel(prev => !prev);
     };
 
     window.addEventListener('openChart', handleOpenChart as EventListener);
     window.addEventListener('openOrderDialog', handleOpenOrderDialog as EventListener);
     window.addEventListener('openDepthOfMarket', handleOpenDOM as EventListener);
+    window.addEventListener('toggleAccountPanel', handleToggleAccountPanel);
 
     return () => {
       window.removeEventListener('openChart', handleOpenChart as EventListener);
       window.removeEventListener('openOrderDialog', handleOpenOrderDialog as EventListener);
       window.removeEventListener('openDepthOfMarket', handleOpenDOM as EventListener);
+      window.removeEventListener('toggleAccountPanel', handleToggleAccountPanel);
     };
   }, []); // Removed ticks dependency
 
@@ -293,7 +321,7 @@ function App() {
 
   // Fetch broker config on mount
   useEffect(() => {
-    fetch('http://localhost:7999/api/config')
+    fetch(API_ENDPOINTS.admin.config)
       .then(res => res.json())
       .then(data => setBrokerConfig(data))
       .catch(err => console.error('Failed to fetch config:', err));
@@ -306,8 +334,8 @@ function App() {
     const fetchAccountData = async () => {
       try {
         const [accRes, posRes] = await Promise.all([
-          fetch(`http://localhost:7999/api/account/summary?accountId=${accountId}`),
-          fetch(`http://localhost:7999/api/positions?accountId=${accountId}`)
+          fetch(`${API_ENDPOINTS.account.summary}?accountId=${accountId}`),
+          fetch(`${API_ENDPOINTS.positions}?accountId=${accountId}`)
         ]);
 
         if (accRes.ok) {
@@ -332,104 +360,117 @@ function App() {
   // PERFORMANCE FIX: Removed tick buffer for immediate updates (MT5 parity - <5ms latency)
   // const tickBuffer = useRef<Record<string, Tick>>({});
 
-  // Connect to WebSocket
+  // Connect to WebSocket using centralized hook with auto-reconnection
+  const {
+    isConnected,
+    connectionState,
+    reconnect,
+    subscribe,
+  } = useWebSocket({
+    url: WS_ENDPOINTS.general,
+    autoConnect: isAuthenticated,
+  });
+
+  // Update reconnect callback ref for StatusBar
+  useEffect(() => {
+    reconnectCallbackRef.current = reconnect;
+  }, [reconnect]);
+
+  // Subscribe to all WebSocket messages
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    let ws: WebSocket | null = null;
-    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-    let isUnmounting = false;
+    // Subscribe to wildcard channel to receive all message types
+    const unsubscribe = subscribe('*', (message: any) => {
+      try {
+        const data = message;
 
-    const connect = () => {
-      if (isUnmounting) return;
+        if (data.type === 'tick') {
+          // Ensure spread is calculated if missing
+          const spread = data.spread !== undefined && data.spread > 0
+            ? data.spread
+            : (data.ask - data.bid);
 
-      const authToken = useAppStore.getState().authToken;
-      let wsUrl = 'ws://localhost:7999/ws';
-      if (authToken) {
-        wsUrl += `?token=${encodeURIComponent(authToken)}`;
-      }
+          // PERFORMANCE FIX: Immediate update to store (no buffering)
+          // 20x faster tick updates for MT5 parity
+          const storeTicks = useAppStore.getState().ticks;
+          const tick: Tick = {
+            ...data,
+            spread: spread,
+            prevBid: storeTicks[data.symbol]?.bid
+          };
 
-      console.log('[WS] Attempting connection to ' + wsUrl);
-      ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+          // CRITICAL FIX: Update BOTH stores for complete data flow
+          // useAppStore: Used by legacy components and chart
+          useAppStore.getState().setTick(data.symbol, tick);
 
-      ws.onopen = () => console.log('[WS] WebSocket connected');
+          // useMarketDataStore: Used by MarketWatch component
+          // This was the missing link causing MarketWatch to show no data
+          useMarketDataStore.getState().updateTick(data.symbol, {
+            symbol: data.symbol,
+            bid: data.bid,
+            ask: data.ask,
+            spread: spread,
+            timestamp: data.timestamp || Date.now(),
+            lp: data.lp,
+            volume: 1 // Default volume for tick
+          });
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'tick') {
-            // Ensure spread is calculated if missing
-            const spread = data.spread !== undefined && data.spread > 0
-              ? data.spread
-              : (data.ask - data.bid);
-
-            // PERFORMANCE FIX: Immediate update to store (no buffering)
-            // 20x faster tick updates for MT5 parity
-            const storeTicks = useAppStore.getState().ticks;
-            const tick: Tick = {
-              ...data,
-              spread: spread,
-              prevBid: storeTicks[data.symbol]?.bid
+          // Check price alerts on every tick
+          const currentPrices = useAppStore.getState().ticks;
+          const priceMap: Record<string, { bid: number; ask: number; last?: number }> = {};
+          Object.keys(currentPrices).forEach(sym => {
+            const t = currentPrices[sym];
+            priceMap[sym] = {
+              bid: t.bid,
+              ask: t.ask,
+              last: t.last
             };
+          });
 
-            // CRITICAL FIX: Update BOTH stores for complete data flow
-            // useAppStore: Used by legacy components and chart
-            useAppStore.getState().setTick(data.symbol, tick);
+          const triggeredAlerts = checkAlerts(priceMap);
 
-            // useMarketDataStore: Used by MarketWatch component
-            // This was the missing link causing MarketWatch to show no data
-            useMarketDataStore.getState().updateTick(data.symbol, {
-              symbol: data.symbol,
-              bid: data.bid,
-              ask: data.ask,
-              spread: spread,
-              timestamp: data.timestamp || Date.now(),
-              lp: data.lp,
-              volume: 1 // Default volume for tick
+          // Show notifications for triggered alerts
+          triggeredAlerts.forEach(alert => {
+            const message = alert.message || `${alert.symbol} ${alert.condition.replace('_', ' ')} ${alert.price.toFixed(5)}`;
+
+            addNotification({
+              type: 'trading',
+              severity: 'warning',
+              title: 'Price Alert Triggered',
+              message: message,
             });
-          } else if (data.type === 'candle_update') {
-            // Dispatch to market data store
-            useMarketDataStore.getState().updateCandle(data);
-          }
-        } catch (e) {
-          console.error('[WS] Parse error:', e);
+
+            // Play sound if enabled
+            if (alert.notifyMethod === 'sound' || alert.notifyMethod === 'both') {
+              const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZUQ0PVKvn77BfGAg+ltvy0H0pBSl+zPLaizsIGGS56+OZUQ4OUKXi8LaHMwU2jdXzz38qBSl9y/Lai0YIDVmw6+6cUw8LTqPf87acPQU0itbyynspBCt7y+/aijsIGWO56+OaUA0OUKXi8LWHMwU2jdXzz38qBSl9y/Lai0YIDVmw6+6cUw8LTqPf87acPQU0itbyynspBCt7y+/aijsI');
+              audio.volume = 0.3;
+              audio.play().catch(() => {});
+            }
+          });
+        } else if (data.type === 'candle_update') {
+          // Dispatch to market data store
+          useMarketDataStore.getState().updateCandle(data);
         }
-      };
-
-      ws.onclose = (event) => {
-        console.log(`[WS] Disconnected (code: ${event.code})`);
-        wsRef.current = null;
-
-        if (event.code === 1008 || event.reason === 'Unauthorized') {
-          setIsAuthenticated(false);
-          return;
-        }
-
-        if (!isUnmounting && event.code !== 1000) {
-          reconnectTimeout = setTimeout(connect, 2000);
-        }
-      };
-    };
-
-    connect();
-
-    // PERFORMANCE FIX: Removed RAF batching for immediate updates
-    // Ticks now update Zustand store directly in onmessage handler
-    // Result: 100-120ms → <5ms tick latency (20x improvement)
+      } catch (e) {
+        console.error('[WS] Parse error:', e);
+      }
+    });
 
     return () => {
-      isUnmounting = true;
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (ws) ws.close(1000, 'Component unmount');
+      unsubscribe();
     };
+  }, [isAuthenticated, subscribe]);
 
-  }, [isAuthenticated, brokerConfig]);
+  // PERFORMANCE FIX: Removed RAF batching for immediate updates
+  // Ticks now update Zustand store directly via subscription handler
+  // Result: 100-120ms → <5ms tick latency (20x improvement)
+  // Automatic reconnection with exponential backoff handled by useWebSocket hook
 
   const placeOrder = useCallback(async (side: 'BUY' | 'SELL') => {
     setOrderLoading(true);
     try {
-      const res = await fetch('http://localhost:7999/api/orders/market', {
+      const res = await fetch(`${API_ENDPOINTS.orders}/market`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -445,7 +486,7 @@ function App() {
       const result = await res.json();
       console.log('[B-Book] Order executed:', result);
 
-      const posRes = await fetch('http://localhost:7999/api/positions?accountId=1');
+      const posRes = await fetch(`${API_ENDPOINTS.positions}?accountId=1`);
       if (posRes.ok) setPositions(await posRes.json() || []);
 
     } catch (err: any) {
@@ -464,7 +505,7 @@ function App() {
     setOrderLoading(true);
     try {
       const side = order.type.toUpperCase() as 'BUY' | 'SELL';
-      const res = await fetch('http://localhost:7999/api/orders/market', {
+      const res = await fetch(`${API_ENDPOINTS.orders}/market`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -482,7 +523,7 @@ function App() {
       const result = await res.json();
       console.log('[B-Book] Order executed:', result);
 
-      const posRes = await fetch('http://localhost:7999/api/positions?accountId=1');
+      const posRes = await fetch(`${API_ENDPOINTS.positions}?accountId=1`);
       if (posRes.ok) setPositions(await posRes.json() || []);
 
     } catch (err: any) {
@@ -494,7 +535,7 @@ function App() {
 
   const closePosition = useCallback(async (tradeId: number, volume?: number) => {
     try {
-      const res = await fetch('http://localhost:7999/api/positions/close', {
+      const res = await fetch(API_ENDPOINTS.closePosition, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ positionId: tradeId, volume })
@@ -502,7 +543,7 @@ function App() {
 
       if (!res.ok) throw new Error('Failed to close');
 
-      const posRes = await fetch('http://localhost:7999/api/positions?accountId=1');
+      const posRes = await fetch(`${API_ENDPOINTS.positions}?accountId=1`);
       if (posRes.ok) setPositions(await posRes.json() || []);
     } catch (err) {
       console.error('Close failed:', err);
@@ -511,7 +552,7 @@ function App() {
 
   const modifyPosition = useCallback(async (id: number, sl: number, tp: number) => {
     try {
-      const res = await fetch('http://localhost:7999/api/positions/modify', {
+      const res = await fetch(API_ENDPOINTS.modifyOrder, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ positionId: id, sl, tp })
@@ -519,7 +560,7 @@ function App() {
 
       if (!res.ok) throw new Error('Failed to modify');
 
-      const posRes = await fetch('http://localhost:7999/api/positions?accountId=1');
+      const posRes = await fetch(`${API_ENDPOINTS.positions}?accountId=1`);
       if (posRes.ok) setPositions(await posRes.json() || []);
     } catch (err) {
       console.error('Modify failed:', err);
@@ -528,7 +569,7 @@ function App() {
 
   const closeBulkPositions = useCallback(async (type: 'ALL' | 'WINNERS' | 'LOSERS', symbol?: string) => {
     try {
-      const res = await fetch('http://localhost:7999/api/positions/close-bulk', {
+      const res = await fetch(`${API_ENDPOINTS.positions}/close-bulk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accountId: 1, type, symbol })
@@ -536,7 +577,7 @@ function App() {
 
       if (!res.ok) throw new Error('Bulk close failed');
 
-      const posRes = await fetch('http://localhost:7999/api/positions?accountId=1');
+      const posRes = await fetch(`${API_ENDPOINTS.positions}?accountId=1`);
       if (posRes.ok) setPositions(await posRes.json() || []);
     } catch (err) {
       alert('Bulk close failed');
@@ -548,7 +589,7 @@ function App() {
 
   useEffect(() => {
     setIsLoadingSymbols(true);
-    fetch('http://localhost:7999/api/symbols')
+    fetch(API_ENDPOINTS.symbols)
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data) && data.length > 0) {
@@ -566,6 +607,17 @@ function App() {
       terminateWorker();
     };
   }, []);
+
+  // Generate mock notifications for testing (only once on mount)
+  useEffect(() => {
+    const mockNotifications = generateMockNotifications();
+    // Add mock notifications with delay for testing
+    mockNotifications.forEach((notif, index) => {
+      setTimeout(() => {
+        addNotification(notif);
+      }, index * 2000); // Stagger by 2 seconds
+    });
+  }, []); // Run only once
 
   // ============================================================================
   // ALL HOOKS MUST BE DECLARED BEFORE ANY EARLY RETURNS
@@ -703,14 +755,22 @@ function App() {
       handlePrintChart();
     };
 
+    const handleChangeTimeframe = (e: CustomEvent) => {
+      const { timeframe: newTimeframe } = e.detail;
+      console.log('[App] Changing timeframe to:', newTimeframe);
+      setTimeframe(newTimeframe as Timeframe);
+    };
+
     window.addEventListener('saveWorkspace', handleSaveWorkspaceEvent);
     window.addEventListener('openDataFolder', handleOpenDataFolderEvent);
     window.addEventListener('printChart', handlePrintChartEvent);
+    window.addEventListener('change-timeframe', handleChangeTimeframe as EventListener);
 
     return () => {
       window.removeEventListener('saveWorkspace', handleSaveWorkspaceEvent);
       window.removeEventListener('openDataFolder', handleOpenDataFolderEvent);
       window.removeEventListener('printChart', handlePrintChartEvent);
+      window.removeEventListener('change-timeframe', handleChangeTimeframe as EventListener);
     };
   }, [handleSaveWorkspace, handleOpenDataFolder, handlePrintChart]);
 
@@ -757,6 +817,16 @@ function App() {
             timeframe={timeframe}
             onChartTypeChange={setChartType}
             onTimeframeChange={setTimeframe}
+            symbol={selectedSymbol}
+            onLoadTemplate={(template) => {
+              // Apply chart settings from template
+              if (template.chartType) setChartType(template.chartType);
+              if (template.timeframe) setTimeframe(template.timeframe);
+
+              // Emit event for TradingChart to handle grid/volumes/indicators
+              const event = new CustomEvent('loadChartTemplate', { detail: template });
+              window.dispatchEvent(event);
+            }}
           />
 
           {/* 2. Main Workspace */}
@@ -776,7 +846,7 @@ function App() {
               </div>
             </div>
 
-            {/* Center Content: Chart + DOM */}
+            {/* Center Content: Chart + DOM + Account Panel */}
             <div className="flex-1 flex bg-[#131722] relative min-w-0 overflow-hidden">
 
               {/* Chart Area */}
@@ -816,7 +886,7 @@ function App() {
                 {showDOM && (
                   <div className="border-l border-black z-20 shadow-xl">
                     <DepthOfMarket
-                      symbol={selectedSymbol}
+                      symbol={domSymbol}
                       onClose={() => setShowDOM(false)}
                       onPlaceOrder={(side, price, vol) => {
                         setVolume(vol);
@@ -829,6 +899,15 @@ function App() {
                   </div>
                 )}
               </div>
+
+              {/* Account Panel (Right Side) */}
+              {showAccountPanel && (
+                <AccountPanel
+                  onClose={() => setShowAccountPanel(false)}
+                  wsConnection={wsRef.current}
+                />
+              )}
+
               <ChartTabs
                 tabs={openCharts}
                 activeTabId={activeChartId || ''}
@@ -838,23 +917,14 @@ function App() {
             </div>
           </div>
 
-          {/* 3. Bottom Terminal */}
-          <BottomDock
-            height={dockHeight}
-            onHeightChange={setDockHeight}
-            account={account}
-            positions={positions}
-            orders={[]}
-            history={[]}
-            ledger={[]}
-            onClosePosition={closePosition}
-            onModifyPosition={modifyPosition}
-            onCancelOrder={() => { }}
-            onCloseBulk={closeBulkPositions}
+          {/* 3. Bottom Terminal - Toolbox */}
+          <Toolbox
+            accountId={accountId}
+            wsConnection={wsRef.current}
           />
 
           {/* 4. Status Bar */}
-          <StatusBar />
+          <StatusBar wsRef={wsRef} reconnectCallback={reconnectCallbackRef.current || undefined} />
 
           {/* Headless Components */}
           <AlertsContainer wsConnection={wsRef.current} />
@@ -884,7 +954,7 @@ function App() {
             />
           )}
 
-          {/* Toast Notification */}
+          {/* Toast Notification (Legacy - for workspace saves) */}
           {showToast && (
             <div className="fixed top-4 right-4 z-[300] animate-in slide-in-from-top-5 fade-in duration-200">
               <div className={`px-4 py-3 rounded-lg shadow-xl border ${toastType === 'success'
@@ -906,6 +976,9 @@ function App() {
               </div>
             </div>
           )}
+
+          {/* Notification Toast Container */}
+          <ToastContainer notifications={activeToasts} />
         </div>
       </KeyboardShortcutProvider>
     </CommandBusProvider>

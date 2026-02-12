@@ -160,7 +160,7 @@ func NewOptimizedTickStoreWithConfig(cfg TickStoreConfig) *OptimizedTickStore {
 		writeQueue:    make(chan *Tick, 10000), // Buffered async queue
 		writeBatch:    make([]Tick, 0, 1000),
 		batchSize:     500, // Flush every 500 ticks
-		ohlcCache:     NewOHLCCache([]Timeframe{TF_M1, TF_M5, TF_M15, TF_H1, TF_H4, TF_D1}),
+		ohlcCache:     NewOHLCCache([]Timeframe{TF_M1, TF_M5, TF_M15, TF_H1, TF_H4, TF_D1, TF_W1, TF_MN1}),
 		stopChan:      make(chan struct{}),
 	}
 
@@ -427,6 +427,10 @@ func (ts *OptimizedTickStore) GetOHLC(symbol string, timeframeSecs int64, limit 
 		tf = TF_H4
 	case 86400:
 		tf = TF_D1
+	case 604800:
+		tf = TF_W1
+	case 2592000:
+		tf = TF_MN1
 	default:
 		tf = TF_M1
 	}

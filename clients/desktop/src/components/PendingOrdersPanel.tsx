@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { buildApiUrl } from '../config/api';
 
 interface PendingOrder {
     id: string;
@@ -27,7 +28,7 @@ export function PendingOrdersPanel({ symbol }: PendingOrdersPanelProps) {
     useEffect(() => {
         const fetchOrders = async () => {
             try {
-                const res = await fetch('http://localhost:7999/orders/pending');
+                const res = await fetch(`${buildApiUrl('')}/orders/pending`);
                 if (res.ok) {
                     const data = await res.json();
                     setOrders(data || []);
@@ -45,7 +46,7 @@ export function PendingOrdersPanel({ symbol }: PendingOrdersPanelProps) {
     const handleCancel = async (orderId: string) => {
         setLoading(true);
         try {
-            await fetch('http://localhost:7999/order/cancel', {
+            await fetch(`${buildApiUrl('')}/order/cancel`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ orderId }),
@@ -79,8 +80,7 @@ export function PendingOrdersPanel({ symbol }: PendingOrdersPanelProps) {
                 >
                     <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                            <span className={`text-xs font-semibold ${order.side === 'BUY' ? 'text-emerald-400' : 'text-red-400'
-                                }`}>
+                            <span className={`text-xs font-semibold ${order.side === 'BUY' ? 'text-emerald-400' : 'text-red-400'}`}>
                                 {order.subtype}
                             </span>
                             <span className="text-xs text-zinc-400">{order.symbol}</span>
@@ -107,9 +107,7 @@ export function PendingOrdersPanel({ symbol }: PendingOrdersPanelProps) {
                         </div>
                         <div>
                             <span className="text-zinc-500">Status:</span>
-                            <span className={`ml-1 ${order.status === 'PENDING' ? 'text-yellow-400' :
-                                order.status === 'TRIGGERED' ? 'text-emerald-400' : 'text-zinc-400'
-                                }`}>
+                            <span className={`ml-1 ${order.status === 'PENDING' ? 'text-yellow-400' : order.status === 'TRIGGERED' ? 'text-emerald-400' : 'text-zinc-400'}`}>
                                 {order.status}
                             </span>
                         </div>

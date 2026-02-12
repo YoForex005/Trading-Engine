@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createChart, CandlestickSeries, LineSeries, BarSeries, HistogramSeries } from 'lightweight-charts';
 import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts';
 import './MetaTraderDashboard.css';
+import { WS_ENDPOINTS, buildApiUrl } from '../config/api';
 
 // Exact MetaTrader-style SVGs for all requested icons
 const ToolIcons = {
@@ -321,7 +322,7 @@ const MetaTraderDashboard: React.FC = () => {
 
     // WebSocket for Live Data
     useEffect(() => {
-        const ws = new WebSocket(`ws://localhost:7999/ws?token=${localStorage.getItem('token') || ''}`);
+        const ws = new WebSocket(`${WS_ENDPOINTS.general}?token=${localStorage.getItem('token') || ''}`);
 
         ws.onopen = () => {
             console.log('[Dashboard] WebSocket Connected');
@@ -468,7 +469,7 @@ const MetaTraderDashboard: React.FC = () => {
     const fetchHistoricalData = async () => {
         try {
             const apiTimeframe = timeframeMap[selectedTimeframe];
-            const response = await fetch(`http://localhost:7999/api/history/ohlc?symbol=${selectedSymbol}&timeframe=${apiTimeframe}&limit=500`);
+            const response = await fetch(`${buildApiUrl('')}/api/history/ohlc?symbol=${selectedSymbol}&timeframe=${apiTimeframe}&limit=500`);
             const data = await response.json();
             console.log('[Dashboard] History Fetch:', data);
 

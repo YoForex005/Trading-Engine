@@ -12,9 +12,10 @@ import {
   type Order,
   type AdminEvent,
 } from '../services/adminWebSocket';
+import { api } from '../services/apiClient';
+import { API_CONFIG } from '../config/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:7999';
-const WS_URL = `ws://${new URL(API_BASE).host}/admin-ws`;
+const WS_URL = API_CONFIG.ADMIN_WS_URL;
 
 interface UseAdminDataOptions {
   autoConnect?: boolean;
@@ -135,27 +136,21 @@ export function useAdminData(options: UseAdminDataOptions = {}) {
 
     const fetchData = async () => {
       try {
-        // Fetch accounts
-        const accountsRes = await fetch(`${API_BASE}/api/admin/accounts`);
-        if (accountsRes.ok) {
-          const accounts = await accountsRes.json();
-          setData((prev) => ({
-            ...prev,
-            accounts: accounts || [],
-            lastUpdate: Date.now(),
-          }));
-        }
+        // Fetch accounts with authentication
+        const accounts = await api.get<Account[]>(API_CONFIG.ADMIN_ACCOUNTS);
+        setData((prev) => ({
+          ...prev,
+          accounts: accounts || [],
+          lastUpdate: Date.now(),
+        }));
 
-        // Fetch orders
-        const ordersRes = await fetch(`${API_BASE}/api/admin/orders`);
-        if (ordersRes.ok) {
-          const orders = await ordersRes.json();
-          setData((prev) => ({
-            ...prev,
-            orders: orders || [],
-            lastUpdate: Date.now(),
-          }));
-        }
+        // Fetch orders with authentication
+        const orders = await api.get<Order[]>(API_CONFIG.ADMIN_ORDERS);
+        setData((prev) => ({
+          ...prev,
+          orders: orders || [],
+          lastUpdate: Date.now(),
+        }));
       } catch (error) {
         console.error('[useAdminData] Polling error:', error);
       }
@@ -172,13 +167,10 @@ export function useAdminData(options: UseAdminDataOptions = {}) {
   // Manual refresh function
   const refresh = useCallback(async () => {
     try {
-      const [accountsRes, ordersRes] = await Promise.all([
-        fetch(`${API_BASE}/api/admin/accounts`),
-        fetch(`${API_BASE}/api/admin/orders`),
+      const [accounts, orders] = await Promise.all([
+        api.get<Account[]>(API_CONFIG.ADMIN_ACCOUNTS).catch(() => []),
+        api.get<Order[]>(API_CONFIG.ADMIN_ORDERS).catch(() => []),
       ]);
-
-      const accounts = accountsRes.ok ? await accountsRes.json() : [];
-      const orders = ordersRes.ok ? await ordersRes.json() : [];
 
       setData((prev) => ({
         ...prev,

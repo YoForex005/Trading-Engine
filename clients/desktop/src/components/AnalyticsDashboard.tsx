@@ -186,9 +186,8 @@ export function AnalyticsDashboard({ onBack, className = '' }: AnalyticsDashboar
       {/* Export Dialog */}
       {showExportDialog && (
         <ExportDialog
+          accountId="default"
           onClose={() => setShowExportDialog(false)}
-          dataType="routing"
-          defaultFilters={{}}
         />
       )}
     </div>

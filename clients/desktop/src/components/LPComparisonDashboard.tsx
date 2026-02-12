@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { useWebSocket } from '../hooks/useWebSocket';
 import {
   createChart,
   ColorType,
@@ -84,7 +85,7 @@ const getLPColor = (lpName: string): string => {
 // API Configuration
 // ============================================
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:7999';
+import { API_BASE_URL, WS_ENDPOINTS } from '../config/api';
 
 // ============================================
 // Main Component
@@ -157,87 +158,61 @@ export const LPComparisonDashboard = () => {
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
     let isUnmounting = false;
 
-    const connect = () => {
-      if (isUnmounting) return;
+    // Use centralized WebSocket with auto-reconnection
+    const { subscribe, sendMessage } = useWebSocket({
+      url: WS_ENDPOINTS.admin,
+      autoConnect: true,
+    });
 
-      const wsUrl = `ws://localhost:7999/ws/analytics`;
-      console.log('[LP Dashboard] Connecting to WebSocket:', wsUrl);
+    // Subscribe to lp-metrics-update messages
+    const unsubscribe = subscribe('*', (message: any) => {
+      try {
+        const data = message;
 
-      ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+        if (data.type === 'lp-metrics-update') {
+          // Update metrics
+          setLpMetrics(prev => {
+            const existing = prev.find(lp => lp.lpName === data.lpName);
+            if (existing) {
+              return prev.map(lp =>
+                lp.lpName === data.lpName ? { ...lp, ...data.metrics } : lp
+              );
+            }
+            return [...prev, { lpName: data.lpName, ...data.metrics }];
+          });
 
-      ws.onopen = () => {
-        console.log('[LP Dashboard] WebSocket connected');
-        // Subscribe to LP performance channel
-        ws?.send(JSON.stringify({
-          type: 'subscribe',
-          channel: 'lp-performance',
-          symbol: selectedSymbol,
-        }));
-      };
+          // Update time series data
+          setTimeSeriesData(prev => {
+            const lpData = prev.find(lp => lp.lpName === data.lpName);
+            const newPoint: TimeSeriesDataPoint = {
+              time: Math.floor(Date.now() / 1000) as Time,
+              value: getMetricValue(data.metrics, selectedMetric),
+            };
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.type === 'lp-metrics-update') {
-            // Update metrics
-            setLpMetrics(prev => {
-              const existing = prev.find(lp => lp.lpName === data.lpName);
-              if (existing) {
-                return prev.map(lp =>
-                  lp.lpName === data.lpName ? { ...lp, ...data.metrics } : lp
-                );
-              }
-              return [...prev, { lpName: data.lpName, ...data.metrics }];
-            });
-
-            // Update time series data
-            setTimeSeriesData(prev => {
-              const lpData = prev.find(lp => lp.lpName === data.lpName);
-              const newPoint: TimeSeriesDataPoint = {
-                time: Math.floor(Date.now() / 1000) as Time,
-                value: getMetricValue(data.metrics, selectedMetric),
-              };
-
-              if (lpData) {
-                return prev.map(lp =>
-                  lp.lpName === data.lpName
-                    ? { ...lp, data: [...lp.data.slice(-100), newPoint] }
-                    : lp
-                );
-              }
-              return [...prev, { lpName: data.lpName, data: [newPoint] }];
-            });
-          }
-        } catch (err) {
-          console.error('[LP Dashboard] WebSocket message error:', err);
+            if (lpData) {
+              return prev.map(lp =>
+                lp.lpName === data.lpName
+                  ? { ...lp, data: [...lp.data.slice(-100), newPoint] }
+                  : lp
+              );
+            }
+            return [...prev, { lpName: data.lpName, data: [newPoint] }];
+          });
         }
-      };
+      } catch (err) {
+        console.error('[LP Dashboard] WebSocket message error:', err);
+      }
+    });
 
-      ws.onerror = (error) => {
-        console.error('[LP Dashboard] WebSocket error:', error);
-      };
-
-      ws.onclose = (event) => {
-        console.log('[LP Dashboard] WebSocket closed:', event.code);
-        wsRef.current = null;
-
-        if (!isUnmounting && event.code !== 1000) {
-          console.log('[LP Dashboard] Reconnecting in 3 seconds...');
-          reconnectTimeout = setTimeout(connect, 3000);
-        }
-      };
-    };
-
-    connect();
+    // Send subscription message on connect
+    sendMessage({
+      type: 'subscribe',
+      channel: 'lp-performance',
+      symbol: selectedSymbol,
+    });
 
     return () => {
-      isUnmounting = true;
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (ws) {
-        ws.close(1000, 'Component unmount');
-      }
+      unsubscribe();
     };
   }, [selectedSymbol, selectedMetric]);
 

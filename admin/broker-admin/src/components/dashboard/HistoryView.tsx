@@ -58,10 +58,10 @@ export default function HistoryView() {
     };
 
     const getMenuActions = (item: any) => [
-        { label: 'Filter by Symbol', onClick: () => console.log('Filter Symbol') },
-        { label: 'Report', onClick: () => console.log('Report') },
-        { label: 'Export to Excel', onClick: () => console.log('Excel') },
-        { label: 'Copy', onClick: () => console.log('Copy'), shortcut: 'Ctrl+C' },
+        { label: 'Filter by Symbol', onClick: () => {} },
+        { label: 'Report', onClick: () => {} },
+        { label: 'Export to Excel', onClick: () => {} },
+        { label: 'Copy', onClick: () => {}, shortcut: 'Ctrl+C' },
     ];
 
     return (

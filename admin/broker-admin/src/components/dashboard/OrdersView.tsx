@@ -64,12 +64,12 @@ export default function OrdersView({ onOrderDoubleClick }: OrdersViewProps) {
     };
 
     const getMenuActions = (order: any) => [
-        { label: 'Close Order', onClick: () => console.log('Close') },
-        { label: 'Modify Order', onClick: () => console.log('Modify') },
-        { label: 'Delete Order', onClick: () => console.log('Delete') },
-        { label: 'Bulk Operations', onClick: () => console.log('Bulk'), separator: true },
-        { label: 'Copy', onClick: () => console.log('Copy'), shortcut: 'Ctrl+C' },
-        { label: 'Report', onClick: () => console.log('Report'), separator: true },
+        { label: 'Close Order', onClick: () => {} },
+        { label: 'Modify Order', onClick: () => {} },
+        { label: 'Delete Order', onClick: () => {} },
+        { label: 'Bulk Operations', onClick: () => {}, separator: true },
+        { label: 'Copy', onClick: () => {}, shortcut: 'Ctrl+C' },
+        { label: 'Report', onClick: () => {}, separator: true },
     ];
 
     return (

@@ -1,6 +1,7 @@
 package orders
 
 import (
+	"database/sql"
 	"errors"
 	"log"
 	"sync"
@@ -51,7 +52,9 @@ const (
 
 // PendingOrder represents a pending order in the system
 type PendingOrder struct {
-	ID           string      `json:"id"`
+	ID           string      `json:"id"`           // UUID for internal reference
+	DBID         int64       `json:"dbId"`         // Database ID from rtx_orders
+	AccountID    int64       `json:"accountId"`    // Account that owns this order
 	Symbol       string      `json:"symbol"`
 	Side         OrderSide   `json:"side"`
 	Type         OrderType   `json:"type"`
@@ -85,6 +88,8 @@ type OrderService struct {
 	tpLadders     map[string][]TPLadder // tradeId -> TP levels
 	priceCallback func(symbol string) (bid, ask float64, ok bool)
 	execCallback  func(order *PendingOrder) error
+	persistCallback func(order *PendingOrder) error // Callback to persist orders to DB
+	db            *sql.DB // Database connection for persistence
 }
 
 // NewOrderService creates a new order service
@@ -111,8 +116,19 @@ func (s *OrderService) SetExecutionCallback(fn func(order *PendingOrder) error) 
 	s.execCallback = fn
 }
 
+// SetPersistenceCallback sets the function to persist orders to database
+func (s *OrderService) SetPersistenceCallback(fn func(order *PendingOrder) error) {
+	s.persistCallback = fn
+}
+
+// SetDB attaches a database connection for direct persistence
+func (s *OrderService) SetDB(db *sql.DB) {
+	s.db = db
+	log.Println("[OrderService] Database connection attached")
+}
+
 // PlaceLimitOrder creates a limit order
-func (s *OrderService) PlaceLimitOrder(symbol string, side OrderSide, volume, price, sl, tp float64) (*PendingOrder, error) {
+func (s *OrderService) PlaceLimitOrder(accountID int64, symbol string, side OrderSide, volume, price, sl, tp float64) (*PendingOrder, error) {
 	if price <= 0 {
 		return nil, errors.New("invalid limit price")
 	}
@@ -124,6 +140,7 @@ func (s *OrderService) PlaceLimitOrder(symbol string, side OrderSide, volume, pr
 
 	order := &PendingOrder{
 		ID:         uuid.New().String(),
+		AccountID:  accountID,
 		Symbol:     symbol,
 		Side:       side,
 		Type:       OrderTypeLimit,
@@ -140,12 +157,24 @@ func (s *OrderService) PlaceLimitOrder(symbol string, side OrderSide, volume, pr
 	s.pendingOrders[order.ID] = order
 	s.mu.Unlock()
 
-	log.Printf("[OrderService] Limit order placed: %s %s %.2f lots @ %.5f", side, symbol, volume, price)
+	// Persist to database directly
+	if s.db != nil {
+		if err := s.persistOrderToDB(order); err != nil {
+			log.Printf("[OrderService] WARNING: Failed to persist order to DB: %v", err)
+		}
+	} else if s.persistCallback != nil {
+		// Fallback to callback if DB not set
+		if err := s.persistCallback(order); err != nil {
+			log.Printf("[OrderService] WARNING: Failed to persist order via callback: %v", err)
+		}
+	}
+
+	log.Printf("[OrderService] Limit order placed: %s %s %.2f lots @ %.5f (Account: %d)", side, symbol, volume, price, accountID)
 	return order, nil
 }
 
 // PlaceStopOrder creates a stop order
-func (s *OrderService) PlaceStopOrder(symbol string, side OrderSide, volume, triggerPrice, sl, tp float64) (*PendingOrder, error) {
+func (s *OrderService) PlaceStopOrder(accountID int64, symbol string, side OrderSide, volume, triggerPrice, sl, tp float64) (*PendingOrder, error) {
 	if triggerPrice <= 0 {
 		return nil, errors.New("invalid trigger price")
 	}
@@ -157,6 +186,7 @@ func (s *OrderService) PlaceStopOrder(symbol string, side OrderSide, volume, tri
 
 	order := &PendingOrder{
 		ID:           uuid.New().String(),
+		AccountID:    accountID,
 		Symbol:       symbol,
 		Side:         side,
 		Type:         OrderTypeStop,
@@ -173,18 +203,31 @@ func (s *OrderService) PlaceStopOrder(symbol string, side OrderSide, volume, tri
 	s.pendingOrders[order.ID] = order
 	s.mu.Unlock()
 
-	log.Printf("[OrderService] Stop order placed: %s %s %.2f lots @ trigger %.5f", side, symbol, volume, triggerPrice)
+	// Persist to database directly
+	if s.db != nil {
+		if err := s.persistOrderToDB(order); err != nil {
+			log.Printf("[OrderService] WARNING: Failed to persist order to DB: %v", err)
+		}
+	} else if s.persistCallback != nil {
+		// Fallback to callback if DB not set
+		if err := s.persistCallback(order); err != nil {
+			log.Printf("[OrderService] WARNING: Failed to persist order via callback: %v", err)
+		}
+	}
+
+	log.Printf("[OrderService] Stop order placed: %s %s %.2f lots @ trigger %.5f (Account: %d)", side, symbol, volume, triggerPrice, accountID)
 	return order, nil
 }
 
 // PlaceStopLimitOrder creates a stop-limit order
-func (s *OrderService) PlaceStopLimitOrder(symbol string, side OrderSide, volume, triggerPrice, limitPrice, sl, tp float64) (*PendingOrder, error) {
+func (s *OrderService) PlaceStopLimitOrder(accountID int64, symbol string, side OrderSide, volume, triggerPrice, limitPrice, sl, tp float64) (*PendingOrder, error) {
 	if triggerPrice <= 0 || limitPrice <= 0 {
 		return nil, errors.New("invalid prices")
 	}
 
 	order := &PendingOrder{
 		ID:           uuid.New().String(),
+		AccountID:    accountID,
 		Symbol:       symbol,
 		Side:         side,
 		Type:         OrderTypeStopLimit,
@@ -206,8 +249,20 @@ func (s *OrderService) PlaceStopLimitOrder(symbol string, side OrderSide, volume
 	s.pendingOrders[order.ID] = order
 	s.mu.Unlock()
 
-	log.Printf("[OrderService] Stop-Limit order placed: %s %s %.2f lots @ trigger %.5f limit %.5f",
-		side, symbol, volume, triggerPrice, limitPrice)
+	// Persist to database directly
+	if s.db != nil {
+		if err := s.persistOrderToDB(order); err != nil {
+			log.Printf("[OrderService] WARNING: Failed to persist order to DB: %v", err)
+		}
+	} else if s.persistCallback != nil {
+		// Fallback to callback if DB not set
+		if err := s.persistCallback(order); err != nil {
+			log.Printf("[OrderService] WARNING: Failed to persist order via callback: %v", err)
+		}
+	}
+
+	log.Printf("[OrderService] Stop-Limit order placed: %s %s %.2f lots @ trigger %.5f limit %.5f (Account: %d)",
+		side, symbol, volume, triggerPrice, limitPrice, accountID)
 	return order, nil
 }
 
@@ -243,11 +298,29 @@ func (s *OrderService) CancelOrder(orderID string) error {
 	order.Status = StatusCancelled
 	delete(s.pendingOrders, orderID)
 
+	// Persist cancellation to database
+	if s.db != nil {
+		if err := s.updateOrderStatusInDB(order.DBID, string(StatusCancelled)); err != nil {
+			log.Printf("[OrderService] WARNING: Failed to persist order cancellation: %v", err)
+		}
+	} else if s.persistCallback != nil {
+		// Fallback to callback
+		if err := s.persistCallback(order); err != nil {
+			log.Printf("[OrderService] WARNING: Failed to persist order cancellation via callback: %v", err)
+		}
+	}
+
 	// Cancel OCO pair if exists
 	if order.OCOPairID != "" {
 		if pairOrder, ok := s.pendingOrders[order.OCOPairID]; ok {
 			pairOrder.Status = StatusCancelled
 			delete(s.pendingOrders, order.OCOPairID)
+			// Persist OCO pair cancellation too
+			if s.db != nil {
+				s.updateOrderStatusInDB(pairOrder.DBID, string(StatusCancelled))
+			} else if s.persistCallback != nil {
+				s.persistCallback(pairOrder)
+			}
 		}
 	}
 
@@ -322,6 +395,10 @@ func (s *OrderService) checkPendingOrders() {
 		if order.Expiry != nil && time.Now().After(*order.Expiry) {
 			order.Status = StatusExpired
 			delete(s.pendingOrders, id)
+			// Update status in DB
+			if s.db != nil {
+				s.updateOrderStatusInDB(order.DBID, string(StatusExpired))
+			}
 			log.Printf("[OrderService] Order expired: %s", id)
 			continue
 		}
@@ -370,14 +447,25 @@ func (s *OrderService) checkPendingOrders() {
 			order.TriggeredAt = &now
 			order.Status = StatusTriggered
 
+			// Update status in DB
+			if s.db != nil {
+				s.updateOrderStatusInDB(order.DBID, string(StatusTriggered))
+			}
+
 			// Execute the order
 			if s.execCallback != nil {
 				go func(o *PendingOrder) {
 					if err := s.execCallback(o); err != nil {
 						log.Printf("[OrderService] Execution failed: %v", err)
 						o.Status = StatusRejected
+						if s.db != nil {
+							s.updateOrderStatusInDB(o.DBID, string(StatusRejected))
+						}
 					} else {
 						o.Status = StatusFilled
+						if s.db != nil {
+							s.updateOrderStatusInDB(o.DBID, string(StatusFilled))
+						}
 					}
 				}(order)
 			}
@@ -387,6 +475,9 @@ func (s *OrderService) checkPendingOrders() {
 				if pairOrder, exists := s.pendingOrders[order.OCOPairID]; exists {
 					pairOrder.Status = StatusCancelled
 					delete(s.pendingOrders, order.OCOPairID)
+					if s.db != nil {
+						s.updateOrderStatusInDB(pairOrder.DBID, string(StatusCancelled))
+					}
 					log.Printf("[OrderService] OCO pair cancelled: %s", order.OCOPairID)
 				}
 			}
@@ -400,4 +491,179 @@ func (s *OrderService) checkPendingOrders() {
 
 func (s *OrderService) checkTPLadders() {
 	// TP Ladder processing will be implemented with position management
+}
+
+// persistOrderToDB inserts a pending order into rtx_orders table
+func (s *OrderService) persistOrderToDB(order *PendingOrder) error {
+	if s.db == nil {
+		return nil
+	}
+
+	// Determine price field based on order type
+	var price, triggerPrice interface{}
+	if order.Type == OrderTypeLimit {
+		price = order.EntryPrice
+	}
+	if order.Type == OrderTypeStop || order.Type == OrderTypeStopLimit {
+		triggerPrice = order.TriggerPrice
+	}
+	if order.Type == OrderTypeStopLimit {
+		price = order.LimitPrice
+	}
+
+	query := `
+		INSERT INTO rtx_orders (
+			account_id, symbol, type, side, volume, price, trigger_price,
+			sl, tp, status, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		RETURNING id
+	`
+
+	var dbID int64
+	err := s.db.QueryRow(query,
+		order.AccountID,
+		order.Symbol,
+		string(order.Type),
+		string(order.Side),
+		order.Volume,
+		price,
+		triggerPrice,
+		order.SL,
+		order.TP,
+		string(order.Status),
+		order.CreatedAt,
+	).Scan(&dbID)
+
+	if err != nil {
+		log.Printf("[OrderService] ERROR persisting order to DB: %v", err)
+		return err
+	}
+
+	// Store the DB ID back into the order
+	order.DBID = dbID
+	log.Printf("[OrderService] Order persisted to DB with ID %d (UUID: %s)", dbID, order.ID)
+	return nil
+}
+
+// updateOrderStatusInDB updates an order's status in the database
+func (s *OrderService) updateOrderStatusInDB(dbID int64, status string) error {
+	if s.db == nil {
+		return nil
+	}
+
+	query := `UPDATE rtx_orders SET status = $1 WHERE id = $2`
+	_, err := s.db.Exec(query, status, dbID)
+	if err != nil {
+		log.Printf("[OrderService] ERROR updating order status in DB: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// LoadPendingOrders restores pending orders from the database on startup
+func (s *OrderService) LoadPendingOrders() error {
+	if s.db == nil {
+		log.Println("[OrderService] No database configured - skipping pending orders load")
+		return nil
+	}
+
+	log.Println("[OrderService] Loading pending orders from database...")
+
+	query := `
+		SELECT id, account_id, symbol, type, side, volume,
+		       COALESCE(price, 0), COALESCE(trigger_price, 0),
+		       COALESCE(sl, 0), COALESCE(tp, 0),
+		       status, created_at
+		FROM rtx_orders
+		WHERE status = 'PENDING'
+		ORDER BY id
+	`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := 0
+	for rows.Next() {
+		var dbID, accountID int64
+		var symbol, orderType, side, status string
+		var volume, price, triggerPrice, sl, tp float64
+		var createdAt time.Time
+
+		err := rows.Scan(
+			&dbID,
+			&accountID,
+			&symbol,
+			&orderType,
+			&side,
+			&volume,
+			&price,
+			&triggerPrice,
+			&sl,
+			&tp,
+			&status,
+			&createdAt,
+		)
+
+		if err != nil {
+			log.Printf("[OrderService] ERROR scanning order row: %v", err)
+			continue
+		}
+
+		// Create PendingOrder from DB data
+		order := &PendingOrder{
+			ID:        uuid.New().String(), // Generate new UUID for internal use
+			DBID:      dbID,
+			AccountID: accountID,
+			Symbol:    symbol,
+			Side:      OrderSide(side),
+			Type:      OrderType(orderType),
+			Volume:    volume,
+			SL:        sl,
+			TP:        tp,
+			Status:    OrderStatus(status),
+			CreatedAt: createdAt,
+		}
+
+		// Map type-specific fields
+		switch OrderType(orderType) {
+		case OrderTypeLimit:
+			order.EntryPrice = price
+			if side == "BUY" {
+				order.Subtype = SubtypeBuyLimit
+			} else {
+				order.Subtype = SubtypeSellLimit
+			}
+		case OrderTypeStop:
+			order.TriggerPrice = triggerPrice
+			if side == "BUY" {
+				order.Subtype = SubtypeBuyStop
+			} else {
+				order.Subtype = SubtypeSellStop
+			}
+		case OrderTypeStopLimit:
+			order.TriggerPrice = triggerPrice
+			order.LimitPrice = price
+			if side == "BUY" {
+				order.Subtype = SubtypeBuyStop
+			} else {
+				order.Subtype = SubtypeSellStop
+			}
+		}
+
+		s.pendingOrders[order.ID] = order
+		count++
+
+		log.Printf("[OrderService] Loaded pending order #%d: %s %s %s %.2f lots",
+			dbID, orderType, side, symbol, volume)
+	}
+
+	log.Printf("[OrderService] ✓ Loaded %d pending orders from database", count)
+	return nil
 }

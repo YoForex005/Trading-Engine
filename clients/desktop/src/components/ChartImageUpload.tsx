@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import './ChartImageUpload.css';
+import { API_ENDPOINTS } from '../config/api';
 
 interface UploadResponse {
     status: string;
@@ -78,7 +79,7 @@ export const ChartImageUpload: React.FC<ChartImageUploadProps> = ({ onPairsDetec
             const formData = new FormData();
             formData.append('image', file);
 
-            const response = await fetch('http://localhost:7999/api/analysis/upload-chart', {
+            const response = await fetch(API_ENDPOINTS.chartAnalysis, {
                 method: 'POST',
                 body: formData,
             });
