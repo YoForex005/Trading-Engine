@@ -433,7 +433,7 @@ export interface ShortcutAction {
 /**
  * Register keyboard shortcuts for Market Watch
  */
-export function registerMarketWatchShortcuts(symbol: string): void {
+export function registerMarketWatchShortcuts(symbol: string): () => void {
   const handleKeyDown = (e: KeyboardEvent) => {
     // F9 - New Order
     if (e.key === 'F9') {
@@ -469,7 +469,8 @@ export function registerMarketWatchShortcuts(symbol: string): void {
   window.addEventListener('keydown', handleKeyDown);
 
   // Return cleanup function
-  return () => window.removeEventListener('keydown', handleKeyDown);
+  const cleanup = () => window.removeEventListener('keydown', handleKeyDown);
+  return cleanup;
 }
 
 // ==========================================

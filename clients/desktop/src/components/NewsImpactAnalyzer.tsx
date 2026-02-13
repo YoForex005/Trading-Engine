@@ -1,8 +1,11 @@
 /**
  * NewsImpactAnalyzer Component
  * Shows how economic news events affect symbol prices historically
+ * Connected to backend: GET /admin/market-news/calendar (for upcoming events)
+ * Mock data used as fallback for historical impact analysis (no dedicated endpoint)
  */
 
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Calendar,
   TrendingUp,
@@ -12,8 +15,10 @@ import {
   BarChart3,
   AlertCircle,
   ChevronRight,
+  RefreshCw,
 } from 'lucide-react';
 import { useNewsImpactStore } from '../store/useNewsImpactStore';
+import { API_ENDPOINTS } from '../config/api';
 
 type EventCategory = 'Employment' | 'Inflation' | 'Interest Rates' | 'GDP' | 'PMI' | 'Trade Balance';
 type ImpactLevel = 'Low' | 'Medium' | 'High';
@@ -216,15 +221,96 @@ function generateOccurrences(avgPips: number): HistoricalOccurrence[] {
   return occurrences;
 }
 
+// Fetch upcoming events from backend calendar: GET /admin/market-news/calendar
+async function fetchUpcomingEventsFromAPI(): Promise<EconomicEvent[]> {
+  let authToken: string | null = null;
+  try {
+    const { useAppStore } = await import('../store/useAppStore');
+    authToken = useAppStore.getState().authToken;
+  } catch {
+    // fallback
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+
+  const response = await fetch(API_ENDPOINTS.marketNews.calendar, { headers });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch calendar: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const events = Array.isArray(data) ? data : (data.events || data.data || []);
+
+  // Map categories
+  const categoryMap: Record<string, EventCategory> = {
+    employment: 'Employment',
+    inflation: 'Inflation',
+    interest_rates: 'Interest Rates',
+    interest_rate: 'Interest Rates',
+    gdp: 'GDP',
+    pmi: 'PMI',
+    trade_balance: 'Trade Balance',
+    trade: 'Trade Balance',
+  };
+
+  return events
+    .filter((e: any) => {
+      // Only upcoming events (next 24 hours)
+      const eventTime = new Date(e.scheduled_at || '');
+      const now = new Date();
+      return eventTime > now && eventTime.getTime() - now.getTime() <= 24 * 60 * 60 * 1000;
+    })
+    .map((e: any, idx: number): EconomicEvent => ({
+      id: String(e.id || idx + 1),
+      type: e.name || '',
+      category: categoryMap[(e.category || '').toLowerCase()] || 'GDP',
+      time: e.scheduled_at || new Date().toISOString(),
+      impact: (e.impact === 'high' ? 'High' : e.impact === 'medium' ? 'Medium' : 'Low') as ImpactLevel,
+      currency: e.currency || '',
+      affectedSymbols: e.affected_symbols || [],
+      forecast: e.forecast !== null && e.forecast !== undefined ? `${e.forecast}${e.unit || ''}` : undefined,
+      previous: e.previous !== null && e.previous !== undefined ? `${e.previous}${e.unit || ''}` : undefined,
+      actual: e.actual !== null && e.actual !== undefined ? `${e.actual}${e.unit || ''}` : undefined,
+    }));
+}
+
 export function NewsImpactAnalyzer() {
   const [selectedEventType, setSelectedEventType] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<EventCategory | 'All'>('All');
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [isLoading, setIsLoading] = useState(false);
+  const [upcomingEvents, setUpcomingEvents] = useState<EconomicEvent[]>(() => generateUpcomingEvents());
 
   const { toggleFavorite, isFavorited } = useNewsImpactStore();
 
-  const upcomingEvents = useMemo(() => generateUpcomingEvents(), []);
+  // eventTypeData remains mock -- no dedicated historical impact endpoint exists
+  // TODO: Backend endpoint needed: GET /admin/market-news/calendar/history or /admin/market-news/impact-analysis
   const eventTypeData = useMemo(() => generateEventTypeData(), []);
+
+  // Fetch upcoming events from API on mount
+  const fetchUpcoming = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const apiEvents = await fetchUpcomingEventsFromAPI();
+      if (apiEvents.length > 0) {
+        setUpcomingEvents(apiEvents);
+      }
+      // If empty, keep mock data
+    } catch (err: any) {
+      console.warn('[NewsImpactAnalyzer] Failed to fetch from API, using mock data:', err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchUpcoming();
+  }, [fetchUpcoming]);
 
   // Update time every second for countdowns
   useEffect(() => {
@@ -264,6 +350,14 @@ export function NewsImpactAnalyzer() {
           <Calendar className="w-5 h-5 text-cyan-400" />
           <h2 className="text-lg font-semibold text-white">Economic News Impact Analyzer</h2>
         </div>
+        <button
+          onClick={fetchUpcoming}
+          disabled={isLoading}
+          className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-700/50 rounded transition-colors disabled:opacity-50"
+          title="Refresh upcoming events"
+        >
+          <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
       {/* Upcoming Events (Next 24h) */}

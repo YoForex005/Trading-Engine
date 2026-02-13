@@ -24,6 +24,11 @@ interface PriceData {
     returns: number[]; // Daily returns
 }
 
+// TODO: Backend endpoint needed - /api/market-data/returns or /api/correlation
+// This would accept symbols[] and period (days) and return daily price returns.
+// Currently the backend has /ticks and /ohlc endpoints which could be used to derive
+// returns (fetch OHLC with timeframe=D1, compute daily close-to-close returns),
+// but there is no dedicated endpoint for correlation data.
 // Mock function to generate 30 days of price returns
 function generateMockReturns(symbol: string, days: number = 30): number[] {
     const returns: number[] = [];

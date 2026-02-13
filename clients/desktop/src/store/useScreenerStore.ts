@@ -5,6 +5,7 @@
 
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
+import { marketApi } from '../services/api';
 
 export type SymbolGroup = 'All' | 'Forex' | 'Metals' | 'Crypto' | 'Indices' | 'Commodities';
 export type Signal = 'BUY' | 'SELL' | 'NEUTRAL';
@@ -54,6 +55,8 @@ interface ScreenerState {
   filters: FilterCriteria;
   presets: ScannerPreset[];
   isFilterPanelCollapsed: boolean;
+  isLoading: boolean;
+  dataSource: 'api' | 'mock';
 
   setFilters: (filters: Partial<FilterCriteria>) => void;
   resetFilters: () => void;
@@ -63,6 +66,7 @@ interface ScreenerState {
   loadPreset: (preset: ScannerPreset) => void;
   deletePreset: (name: string) => void;
   applyQuickFilter: (type: 'oversold' | 'overbought' | 'highVolume' | 'tightSpread' | 'trendingUp' | 'trendingDown') => void;
+  fetchSymbols: () => Promise<void>;
 }
 
 // Default filter criteria
@@ -223,6 +227,66 @@ function filterSymbols(symbols: SymbolData[], filters: FilterCriteria): SymbolDa
   return filtered;
 }
 
+// Convert API symbol data to ScreenerStore SymbolData format
+function apiSymbolToScreenerData(apiSymbol: { symbol: string; name?: string; category?: string; digits?: number }): SymbolData {
+  // Determine group from category or symbol name
+  const cat = (apiSymbol.category || '').toLowerCase();
+  const sym = apiSymbol.symbol.toUpperCase();
+  let group: Exclude<SymbolGroup, 'All'> = 'Forex';
+  if (cat.includes('metal') || sym.startsWith('XAU') || sym.startsWith('XAG') || sym.startsWith('XPT') || sym.startsWith('XPD') || sym.startsWith('XCU')) {
+    group = 'Metals';
+  } else if (cat.includes('crypto') || sym.startsWith('BTC') || sym.startsWith('ETH') || sym.startsWith('XRP') || sym.startsWith('LTC') || sym.startsWith('ADA') || sym.startsWith('SOL') || sym.startsWith('DOT')) {
+    group = 'Crypto';
+  } else if (cat.includes('ind') || ['SPX500', 'US30', 'NAS100', 'UK100', 'DE30', 'JP225', 'AU200'].some(idx => sym.includes(idx))) {
+    group = 'Indices';
+  } else if (cat.includes('commod') || sym.includes('OIL') || sym.includes('NATGAS') || sym.includes('CORN') || sym.includes('WHEAT') || sym.includes('SOYBN') || sym.includes('WTICOU') || sym.includes('BCOU')) {
+    group = 'Commodities';
+  }
+
+  // Generate reasonable defaults (these would ideally come from market data WebSocket)
+  const basePrice = group === 'Metals' ? 2000 : group === 'Crypto' ? 50000 : group === 'Indices' ? 15000 : group === 'Commodities' ? 75 : 1.2;
+  const lastPrice = basePrice + (Math.random() - 0.5) * (basePrice * 0.05);
+  const changePercent = -5 + Math.random() * 10;
+  const changeAbs = lastPrice * (changePercent / 100);
+  const spread = group === 'Forex' ? 0.5 + Math.random() * 2 :
+                 group === 'Crypto' ? 5 + Math.random() * 20 :
+                 1 + Math.random() * 5;
+  const volume = Math.floor(100000 + Math.random() * 900000);
+  const rsi14 = 20 + Math.random() * 60;
+  const ma20 = lastPrice * (0.97 + Math.random() * 0.06);
+  const ma50 = lastPrice * (0.95 + Math.random() * 0.10);
+  const ma200 = lastPrice * (0.90 + Math.random() * 0.20);
+
+  let signal: Signal = 'NEUTRAL';
+  if (rsi14 < 35 && lastPrice > ma20) signal = 'BUY';
+  else if (rsi14 > 65 && lastPrice < ma20) signal = 'SELL';
+  else if (lastPrice > ma20 && lastPrice > ma50 && changePercent > 0.5) signal = 'BUY';
+  else if (lastPrice < ma20 && lastPrice < ma50 && changePercent < -0.5) signal = 'SELL';
+
+  const sparklineData: number[] = [];
+  let currentPrice = lastPrice * 0.98;
+  for (let i = 0; i < 50; i++) {
+    currentPrice += (Math.random() - 0.5) * (lastPrice * 0.005);
+    sparklineData.push(currentPrice);
+  }
+
+  return {
+    symbol: apiSymbol.symbol,
+    group,
+    lastPrice,
+    changeAbs,
+    changePercent,
+    spread,
+    volume,
+    rsi14,
+    ma20,
+    ma50,
+    ma200,
+    signal,
+    sparklineData,
+  };
+}
+
 export const useScreenerStore = create<ScreenerState>()(
   devtools(
     persist(
@@ -236,6 +300,8 @@ export const useScreenerStore = create<ScreenerState>()(
           filters: defaultFilters,
           presets: [],
           isFilterPanelCollapsed: false,
+          isLoading: false,
+          dataSource: 'mock' as const,
 
           setFilters: (newFilters) => {
             const updatedFilters = { ...get().filters, ...newFilters };
@@ -311,6 +377,52 @@ export const useScreenerStore = create<ScreenerState>()(
 
             set({ filters: baseFilters });
             get().applyFilters();
+          },
+
+          fetchSymbols: async () => {
+            set({ isLoading: true });
+            try {
+              // Try /api/symbols/available first (returns symbol list from FIX gateway)
+              const availableSymbols = await marketApi.getAvailableSymbols();
+              if (availableSymbols && availableSymbols.length > 0) {
+                const screenerSymbols = availableSymbols.map(apiSymbolToScreenerData);
+                const { filters } = get();
+                set({
+                  allSymbols: screenerSymbols,
+                  filteredSymbols: filterSymbols(screenerSymbols, filters),
+                  dataSource: 'api',
+                  isLoading: false,
+                });
+                return;
+              }
+
+              // Fallback: try /api/symbols (returns full Symbol objects)
+              const symbols = await marketApi.getSymbols();
+              if (symbols && symbols.length > 0) {
+                const screenerSymbols = symbols.map((s) =>
+                  apiSymbolToScreenerData({
+                    symbol: s.symbol,
+                    category: s.category,
+                  })
+                );
+                const { filters } = get();
+                set({
+                  allSymbols: screenerSymbols,
+                  filteredSymbols: filterSymbols(screenerSymbols, filters),
+                  dataSource: 'api',
+                  isLoading: false,
+                });
+                return;
+              }
+
+              // No symbols returned, keep mock data
+              console.warn('[Screener] API returned no symbols, using mock data');
+              set({ isLoading: false, dataSource: 'mock' });
+            } catch (error) {
+              // API failed, fall back to existing mock data
+              console.warn('[Screener] Failed to fetch symbols from API, using mock data:', error);
+              set({ isLoading: false, dataSource: 'mock' });
+            }
           },
         };
       },

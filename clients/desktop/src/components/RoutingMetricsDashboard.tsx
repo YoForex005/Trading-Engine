@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { getWebSocketService } from '../services/websocket';
 import { useAppStore } from '../store/useAppStore';
+import { API_BASE_URL as API_BASE, WS_ENDPOINTS } from '../config/api';
 
 // ============================================
 // Type Definitions
@@ -86,9 +87,6 @@ export const RoutingMetricsDashboard = ({ className = '' }: RoutingMetricsDashbo
   const confidenceChartRef = useRef<HTMLDivElement>(null);
   const timelineChart = useRef<IChartApi | null>(null);
   const confidenceChart = useRef<IChartApi | null>(null);
-
-  // API base URL
-  import { API_BASE_URL as API_BASE, WS_ENDPOINTS } from '../config/api';
 
   // ============================================
   // Data Fetching

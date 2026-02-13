@@ -55,29 +55,32 @@ export function ChartIntegrationDemo() {
   }, []);
 
   const handleCrosshairToggle = () => {
-    commandBus.dispatch({ type: 'TOGGLE_CROSSHAIR' });
+    commandBus.dispatch({ type: 'TOGGLE_CROSSHAIR', payload: {} });
     setCrosshairEnabled(!crosshairEnabled);
   };
 
   const handleZoomIn = () => {
-    commandBus.dispatch({ type: 'ZOOM_IN' });
+    commandBus.dispatch({ type: 'ZOOM_IN', payload: {} });
   };
 
   const handleZoomOut = () => {
-    commandBus.dispatch({ type: 'ZOOM_OUT' });
+    commandBus.dispatch({ type: 'ZOOM_OUT', payload: {} });
   };
 
   const handleFitContent = () => {
-    commandBus.dispatch({ type: 'FIT_CONTENT' });
+    commandBus.dispatch({ type: 'FIT_CONTENT', payload: {} });
   };
 
   const handleToolSelect = (tool: string) => {
     setActiveTool(tool);
-    commandBus.dispatch({ type: `SELECT_${tool.toUpperCase()}` });
+    commandBus.dispatch({
+      type: 'SELECT_TOOL',
+      payload: { tool: tool as 'cursor' | 'trendline' | 'hline' | 'vline' | 'text' }
+    });
   };
 
   const handleOpenIndicators = () => {
-    commandBus.dispatch({ type: 'OPEN_INDICATORS' });
+    commandBus.dispatch({ type: 'OPEN_INDICATOR_NAVIGATOR', payload: {} });
   };
 
   const handleClearDrawings = () => {
@@ -236,7 +239,7 @@ export function ChartIntegrationDemo() {
         <ChartWithIndicators
           symbol="EURUSD"
           chartType="candlestick"
-          timeframe="1m"
+          timeframe="M1"
         />
       </div>
 

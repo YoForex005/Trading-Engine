@@ -1,66 +1,43 @@
 /**
  * Drawing Store (Zustand)
  * Manages chart drawing tools and drawings state
+ *
+ * NOTE: This store uses canonical Drawing types from drawingManager.ts
+ * Extended properties for UI-specific features (zIndex, extendLeft/Right, etc.)
  */
 
 import { create } from 'zustand';
+import type { Drawing as BaseDrawing, DrawingType, DrawingPoint } from '../services/drawingManager';
 
-export type DrawingType =
-  | 'trend-line'
-  | 'horizontal-line'
-  | 'vertical-line'
-  | 'channel'
-  | 'fib-retracement'
-  | 'fib-extension'
-  | 'rectangle'
-  | 'ellipse'
-  | 'pitchfork'
-  | 'text-label'
-  | 'arrow'
-  | 'crosshair-ruler';
-
-export type LineStyle = 'solid' | 'dashed' | 'dotted';
-
-export interface Point {
-  x: number;
-  y: number;
-  price?: number;
-  time?: string;
+// Extended drawing interface for store-specific features
+export interface StoreDrawing extends BaseDrawing {
+  extendLeft?: boolean;
+  extendRight?: boolean;
+  showPriceLabels?: boolean;
+  zIndex?: number;
+  label?: string;
 }
 
-export interface Drawing {
-  id: string;
-  type: DrawingType;
-  points: Point[];
-  color: string;
-  lineWidth: number;
-  lineStyle: LineStyle;
-  extendLeft: boolean;
-  extendRight: boolean;
-  showPriceLabels: boolean;
-  visible: boolean;
-  zIndex: number;
-  text?: string; // For text labels
-  label?: string; // Custom label
-}
+// Re-export types from canonical source
+export type { DrawingType, DrawingPoint };
 
 export interface DrawingTemplate {
   id: string;
   name: string;
-  drawings: Drawing[];
+  drawings: StoreDrawing[];
   createdAt: string;
 }
 
 interface DrawingState {
-  drawings: Drawing[];
+  drawings: StoreDrawing[];
   selectedDrawingId: string | null;
   activeTool: DrawingType | null;
   templates: DrawingTemplate[];
   isDrawing: boolean;
 
   // Actions
-  addDrawing: (drawing: Omit<Drawing, 'id' | 'zIndex'>) => void;
-  updateDrawing: (id: string, updates: Partial<Drawing>) => void;
+  addDrawing: (drawing: Omit<StoreDrawing, 'id' | 'zIndex'>) => void;
+  updateDrawing: (id: string, updates: Partial<StoreDrawing>) => void;
   deleteDrawing: (id: string) => void;
   duplicateDrawing: (id: string) => void;
   setSelectedDrawing: (id: string | null) => void;
@@ -78,9 +55,9 @@ interface DrawingState {
 }
 
 // Helper to get next z-index
-const getNextZIndex = (drawings: Drawing[]): number => {
+const getNextZIndex = (drawings: StoreDrawing[]): number => {
   if (drawings.length === 0) return 1;
-  return Math.max(...drawings.map(d => d.zIndex)) + 1;
+  return Math.max(...drawings.map(d => d.zIndex || 0)) + 1;
 };
 
 // Load from localStorage
@@ -112,10 +89,11 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
   isDrawing: false,
 
   addDrawing: (drawing) => {
-    const newDrawing: Drawing = {
+    const newDrawing: StoreDrawing = {
       ...drawing,
       id: `drawing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       zIndex: getNextZIndex(get().drawings),
+      visible: drawing.visible !== false, // Default to true
     };
 
     set((state) => {
@@ -150,11 +128,14 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
     const drawing = get().drawings.find((d) => d.id === id);
     if (!drawing) return;
 
-    const duplicated: Drawing = {
+    const duplicated: StoreDrawing = {
       ...drawing,
       id: `drawing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       zIndex: getNextZIndex(get().drawings),
-      points: drawing.points.map(p => ({ ...p, x: p.x + 20, y: p.y + 20 })), // Offset slightly
+      points: drawing.points.map(p => ({
+        time: p.time + 60, // Offset by 1 minute
+        price: p.price * 1.0001 // Offset slightly in price
+      })),
     };
 
     set((state) => {
@@ -181,7 +162,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
   },
 
   bringToFront: (id) => {
-    const maxZ = Math.max(...get().drawings.map(d => d.zIndex));
+    const maxZ = Math.max(...get().drawings.map(d => d.zIndex || 0));
     get().updateDrawing(id, { zIndex: maxZ + 1 });
   },
 
@@ -190,7 +171,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
     // Re-index all drawings
     set((state) => {
       const newDrawings = state.drawings
-        .sort((a, b) => a.zIndex - b.zIndex)
+        .sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
         .map((d, idx) => ({ ...d, zIndex: idx + 1 }));
       localStorage.setItem('rtx5-drawings', JSON.stringify(newDrawings));
       return { drawings: newDrawings };
@@ -223,7 +204,7 @@ export const useDrawingStore = create<DrawingState>((set, get) => ({
     if (!template) return;
 
     // Generate new IDs for loaded drawings
-    const loadedDrawings: Drawing[] = template.drawings.map(d => ({
+    const loadedDrawings: StoreDrawing[] = template.drawings.map(d => ({
       ...d,
       id: `drawing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       zIndex: getNextZIndex(get().drawings) + (d.zIndex || 0),

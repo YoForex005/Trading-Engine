@@ -6,7 +6,8 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { getWebSocketService } from '../services/websocket';
-import { WS_ENDPOINTS } from '../config/api';
+import { WS_ENDPOINTS, API_BASE_URL } from '../config/api';
+import { useAppStore } from '../store/useAppStore';
 
 // ============================================
 // Types
@@ -249,9 +250,14 @@ export const ExposureHeatmap = () => {
 
   const fetchExposureData = useCallback(async () => {
     try {
-      // TODO: Replace with actual API endpoint
+      // Fetch from real backend endpoint: /api/analytics/exposure/heatmap
+      const authToken = useAppStore.getState().authToken;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/analytics/exposure/heatmap?interval=${timeInterval}`
+        `${API_BASE_URL}/api/analytics/exposure/heatmap?interval=${timeInterval}`,
+        { headers }
       );
 
       if (!response.ok) throw new Error('Failed to fetch exposure data');
@@ -259,7 +265,7 @@ export const ExposureHeatmap = () => {
       const result = await response.json();
       setData(result);
     } catch (error) {
-      console.error('[ExposureHeatmap] Failed to fetch data:', error);
+      console.error('[ExposureHeatmap] Failed to fetch data, using mock fallback:', error);
 
       // Mock data for development
       const symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD'];

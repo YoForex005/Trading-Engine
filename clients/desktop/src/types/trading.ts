@@ -107,30 +107,9 @@ export type Notification = {
   };
 };
 
-// Chart Types
-export type DrawingTool =
-  | 'TREND_LINE'
-  | 'HORIZONTAL_LINE'
-  | 'VERTICAL_LINE'
-  | 'FIBONACCI'
-  | 'SUPPORT_RESISTANCE'
-  | 'CHANNEL'
-  | 'RECTANGLE'
-  | 'TRIANGLE'
-  | 'TEXT_NOTE';
-
-export type Drawing = {
-  id: string;
-  type: DrawingTool;
-  points: { time: number; price: number }[];
-  style: {
-    color: string;
-    lineWidth: number;
-    lineStyle: 'solid' | 'dashed' | 'dotted';
-  };
-  locked?: boolean;
-  visible?: boolean;
-};
+// Chart Types - Drawing types are now consolidated in services/drawingManager.ts
+// Use: import type { Drawing, DrawingType } from '../services/drawingManager';
+// This avoids type conflicts and maintains a single source of truth
 
 export type TechnicalIndicator = {
   id: string;
@@ -420,7 +399,7 @@ export type ChartConfig = {
   symbol: string;
   timeframe: string;
   indicators: TechnicalIndicator[];
-  drawings: Drawing[];
+  drawings: any[]; // Use Drawing type from services/drawingManager.ts
   settings: ChartSettings;
 };
 

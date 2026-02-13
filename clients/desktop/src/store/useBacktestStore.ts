@@ -63,6 +63,11 @@ export const useBacktestStore = create<BacktestState>((set) => ({
     estimatedTimeRemaining: 0,
     results: null,
 
+    // TODO: Backend API needed - No /api/backtest endpoint exists yet.
+    // When a backend endpoint is added, startBacktest should POST to /api/backtest
+    // with strategy parameters (symbol, timeframe, dateRange, strategyId, etc.)
+    // and poll /api/backtest/:id/status for progress updates, then GET /api/backtest/:id/results
+    // for final BacktestResults. For now, the component only toggles isRunning locally.
     startBacktest: () => set({ isRunning: true, progress: 0, results: null }),
     stopBacktest: () => set({ isRunning: false, progress: 0 }),
     setProgress: (progress, currentDate) => set({

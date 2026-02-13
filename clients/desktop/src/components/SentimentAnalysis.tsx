@@ -261,7 +261,7 @@ export function SentimentAnalysis() {
                             {item.symbol}
                           </span>
                           {isExtremePosition && (
-                            <AlertTriangle size={12} className="text-yellow-400" title="Extreme positioning - contrarian signal" />
+                            <AlertTriangle size={12} className="text-yellow-400" />
                           )}
                         </div>
                         <div className="flex gap-3 text-xs">

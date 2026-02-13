@@ -23,37 +23,79 @@ export function Login({ onLogin }: LoginProps) {
             const username = (form.elements[0] as HTMLInputElement).value;
             const password = (form.elements[1] as HTMLInputElement).value;
 
-            // Assume username IS the account ID for now
-            const accountId = username;
+            // Validate inputs
+            if (!username || !password) {
+                throw new Error('Username and password are required');
+            }
+
+            console.log('[Login] Attempting login for user:', username);
 
             // Note: Dynamic server selection is used. In production, use proper environment handling
             if (server !== defaultServer) {
                 console.log('Using server:', server);
             }
 
-            // Make login request with proper error handling
-            const res = await fetch(`http://${server}/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
-            });
+            // Make login request with proper error handling and timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-            if (res.status !== 200) {
-                throw new Error('Authentication failed');
+            let res: Response;
+            try {
+                res = await fetch(`http://${server}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password }),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+            } catch (fetchError: any) {
+                clearTimeout(timeoutId);
+                if (fetchError.name === 'AbortError') {
+                    throw new Error('Request timeout - server not responding');
+                }
+                throw new Error(`Network error: ${fetchError.message}`);
             }
 
-            const data = await res.json();
+            // Handle non-200 responses
+            if (res.status === 401) {
+                throw new Error('Invalid credentials');
+            } else if (res.status === 403) {
+                throw new Error('Account is disabled');
+            } else if (res.status === 500) {
+                throw new Error('Server error - please try again');
+            } else if (res.status !== 200) {
+                throw new Error(`Authentication failed (${res.status})`);
+            }
 
-            if (!data.token) {
+            // Parse response with error handling
+            let data: any;
+            try {
+                data = await res.json();
+            } catch (parseError) {
+                throw new Error('Invalid response from server');
+            }
+
+            // Validate token
+            if (!data.token || typeof data.token !== 'string') {
                 throw new Error('No authentication token received');
             }
+
+            console.log('[Login] Token received, user:', data.user);
+
+            // Extract account ID from response or use username as fallback
+            const accountId = data.user?.id || username;
+            console.log('[Login] Using account ID:', accountId);
 
             // Store token in Zustand store and localStorage for persistence
             setAuthToken(data.token);
             setAuthenticated(true, accountId, data.token);
             localStorage.setItem('rtx_token', data.token);
-            localStorage.setItem('rtx_user', JSON.stringify(data.user));
+            localStorage.setItem('rtx_account_id', accountId);
+            localStorage.setItem('rtx_user', JSON.stringify(data.user || {}));
 
+            console.log('[Login] Auth state saved, triggering onLogin callback');
+
+            // Call onLogin callback to trigger route navigation
             onLogin(accountId);
         } catch (err: any) {
             console.error('Login error:', err);

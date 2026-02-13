@@ -20,6 +20,8 @@ import { useTradeSettings, useChartsSettings, useSettingsStore } from '../store/
 import { DrawingContextMenu } from './DrawingContextMenu';
 import { ChartContextMenu } from './ChartContextMenu';
 import { OneClickPanel } from './OneClickPanel';
+import { DrawingListPanel } from './DrawingListPanel';
+import { DrawingPropertiesPanel } from './DrawingPropertiesPanel';
 
 export type ChartType = 'candlestick' | 'heikinAshi' | 'bar' | 'line' | 'area';
 export type Timeframe = 'M1' | 'M5' | 'M15' | 'M30' | 'H1' | 'H4' | 'D1' | 'W1' | 'MN';
@@ -100,6 +102,7 @@ export function TradingChart({
     // Chart settings state (local UI state only)
     const [showGrid, setShowGrid] = useState(true);
     const [showVolumes, setShowVolumes] = useState(true);
+    const [showDrawingList, setShowDrawingList] = useState(false);
 
     // Initialize chart ONCE
     useEffect(() => {
@@ -302,7 +305,7 @@ export function TradingChart({
                 // Clear manager references
                 chartManager.setChart(null);
                 indicatorManager.setChart(null);
-                drawingManager.setChart(null, null);
+                drawingManager.setChart(null, null, null);
 
                 // Clear global refs
                 if ((window as any).__activeChartCanvas === canvasRef.current) {
@@ -419,7 +422,31 @@ export function TradingChart({
             volumeSeriesRef.current = volumeSeries;
 
             // Update drawing manager with new series
-            drawingManager.setChart(chartRef.current, series, symbol);
+            // Ensure drawingManager.setChart() is called with valid refs
+            if (chartRef.current && series) {
+                drawingManager.setChart(chartRef.current, series, symbol, accountId ? parseInt(accountId) : 1);
+            } else {
+                console.warn('[TradingChart] Cannot set chart in drawingManager: invalid refs');
+            }
+
+            // CRITICAL: Verify overlay container exists and log details
+            setTimeout(() => {
+                const container = document.querySelector('.chart-drawing-overlay');
+                if (container) {
+                    const rect = container.getBoundingClientRect();
+                    console.log('[TradingChart] Overlay container verified:', {
+                        exists: true,
+                        width: rect.width,
+                        height: rect.height,
+                        top: rect.top,
+                        left: rect.left,
+                        zIndex: window.getComputedStyle(container).zIndex,
+                        position: window.getComputedStyle(container).position
+                    });
+                } else {
+                    console.error('[TradingChart] CRITICAL: Overlay container not found after series creation!');
+                }
+            }, 100);
 
             // Get combined candles (historical + forming)
             const allCandles = getAllCandles(historicalCandlesRef.current, formingCandleRef.current);
@@ -773,9 +800,14 @@ export function TradingChart({
                     commandBus.subscribe('ZOOM_OUT', () => chartManager.zoomOut()),
                     commandBus.subscribe('FIT_CONTENT', () => chartManager.fitContent()),
                     commandBus.subscribe('SELECT_TOOL', (payload: any) => {
-                        if (['trendline', 'hline', 'vline', 'text', 'channel', 'fibonacci', 'shapes'].includes(payload.tool)) {
-                            drawingManager.startDrawing(payload.tool, '#3b82f6', payload.subtype);
-                            setActiveDrawingType(payload.tool);
+                        if (['trendline', 'hline', 'vline', 'text', 'channel', 'fibonacci', 'shapes', 'rectangle', 'ellipse', 'arrow', 'pitchfork'].includes(payload.tool)) {
+                            // Guard: Check if chart and series refs exist before activating drawing tools
+                            if (chartRef.current && seriesRef.current) {
+                                drawingManager.startDrawing(payload.tool, '#3b82f6', payload.subtype);
+                                setActiveDrawingType(payload.tool);
+                            } else {
+                                console.warn('[TradingChart] Cannot activate drawing tool: chart or series not ready');
+                            }
                         } else if (payload.tool === 'cursor') {
                             drawingManager.cancelDrawing();
                             setActiveDrawingType(null);
@@ -861,7 +893,7 @@ export function TradingChart({
             const visibleRange = timeScale.getVisibleRange();
             if (!visibleRange) return;
 
-            const barCount = visibleRange.to - visibleRange.from;
+            const barCount = (visibleRange.to as number) - (visibleRange.from as number);
             const scrollAmount = barCount * 0.1; // Scroll by 10% of visible range
 
             if (direction === 'left') {
@@ -887,6 +919,12 @@ export function TradingChart({
         window.addEventListener('chart-undo-drawing', handleUndoDrawing as EventListener);
         window.addEventListener('chart-delete-drawing', handleDeleteDrawing as EventListener);
 
+        const handleToggleDrawingList = () => {
+            setShowDrawingList(prev => !prev);
+        };
+
+        window.addEventListener('toggle-drawing-list', handleToggleDrawingList as EventListener);
+
         return () => {
             window.removeEventListener('chart-toggle-grid', handleToggleGrid as EventListener);
             window.removeEventListener('chart-toggle-volume', handleToggleVolume as EventListener);
@@ -895,6 +933,7 @@ export function TradingChart({
             window.removeEventListener('chart-scroll', handleScroll as EventListener);
             window.removeEventListener('chart-undo-drawing', handleUndoDrawing as EventListener);
             window.removeEventListener('chart-delete-drawing', handleDeleteDrawing as EventListener);
+            window.removeEventListener('toggle-drawing-list', handleToggleDrawingList as EventListener);
         };
     }, [oneClickTrading, updateTradeSettings]);
 
@@ -986,13 +1025,13 @@ export function TradingChart({
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.ctrlKey && e.shiftKey && e.key === 'T') {
                 e.preventDefault();
-                setOneClickTrading(prev => !prev);
+                updateTradeSettings({ oneClickTrading: !oneClickTrading });
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, []);
+    }, [oneClickTrading, updateTradeSettings]);
 
     // Listen for template load events from ChartTemplateManager
     useEffect(() => {
@@ -1046,7 +1085,12 @@ export function TradingChart({
             />
 
             {/* Drawing overlay container */}
-            <div className="chart-drawing-overlay absolute inset-0 pointer-events-none" />
+            <div
+                className="chart-drawing-overlay absolute inset-0 pointer-events-none"
+                style={{
+                    zIndex: 10
+                }}
+            />
 
             {/* HTML Overlays */}
             <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -1081,6 +1125,15 @@ export function TradingChart({
             {/* Context Menu for Drawings */}
             <DrawingContextMenu onClose={() => { }} />
 
+            {/* Drawing Properties Panel */}
+            <DrawingPropertiesPanel />
+
+            {/* Drawing List Panel */}
+            <DrawingListPanel
+                visible={showDrawingList}
+                onClose={() => setShowDrawingList(false)}
+            />
+
             {/* One-Click Trading Panel */}
             {oneClickTrading && currentTick && accountId && (
                 <OneClickPanel
@@ -1088,7 +1141,7 @@ export function TradingChart({
                     currentBid={currentTick.bid}
                     currentAsk={currentTick.ask}
                     accountId={parseInt(accountId)}
-                    onClose={() => setOneClickTrading(false)}
+                    onClose={() => updateTradeSettings({ oneClickTrading: false })}
                     onOrderPlaced={() => {
                         console.log('Order placed via one-click panel');
                     }}
@@ -1201,13 +1254,15 @@ export function TradingChart({
                     onPrintChart={async () => {
                         try {
                             const chartPrinterModule = await import('../services/chartPrinter');
-                            const printer = (chartPrinterModule as any).chartPrinter || chartPrinterModule.default;
+                            const printer = (chartPrinterModule as any).chartPrinter || (chartPrinterModule as any).default || chartPrinterModule;
                             const canvas = chartContainerRef.current?.querySelector('canvas');
                             if (canvas && printer) {
                                 if (typeof printer.print === 'function') {
                                     printer.print(canvas, { symbol, timeframe, chartType });
                                 } else if (typeof printer.printChart === 'function') {
                                     printer.printChart(canvas, { symbol, timeframe, chartType });
+                                } else if (typeof printer === 'function') {
+                                    printer(canvas, { symbol, timeframe, chartType });
                                 } else {
                                     // Fallback: browser print
                                     window.print();
@@ -1224,6 +1279,16 @@ export function TradingChart({
                     showGrid={showGrid}
                     showVolumes={showVolumes}
                 />
+            )}
+
+            {/* Drawing Mode Indicator Banner */}
+            {activeDrawingType && (
+                <div className="absolute top-2 left-1/2 transform -translate-x-1/2 z-20 pointer-events-none">
+                    <div className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg font-medium text-sm flex items-center gap-2">
+                        <span className="animate-pulse">●</span>
+                        <span>Drawing Mode: {activeDrawingType.charAt(0).toUpperCase() + activeDrawingType.slice(1)}</span>
+                    </div>
+                </div>
             )}
 
             {/* Legend - Updated with OHLC */}

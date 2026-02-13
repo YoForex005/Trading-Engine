@@ -15,8 +15,7 @@ export { ChartWithIndicators } from './ChartWithIndicators';
 export { IndicatorNavigator } from './IndicatorNavigator';
 export type { IndicatorInfo } from './IndicatorNavigator';
 
-export { OrderEntry } from './OrderEntry';
-export type { OrderType, OrderSide } from './OrderEntry';
+export { default as OrderEntry } from './OrderEntry';
 
 export { PositionList } from './PositionList';
 export { AccountInfoDashboard } from './AccountInfoDashboard';
@@ -32,3 +31,5 @@ export { OrderEntryPanel } from './OrderEntryPanel';
 export { PendingOrdersPanel } from './PendingOrdersPanel';
 export { FloatingAccountPanel } from './FloatingAccountPanel';
 export { AdvancedOrderPanel } from './AdvancedOrderPanel';
+export { DrawingListPanel } from './DrawingListPanel';
+export { DrawingPropertiesPanel } from './DrawingPropertiesPanel';

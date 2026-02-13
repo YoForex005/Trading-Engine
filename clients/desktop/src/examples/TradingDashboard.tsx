@@ -157,14 +157,11 @@ const TradingView = () => {
         </div>
 
         {/* Order Entry */}
-        {account && (
+        {account && currentTick && (
           <div className="bg-zinc-900 rounded-lg border border-zinc-800">
             <OrderEntry
               symbol={selectedSymbol}
-              currentBid={currentTick?.bid}
-              currentAsk={currentTick?.ask}
-              accountId={1}
-              balance={account.balance}
+              onClose={() => {}}
             />
           </div>
         )}

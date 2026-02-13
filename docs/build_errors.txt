@@ -1,0 +1,39 @@
+
+> desktop@0.0.0 build
+> tsc -b && vite build
+
+src/components/Toolbox.tsx(132,21): error TS2339: Property 'setAlerts' does not exist on type 'AlertState'.
+src/components/Toolbox.tsx(320,44): error TS2367: This comparison appears to be unintentional because the types 'AlertStatus' and '"ACTIVE"' have no overlap.
+src/components/Toolbox.tsx(321,35): error TS2367: This comparison appears to be unintentional because the types 'AlertStatus' and '"ACTIVE"' have no overlap.
+src/components/Toolbox.tsx(407,34): error TS2322: Type '{ accountId: string; }' is not assignable to type 'IntrinsicAttributes'.
+  Property 'accountId' does not exist on type 'IntrinsicAttributes'.
+src/components/TradingChart.tsx(886,30): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+src/components/TradingChart.tsx(886,48): error TS2363: The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+src/components/ui/ContextMenu.tsx(176,27): error TS2554: Expected 1 arguments, but got 0.
+src/components/ui/ContextMenu.tsx(511,15): error TS2322: Type '(el: HTMLDivElement | null) => HTMLDivElement | null' is not assignable to type 'Ref<HTMLDivElement> | undefined'.
+  Type '(el: HTMLDivElement | null) => HTMLDivElement | null' is not assignable to type '(instance: HTMLDivElement | null) => void | (() => VoidOrUndefinedOnly)'.
+    Type 'HTMLDivElement | null' is not assignable to type 'void | (() => VoidOrUndefinedOnly)'.
+      Type 'null' is not assignable to type 'void | (() => VoidOrUndefinedOnly)'.
+src/components/ui/FlashPrice.tsx(22,22): error TS2554: Expected 1 arguments, but got 0.
+src/components/UIShowcase.tsx(223,31): error TS2353: Object literal may only specify known properties, and 'onClick' does not exist in type 'ContextMenuItemConfig'.
+src/components/UIShowcase.tsx(224,32): error TS2353: Object literal may only specify known properties, and 'onClick' does not exist in type 'ContextMenuItemConfig'.
+src/components/UIShowcase.tsx(225,32): error TS2353: Object literal may only specify known properties, and 'onClick' does not exist in type 'ContextMenuItemConfig'.
+src/components/UIShowcase.tsx(226,37): error TS2353: Object literal may only specify known properties, and 'onClick' does not exist in type 'ContextMenuItemConfig'.
+src/examples/ChartIntegrationDemo.tsx(58,25): error TS2345: Argument of type '{ type: "TOGGLE_CROSSHAIR"; }' is not assignable to parameter of type 'Command'.
+  Property 'payload' is missing in type '{ type: "TOGGLE_CROSSHAIR"; }' but required in type '{ type: "TOGGLE_CROSSHAIR"; payload: Record<string, never>; }'.
+src/examples/ChartIntegrationDemo.tsx(63,25): error TS2345: Argument of type '{ type: "ZOOM_IN"; }' is not assignable to parameter of type 'Command'.
+  Property 'payload' is missing in type '{ type: "ZOOM_IN"; }' but required in type '{ type: "ZOOM_IN"; payload: Record<string, never>; }'.
+src/examples/ChartIntegrationDemo.tsx(67,25): error TS2345: Argument of type '{ type: "ZOOM_OUT"; }' is not assignable to parameter of type 'Command'.
+  Property 'payload' is missing in type '{ type: "ZOOM_OUT"; }' but required in type '{ type: "ZOOM_OUT"; payload: Record<string, never>; }'.
+src/examples/ChartIntegrationDemo.tsx(71,25): error TS2345: Argument of type '{ type: "FIT_CONTENT"; }' is not assignable to parameter of type 'Command'.
+  Property 'payload' is missing in type '{ type: "FIT_CONTENT"; }' but required in type '{ type: "FIT_CONTENT"; payload: Record<string, never>; }'.
+src/examples/ChartIntegrationDemo.tsx(76,27): error TS2322: Type '`SELECT_${string}`' is not assignable to type '"OPEN_ORDER_PANEL" | "SET_CHART_TYPE" | "OPEN_INDICATOR_NAVIGATOR" | "TOGGLE_CROSSHAIR" | "ZOOM_IN" | "ZOOM_OUT" | "TILE_WINDOWS" | "SELECT_TOOL" | "SET_TIMEFRAME" | "ADD_INDICATOR" | ... 15 more ... | "SET_CHART_SHIFT"'.
+src/examples/ChartIntegrationDemo.tsx(80,27): error TS2322: Type '"OPEN_INDICATORS"' is not assignable to type '"OPEN_ORDER_PANEL" | "SET_CHART_TYPE" | "OPEN_INDICATOR_NAVIGATOR" | "TOGGLE_CROSSHAIR" | "ZOOM_IN" | "ZOOM_OUT" | "TILE_WINDOWS" | "SELECT_TOOL" | "SET_TIMEFRAME" | "ADD_INDICATOR" | ... 15 more ... | "SET_CHART_SHIFT"'.
+src/examples/CommandBusExample.tsx(252,45): error TS2345: Argument of type '"cursor" | "text" | "trendline" | "hline" | "vline"' is not assignable to parameter of type '"cursor"'.
+  Type '"text"' is not assignable to type '"cursor"'.
+src/examples/HistoricalDataExample.tsx(60,11): error TS2322: Type '"15m"' is not assignable to type 'Timeframe | undefined'.
+src/examples/TradingDashboard.tsx(164,15): error TS2322: Type '{ symbol: string; currentBid: number; currentAsk: number; accountId: number; balance: number; }' is not assignable to type 'IntrinsicAttributes & OrderEntryProps'.
+  Property 'currentBid' does not exist on type 'IntrinsicAttributes & OrderEntryProps'.
+src/hooks/useKeyboardShortcut.ts(45,16): error TS2367: This comparison appears to be unintentional because the types 'true | undefined' and 'false' have no overlap.
+src/hooks/useKeyboardShortcut.ts(81,18): error TS2367: This comparison appears to be unintentional because the types 'true | undefined' and 'false' have no overlap.
+src/services/marketWatchActions.ts(472,10): error TS2322: Type '() => void' is not assignable to type 'void'.

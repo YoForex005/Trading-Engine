@@ -12,7 +12,7 @@ export type SubscriptionCallback = (data: unknown) => void;
 export type ConnectionStateCallback = (state: ConnectionState) => void;
 export type MetricsCallback = (metrics: ConnectionMetrics) => void;
 
-export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error' | 'offline';
+export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'error' | 'offline';
 
 export interface WebSocketMessage {
   type: string;
@@ -55,8 +55,9 @@ export class EnhancedWebSocketService {
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private pongTimeout: ReturnType<typeof setTimeout> | null = null;
   private pingIntervalMs = 30000; // 30 seconds
-  private pongTimeoutMs = 5000; // 5 seconds
+  private pongTimeoutMs = 10000; // 10 seconds - detect dead connections
   private lastPongTime = 0;
+  private lastPingTimestamp = 0; // Track when ping was sent for latency calc
 
   // Subscription management
   private subscribers: Map<string, Set<SubscriptionCallback>> = new Map();
@@ -93,8 +94,20 @@ export class EnhancedWebSocketService {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', this.handleOnline);
       window.addEventListener('offline', this.handleOffline);
+
+      // Listen for auth failure events
+      window.addEventListener('ws-auth-failed', this.handleAuthFailure);
     }
   }
+
+  /**
+   * Handle WebSocket authentication failure
+   */
+  private handleAuthFailure = () => {
+    console.log('[WS] Authentication failed - disconnecting');
+    this.disconnect();
+    this.updateState('error');
+  };
 
   /**
    * Connect to WebSocket server
@@ -134,11 +147,24 @@ export class EnhancedWebSocketService {
 
       this.ws.onmessage = (event) => {
         try {
+          // Validate event data
+          if (!event || !event.data) {
+            console.warn('[WS] Received empty message');
+            return;
+          }
+
           const data = JSON.parse(event.data) as WebSocketMessage;
+
+          // Validate parsed data
+          if (!data || typeof data !== 'object') {
+            console.warn('[WS] Invalid message format:', event.data);
+            return;
+          }
+
           this.handleMessage(data);
           this.metrics.messagesReceived++;
         } catch (error) {
-          console.error('[WS] Failed to parse message:', error);
+          console.error('[WS] Failed to parse message:', error, 'Raw data:', event?.data);
         }
       };
 
@@ -342,7 +368,28 @@ export class EnhancedWebSocketService {
       return;
     }
 
-    // Broadcast to subscribers
+    // Handle notification messages (order fills, margin calls, etc.)
+    // Backend sends: { type: "notification", notification: { id, type, severity, title, message, data, ... } }
+    if (type === 'notification') {
+      this.broadcastToSubscribers(data);
+      return;
+    }
+
+    // Handle alert messages (system/trading alerts from alert engine)
+    // Backend sends: { type: "alert", alert: { id, severity, title, message, ... }, timestamp }
+    if (type === 'alert') {
+      this.broadcastToSubscribers(data);
+      return;
+    }
+
+    // Handle orderbook update messages
+    // Backend sends: { type: "orderbook_update", symbol, bids, asks, spread, midPrice, timestamp }
+    if (type === 'orderbook_update') {
+      this.broadcastToSubscribers(data);
+      return;
+    }
+
+    // Broadcast any other message types to subscribers
     this.broadcastToSubscribers(data);
   }
 
@@ -442,13 +489,13 @@ export class EnhancedWebSocketService {
    */
   private sendPing(): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      const pingTime = Date.now();
-      this.sendMessage({ type: 'ping', timestamp: pingTime });
+      this.lastPingTimestamp = Date.now();
+      this.sendMessage({ type: 'ping', timestamp: this.lastPingTimestamp });
 
-      // Set timeout for pong response
+      // Set timeout for pong response - if no pong within 10s, connection is dead
       this.pongTimeout = setTimeout(() => {
-        console.warn('[WS] Pong timeout - connection may be dead');
-        this.ws?.close();
+        console.warn('[WS] Pong timeout (10s) - connection dead, triggering reconnect');
+        this.ws?.close(4000, 'Pong timeout');
       }, this.pongTimeoutMs);
     }
   }
@@ -463,8 +510,9 @@ export class EnhancedWebSocketService {
     }
 
     const now = Date.now();
-    if (this.lastPongTime > 0) {
-      const latency = now - this.lastPongTime;
+    // Calculate round-trip latency from ping send time
+    if (this.lastPingTimestamp > 0) {
+      const latency = now - this.lastPingTimestamp;
       this.recordLatency(latency);
     }
     this.lastPongTime = now;
@@ -515,18 +563,25 @@ export class EnhancedWebSocketService {
   }
 
   /**
-   * Resubscribe to all channels after reconnection
+   * Resubscribe to all channels after reconnection.
+   * This replays all active subscriptions to ensure the server knows
+   * which channels this client is interested in after a reconnect.
    */
   private resubscribeChannels(): void {
-    console.log(`[WS] Resubscribing to ${this.subscribers.size} channels`);
+    const channels = Array.from(this.subscribers.keys()).filter(ch => ch !== '*');
 
-    this.subscribers.forEach((_, channel) => {
-      if (channel !== '*') {
-        this.sendMessage({
-          type: 'subscribe',
-          channel,
-        });
-      }
+    if (channels.length === 0) {
+      console.log('[WS] No channels to resubscribe after reconnect');
+      return;
+    }
+
+    console.log(`[WS] Resubscribing to ${channels.length} channels after reconnect: ${channels.join(', ')}`);
+
+    channels.forEach((channel) => {
+      this.sendMessage({
+        type: 'subscribe',
+        channel,
+      });
     });
   }
 

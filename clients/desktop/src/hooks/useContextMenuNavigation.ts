@@ -3,7 +3,8 @@
  * Implements full keyboard navigation for context menus with MT5-style controls
  */
 
-import { useEffect, useCallback, useState, RefObject } from 'react';
+import { useEffect, useCallback, useState } from 'react';
+import type { RefObject } from 'react';
 
 export interface MenuNavigationState {
   focusedIndex: number;

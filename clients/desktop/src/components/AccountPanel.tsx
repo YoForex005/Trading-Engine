@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, Wallet, TrendingUp, Settings, Lock, CreditCard, Building2, Bitcoin, ChevronRight } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
-import { API_ENDPOINTS } from '../config/api';
+import { API_ENDPOINTS, API_BASE_URL } from '../config/api';
 
 interface AccountPanelProps {
   onClose: () => void;
@@ -38,18 +38,41 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({ onClose, wsConnectio
     leverage: leverage,
   };
 
-  // Fetch transaction history
+  // Fetch transaction history from /api/ledger (real endpoint), fallback to mock
+  // NOTE: No dedicated /api/account/transactions endpoint exists.
+  // Using /api/ledger as the closest match for transaction history.
   useEffect(() => {
     const fetchTransactions = async () => {
       try {
-        const response = await fetch(API_ENDPOINTS.payments.history);
+        const accountId = useAppStore.getState().accountId;
+        const authToken = useAppStore.getState().authToken;
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/ledger${accountId ? `?accountId=${accountId}` : ''}`,
+          { headers }
+        );
         if (response.ok) {
           const data = await response.json();
-          setTransactions(data.slice(0, 10)); // Last 10 transactions
+          const raw = Array.isArray(data) ? data : data.entries || [];
+          if (raw.length > 0) {
+            const mapped: Transaction[] = raw.slice(0, 10).map((entry: any) => ({
+              id: String(entry.id || entry.referenceId || Math.random()),
+              date: entry.timestamp || entry.date || new Date().toISOString(),
+              type: (entry.type || '').toLowerCase().includes('withdraw') ? 'withdrawal' as const : 'deposit' as const,
+              amount: Math.abs(entry.amount ?? 0),
+              status: 'completed' as const,
+              method: entry.description || '',
+            }));
+            setTransactions(mapped);
+            return;
+          }
         }
+        // Fallback to mock
+        setTransactions(generateMockTransactions());
       } catch (error) {
         console.error('Failed to fetch transactions:', error);
-        // Use mock data for testing
         setTransactions(generateMockTransactions());
       }
     };

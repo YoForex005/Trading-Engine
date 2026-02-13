@@ -47,9 +47,9 @@ export const TimeSales = ({ symbol, maxEntries = 100 }: TimeSalesProps) => {
       symbol: wsData.symbol,
       price: wsData.price,
       volume: wsData.volume,
-      side: wsData.side,
+      side: (wsData.side === 'BUY' || wsData.side === 'SELL') ? wsData.side : 'BUY',
       timestamp: wsData.timestamp,
-      aggressor: wsData.aggressor,
+      aggressor: (wsData.aggressor === 'BUYER' || wsData.aggressor === 'SELLER') ? wsData.aggressor : undefined,
     };
 
     setEntries((prev) => {
@@ -89,11 +89,10 @@ export const TimeSales = ({ symbol, maxEntries = 100 }: TimeSalesProps) => {
             <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wide">Time & Sales</h3>
             {/* Connection Status Indicator */}
             {connectionState === 'connected' ? (
-              <Wifi className={`w-3 h-3 ${isStale ? 'text-yellow-500' : 'text-emerald-500'}`} title={isStale ? 'Connection stale' : 'Connected'} />
+              <Wifi className={`w-3 h-3 ${isStale ? 'text-yellow-500' : 'text-emerald-500'}`} />
             ) : (
               <WifiOff
                 className={`w-3 h-3 ${connectionState === 'connecting' ? 'text-blue-500 animate-pulse' : 'text-red-500'}`}
-                title={connectionState === 'connecting' ? 'Connecting...' : 'Disconnected'}
               />
             )}
           </div>

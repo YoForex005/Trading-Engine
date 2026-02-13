@@ -32,25 +32,23 @@ import {
 import {
   useDrawingStore,
   type DrawingType,
-  type LineStyle,
-  type Point,
-  type Drawing,
+  type DrawingPoint,
+  type StoreDrawing,
 } from '../store/useDrawingStore';
 
-// Drawing tool configuration
+// Drawing tool configuration - mapped to canonical DrawingType values
 const DRAWING_TOOLS = [
-  { type: 'trend-line' as DrawingType, label: 'Trend Line', icon: TrendingUp, shortcut: 'T' },
-  { type: 'horizontal-line' as DrawingType, label: 'Horizontal Line', icon: Minus, shortcut: 'H' },
-  { type: 'vertical-line' as DrawingType, label: 'Vertical Line', icon: ArrowRight, shortcut: 'V' },
+  { type: 'trendline' as DrawingType, label: 'Trend Line', icon: TrendingUp, shortcut: 'T' },
+  { type: 'hline' as DrawingType, label: 'Horizontal Line', icon: Minus, shortcut: 'H' },
+  { type: 'vline' as DrawingType, label: 'Vertical Line', icon: ArrowRight, shortcut: 'V' },
   { type: 'channel' as DrawingType, label: 'Channel', icon: GitBranch, shortcut: 'C' },
-  { type: 'fib-retracement' as DrawingType, label: 'Fibonacci Retracement', icon: TrendingDown, shortcut: 'F' },
-  { type: 'fib-extension' as DrawingType, label: 'Fibonacci Extension', icon: Route, shortcut: 'E' },
+  { type: 'fibonacci' as DrawingType, label: 'Fibonacci Retracement', icon: TrendingDown, shortcut: 'F' },
   { type: 'rectangle' as DrawingType, label: 'Rectangle', icon: Square, shortcut: 'R' },
   { type: 'ellipse' as DrawingType, label: 'Ellipse', icon: Circle, shortcut: 'O' },
   { type: 'pitchfork' as DrawingType, label: 'Pitchfork', icon: Triangle, shortcut: 'P' },
-  { type: 'text-label' as DrawingType, label: 'Text Label', icon: Type, shortcut: 'L' },
+  { type: 'text' as DrawingType, label: 'Text Label', icon: Type, shortcut: 'L' },
   { type: 'arrow' as DrawingType, label: 'Arrow', icon: ArrowUpRight, shortcut: 'A' },
-  { type: 'crosshair-ruler' as DrawingType, label: 'Crosshair Ruler', icon: Crosshair, shortcut: 'X' },
+  { type: 'shapes' as DrawingType, label: 'Shapes', icon: Crosshair, shortcut: 'X' },
 ];
 
 const COLORS = [
@@ -65,6 +63,7 @@ const COLORS = [
   '#71717a', // gray
 ];
 
+type LineStyle = 'solid' | 'dashed' | 'dotted';
 const LINE_STYLES: LineStyle[] = ['solid', 'dashed', 'dotted'];
 const LINE_WIDTHS = [1, 2, 3, 4, 5];
 
@@ -95,7 +94,7 @@ export function DrawingTools() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; drawingId: string } | null>(null);
-  const [currentPoints, setCurrentPoints] = useState<Point[]>([]);
+  const [currentPoints, setCurrentPoints] = useState<DrawingPoint[]>([]);
 
   const canvasRef = useRef<SVGSVGElement>(null);
   const [svgDimensions] = useState({ width: 800, height: 500 });
@@ -123,7 +122,7 @@ export function DrawingTools() {
     // Calculate mock price based on y position (inverse, top = higher price)
     const price = 1.1000 - (y / svgDimensions.height) * 0.02; // Range: 1.08 to 1.10
 
-    const point: Point = { x, y, price, time: new Date().toISOString() };
+    const point: DrawingPoint = { time: Math.floor(Date.now() / 1000), price };
 
     setIsDrawing(true);
     setCurrentPoints([point]);
@@ -137,7 +136,7 @@ export function DrawingTools() {
     const y = e.clientY - rect.top;
     const price = 1.1000 - (y / svgDimensions.height) * 0.02;
 
-    const point: Point = { x, y, price, time: new Date().toISOString() };
+    const point: DrawingPoint = { time: Math.floor(Date.now() / 1000), price };
 
     // Update preview
     setCurrentPoints([currentPoints[0], point]);
@@ -151,7 +150,7 @@ export function DrawingTools() {
     }
 
     // Create the drawing
-    const newDrawing: Omit<Drawing, 'id' | 'zIndex'> = {
+    const newDrawing: Omit<StoreDrawing, 'id' | 'zIndex'> = {
       type: activeTool,
       points: currentPoints,
       color: '#22c55e',
@@ -161,7 +160,7 @@ export function DrawingTools() {
       extendRight: false,
       showPriceLabels: true,
       visible: true,
-      text: activeTool === 'text-label' ? 'New Label' : undefined,
+      text: activeTool === 'text' ? 'New Label' : undefined,
       label: DRAWING_TOOLS.find(t => t.type === activeTool)?.label,
     };
 
@@ -202,20 +201,28 @@ export function DrawingTools() {
     setContextMenu(null);
   }, [contextMenu, setSelectedDrawing, duplicateDrawing, deleteDrawing, bringToFront, sendToBack]);
 
-  // Render drawing on canvas
-  const renderDrawing = useCallback((drawing: Drawing) => {
+  // Render drawing on canvas (convert DrawingPoint to screen coordinates)
+  const renderDrawing = useCallback((drawing: StoreDrawing) => {
     if (!drawing.visible || drawing.points.length < 2) return null;
 
-    const [p1, p2] = drawing.points;
+    // Convert DrawingPoint { time, price } to screen coordinates
+    const toScreenCoords = (point: DrawingPoint) => {
+      const x = (point.time % 1000) * (svgDimensions.width / 1000);
+      const y = svgDimensions.height - ((point.price - 1.08) / 0.02) * svgDimensions.height;
+      return { x, y };
+    };
+
+    const screenPoints = drawing.points.map(toScreenCoords);
+    const [p1, p2] = screenPoints;
     const strokeDasharray =
       drawing.lineStyle === 'dashed' ? '8,4' :
       drawing.lineStyle === 'dotted' ? '2,2' :
       undefined;
 
     switch (drawing.type) {
-      case 'trend-line':
-      case 'horizontal-line':
-      case 'vertical-line':
+      case 'trendline':
+      case 'hline':
+      case 'vline':
       case 'arrow':
         return (
           <line
@@ -303,7 +310,7 @@ export function DrawingTools() {
           </g>
         );
 
-      case 'fib-retracement':
+      case 'fibonacci':
         // Draw Fibonacci retracement levels
         const fibLevels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
         const height = p2.y - p1.y;
@@ -352,7 +359,7 @@ export function DrawingTools() {
           </g>
         );
 
-      case 'text-label':
+      case 'text':
         return (
           <text
             key={drawing.id}
@@ -373,18 +380,26 @@ export function DrawingTools() {
       default:
         return null;
     }
-  }, [handleDrawingRightClick, setSelectedDrawing]);
+  }, [handleDrawingRightClick, setSelectedDrawing, svgDimensions]);
 
   // Render current drawing preview
   const renderCurrentDrawing = useCallback(() => {
     if (!isDrawing || currentPoints.length < 2 || !activeTool) return null;
 
-    const [p1, p2] = currentPoints;
+    // Convert DrawingPoint to screen coordinates
+    const toScreenCoords = (point: DrawingPoint) => {
+      const x = (point.time % 1000) * (svgDimensions.width / 1000);
+      const y = svgDimensions.height - ((point.price - 1.08) / 0.02) * svgDimensions.height;
+      return { x, y };
+    };
+
+    const screenPoints = currentPoints.map(toScreenCoords);
+    const [p1, p2] = screenPoints;
 
     switch (activeTool) {
-      case 'trend-line':
-      case 'horizontal-line':
-      case 'vertical-line':
+      case 'trendline':
+      case 'hline':
+      case 'vline':
       case 'arrow':
         return (
           <line
@@ -436,7 +451,7 @@ export function DrawingTools() {
       default:
         return null;
     }
-  }, [isDrawing, currentPoints, activeTool]);
+  }, [isDrawing, currentPoints, activeTool, svgDimensions]);
 
   return (
     <div className="flex flex-col h-full bg-zinc-900 text-white">
@@ -547,7 +562,7 @@ export function DrawingTools() {
                 {/* Render all drawings sorted by z-index */}
                 {drawings
                   .slice()
-                  .sort((a, b) => a.zIndex - b.zIndex)
+                  .sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
                   .map(renderDrawing)}
 
                 {/* Render current drawing preview */}
@@ -584,7 +599,7 @@ export function DrawingTools() {
               ) : (
                 drawings
                   .slice()
-                  .sort((a, b) => b.zIndex - a.zIndex)
+                  .sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))
                   .map((drawing) => {
                     const tool = DRAWING_TOOLS.find(t => t.type === drawing.type);
                     const Icon = tool?.icon || Layers;
@@ -741,7 +756,7 @@ export function DrawingTools() {
             </label>
 
             {/* Text input for text labels */}
-            {selectedDrawing.type === 'text-label' && (
+            {selectedDrawing.type === 'text' && (
               <div>
                 <label className="text-xs font-medium text-zinc-400 mb-2 block">Text</label>
                 <input

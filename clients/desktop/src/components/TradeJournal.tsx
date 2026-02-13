@@ -5,7 +5,8 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { Download, TrendingUp, TrendingDown, DollarSign, Target, Activity } from 'lucide-react';
-import { API_ENDPOINTS } from '../config/api';
+import { API_BASE_URL } from '../config/api';
+import { useAppStore } from '../store/useAppStore';
 
 interface Trade {
   id: number;
@@ -52,12 +53,42 @@ export function TradeJournal() {
   const fetchTrades = async () => {
     try {
       setLoading(true);
-      const response = await fetch(API_ENDPOINTS.trades.history);
+      const accountId = useAppStore.getState().accountId;
+      const authToken = useAppStore.getState().authToken;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+      // Backend endpoint: /api/trades (GET)
+      const response = await fetch(
+        `${API_BASE_URL}/api/trades${accountId ? `?accountId=${accountId}` : ''}`,
+        { headers }
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      setTrades(data.trades || []);
+      const raw = Array.isArray(data) ? data : data.trades || [];
+      if (raw.length > 0) {
+        const mapped: Trade[] = raw.map((t: any, i: number) => ({
+          id: t.id || i + 1,
+          openTime: t.openTime || t.open_time || t.time || '',
+          closeTime: t.closeTime || t.close_time || t.time || '',
+          symbol: t.symbol || '',
+          type: t.type || t.side || 'BUY',
+          volume: t.volume ?? t.lots ?? 0,
+          openPrice: t.openPrice ?? t.open_price ?? 0,
+          closePrice: t.closePrice ?? t.close_price ?? 0,
+          sl: t.sl ?? t.stopLoss ?? 0,
+          tp: t.tp ?? t.takeProfit ?? 0,
+          commission: t.commission ?? 0,
+          swap: t.swap ?? 0,
+          profit: t.profit ?? 0,
+        }));
+        setTrades(mapped.sort((a, b) => new Date(b.closeTime).getTime() - new Date(a.closeTime).getTime()));
+      } else {
+        setTrades(generateMockTrades());
+      }
     } catch (error) {
       console.error('Failed to fetch trades:', error);
-      // Use mock data for development
+      // Use mock data as fallback
       setTrades(generateMockTrades());
     } finally {
       setLoading(false);

@@ -1,10 +1,12 @@
 /**
  * News Store with Zustand
  * Manages financial news feed (ephemeral, no persistence)
+ * Connected to backend: GET /admin/market-news/articles
  */
 
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
+import { API_ENDPOINTS } from '../config/api';
 
 export type NewsImpact = 'high' | 'medium' | 'low';
 export type NewsCategory = 'All' | 'Forex' | 'Crypto' | 'Economy' | 'Central Banks';
@@ -24,11 +26,14 @@ export interface NewsItem {
 interface NewsState {
   news: NewsItem[];
   activeCategory: NewsCategory;
+  isLoading: boolean;
+  error: string | null;
   setNews: (news: NewsItem[]) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
   setActiveCategory: (category: NewsCategory) => void;
   refreshNews: () => void;
+  fetchNews: () => Promise<void>;
   getFilteredNews: () => NewsItem[];
 }
 
@@ -211,11 +216,86 @@ function generateMockNews(): NewsItem[] {
   }).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 }
 
+// Map backend category to frontend category
+function mapCategory(backendCategory: string): Exclude<NewsCategory, 'All'> {
+  const cat = backendCategory.toLowerCase();
+  if (cat === 'crypto') return 'Crypto';
+  if (cat === 'central_bank' || cat === 'central banks') return 'Central Banks';
+  if (cat === 'forex') return 'Forex';
+  // commodities, indices, geopolitical, etc. map to Economy
+  return 'Economy';
+}
+
+// Map backend sentiment to impact level
+function mapImpact(sentiment: { bullish: number; bearish: number; neutral: number; overall: string }): NewsImpact {
+  const maxScore = Math.max(sentiment.bullish, sentiment.bearish);
+  if (maxScore > 0.7) return 'high';
+  if (maxScore > 0.4) return 'medium';
+  return 'low';
+}
+
+// Transform backend article to frontend NewsItem
+function transformArticle(article: any): NewsItem {
+  return {
+    id: `news-${article.id}`,
+    headline: article.title || '',
+    summary: article.summary || '',
+    source: article.source || 'Unknown',
+    impact: article.sentiment ? mapImpact(article.sentiment) : 'medium',
+    category: mapCategory(article.category || 'economy'),
+    symbols: article.affected_symbols || [],
+    timestamp: new Date(article.published_at || Date.now()),
+    isRead: false,
+  };
+}
+
+// Fetch news from backend API: GET /admin/market-news/articles
+async function fetchNewsFromAPI(): Promise<NewsItem[]> {
+  const token = localStorage.getItem('auth_token') ||
+    (typeof window !== 'undefined' ? (window as any).__authToken : null);
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  // Try to get auth token from useAppStore if available
+  try {
+    const { useAppStore } = await import('./useAppStore');
+    const authToken = useAppStore.getState().authToken;
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+  } catch {
+    // Store not available, proceed with whatever token we have
+  }
+
+  const response = await fetch(API_ENDPOINTS.marketNews.articles, {
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch news: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+
+  // Backend returns array of articles or { articles: [...] }
+  const articles = Array.isArray(data) ? data : (data.articles || data.data || []);
+  return articles.map(transformArticle).sort(
+    (a: NewsItem, b: NewsItem) => b.timestamp.getTime() - a.timestamp.getTime()
+  );
+}
+
 export const useNewsStore = create<NewsState>()(
   devtools(
     (set, get) => ({
-      news: generateMockNews(),
+      news: generateMockNews(), // Initialize with mock data as fallback
       activeCategory: 'All',
+      isLoading: false,
+      error: null,
 
       setNews: (news) => set({ news }),
 
@@ -233,15 +313,35 @@ export const useNewsStore = create<NewsState>()(
 
       setActiveCategory: (category) => set({ activeCategory: category }),
 
+      fetchNews: async () => {
+        set({ isLoading: true, error: null });
+        try {
+          const newsItems = await fetchNewsFromAPI();
+          if (newsItems.length > 0) {
+            set({ news: newsItems, isLoading: false });
+          } else {
+            // No articles returned; keep mock data as fallback
+            set({ isLoading: false });
+          }
+        } catch (err: any) {
+          console.warn('[NewsStore] Failed to fetch from API, using mock data:', err.message);
+          set({ isLoading: false, error: err.message });
+          // Keep existing mock data on error
+        }
+      },
+
       refreshNews: () => {
-        // Simulate refresh by updating timestamps
-        set((state) => ({
-          news: state.news.map((item) => ({
-            ...item,
-            timestamp: new Date(Date.now() - Math.floor(Math.random() * 1440) * 60 * 1000),
-            isRead: Math.random() > 0.6,
-          })).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
-        }));
+        // Try API first, fall back to mock refresh
+        const store = get();
+        store.fetchNews().catch(() => {
+          set((state) => ({
+            news: state.news.map((item) => ({
+              ...item,
+              timestamp: new Date(Date.now() - Math.floor(Math.random() * 1440) * 60 * 1000),
+              isRead: Math.random() > 0.6,
+            })).sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
+          }));
+        });
       },
 
       getFilteredNews: () => {

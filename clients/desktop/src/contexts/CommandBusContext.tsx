@@ -8,7 +8,8 @@
  * 2. Use useCommandBusContext() in any component to access the bus
  */
 
-import React, { createContext, useContext, ReactNode } from 'react';
+import React, { createContext, useContext } from 'react';
+import type { ReactNode } from 'react';
 import { commandBus } from '../services/commandBus';
 import type {
   Command,

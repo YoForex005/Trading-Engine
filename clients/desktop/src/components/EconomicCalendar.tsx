@@ -1,9 +1,10 @@
 /**
  * Economic Calendar Component (MT5-style) - ENHANCED
  * Shows upcoming economic events with filters, alerts, real-time updates, and advanced features
+ * Connected to backend: GET /admin/market-news/calendar
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Calendar,
   Filter,
@@ -18,7 +19,8 @@ import {
   Minus,
   LineChart,
   Star,
-  ChevronRight
+  ChevronRight,
+  RefreshCw
 } from 'lucide-react';
 import { API_ENDPOINTS } from '../config/api';
 import { useAlertStore } from '../store/useAlertStore';
@@ -143,8 +145,64 @@ const getMockHistoricalData = (eventName: string): HistoricalOccurrence[] => {
 // Main Component
 // ============================================================================
 
+// Transform backend calendar event to frontend EconomicEvent
+function transformCalendarEvent(backendEvent: any): EconomicEvent {
+  // Backend returns forecast/previous/actual as numbers or null; frontend uses strings
+  const formatValue = (val: number | null | undefined, unit: string): string => {
+    if (val === null || val === undefined) return '';
+    if (unit === '%') return `${val}%`;
+    if (unit === 'K') return `${val}K`;
+    if (unit === 'M') return `${val}M`;
+    if (unit === 'B') return `${val}B`;
+    if (unit === 'T') return `${val}T`;
+    return `${val}${unit ? ' ' + unit : ''}`;
+  };
+
+  return {
+    id: String(backendEvent.id),
+    time: backendEvent.scheduled_at || new Date().toISOString(),
+    currency: backendEvent.currency || '',
+    country: backendEvent.country || '',
+    event: backendEvent.name || '',
+    impact: (backendEvent.impact === 'high' ? 'High' : backendEvent.impact === 'medium' ? 'Medium' : 'Low') as 'High' | 'Medium' | 'Low',
+    period: backendEvent.period || '',
+    actual: formatValue(backendEvent.actual, backendEvent.unit || ''),
+    forecast: formatValue(backendEvent.forecast, backendEvent.unit || ''),
+    previous: formatValue(backendEvent.previous, backendEvent.unit || ''),
+    description: backendEvent.description || '',
+  };
+}
+
+// Fetch calendar events from backend: GET /admin/market-news/calendar
+async function fetchCalendarFromAPI(): Promise<EconomicEvent[]> {
+  let authToken: string | null = null;
+  try {
+    const { useAppStore } = await import('../store/useAppStore');
+    authToken = useAppStore.getState().authToken;
+  } catch {
+    // fallback
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+
+  const response = await fetch(API_ENDPOINTS.marketNews.calendar, { headers });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch calendar: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const events = Array.isArray(data) ? data : (data.events || data.data || []);
+  return events.map(transformCalendarEvent);
+}
+
 export const EconomicCalendar: React.FC<EconomicCalendarProps> = ({ onClose }) => {
-  const [events] = useState<EconomicEvent[]>(generateMockEvents());
+  const [events, setEvents] = useState<EconomicEvent[]>(generateMockEvents());
+  const [isLoading, setIsLoading] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange>('This Week');
   const [selectedCurrencies, setSelectedCurrencies] = useState<string[]>([]);
   const [selectedImpacts, setSelectedImpacts] = useState<string[]>(['High', 'Medium', 'Low']);
@@ -162,6 +220,27 @@ export const EconomicCalendar: React.FC<EconomicCalendarProps> = ({ onClose }) =
 
   const { alerts, addAlert } = useAlertStore();
   const currencies = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'NZD', 'CHF', 'CNY'];
+
+  // Fetch calendar events from API on mount
+  const fetchCalendar = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const apiEvents = await fetchCalendarFromAPI();
+      if (apiEvents.length > 0) {
+        setEvents(apiEvents);
+      }
+      // If empty, keep mock data
+    } catch (err: any) {
+      console.warn('[EconomicCalendar] Failed to fetch from API, using mock data:', err.message);
+      // Keep mock data on error
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCalendar();
+  }, [fetchCalendar]);
 
   // Live countdown timer - updates every second
   useEffect(() => {
@@ -427,6 +506,15 @@ export const EconomicCalendar: React.FC<EconomicCalendarProps> = ({ onClose }) =
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Refresh Button */}
+          <button
+            onClick={fetchCalendar}
+            disabled={isLoading}
+            className="p-1 text-zinc-400 hover:text-white hover:bg-zinc-700/50 rounded transition-colors disabled:opacity-50"
+            title="Refresh calendar"
+          >
+            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+          </button>
           {/* View Mode Toggle */}
           <div className="flex items-center gap-1 bg-zinc-800 rounded p-0.5">
             <button

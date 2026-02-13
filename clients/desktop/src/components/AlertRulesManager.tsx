@@ -34,7 +34,7 @@ export function AlertRulesManager() {
   const fetchRules = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('${API_ENDPOINTS.alertRules}');
+      const response = await fetch(`${API_ENDPOINTS.alertRules}`);
       if (response.ok) {
         const data = await response.json();
         setRules(data || []);
@@ -48,7 +48,7 @@ export function AlertRulesManager() {
 
   const createRule = async (rule: Omit<AlertRule, 'id'>) => {
     try {
-      const response = await fetch('${API_ENDPOINTS.alertRules}', {
+      const response = await fetch(`${API_ENDPOINTS.alertRules}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(rule),

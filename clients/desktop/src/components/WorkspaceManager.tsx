@@ -321,7 +321,7 @@ export const WorkspaceManager: React.FC<WorkspaceManagerProps> = ({ onClose }) =
         </div>
       )}
 
-      <style jsx>{`
+      <style>{`
         .workspace-manager {
           display: flex;
           flex-direction: column;

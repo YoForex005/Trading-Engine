@@ -9,6 +9,9 @@ import { Toolbox } from './components/Toolbox';
 import { AlertsContainer } from './components/AlertsContainer';
 import { useAppStore } from './store/useAppStore';
 import { useMarketDataStore } from './store/useMarketDataStore';
+import { useNewsStore } from './store/useNewsStore';
+import { useSentimentStore } from './store/useSentimentStore';
+import { useSignalStore } from './store/useSignalStore';
 import { terminateWorker } from './services/aggregationWorkerManager';
 import { API_ENDPOINTS, WS_ENDPOINTS } from './config/api';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -87,7 +90,11 @@ interface BrokerConfig {
 }
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // CRITICAL FIX: Use Zustand store directly as single source of truth
+  // Eliminates race condition between local state and global store
+  const isAuthenticated = useAppStore(state => state.isAuthenticated);
+  const accountId = useAppStore(state => state.accountId);
+
   const [selectedSymbol, setSelectedSymbol] = useState('BTCUSD');
   const [positions, setPositions] = useState<Position[]>([]);
   const [account, setAccount] = useState<Account | null>(null);
@@ -100,7 +107,6 @@ function App() {
     const saved = localStorage.getItem('dockHeight');
     return saved ? parseInt(saved, 10) : 250;
   });
-  const [accountId, setAccountId] = useState<string>("1");
   const [isLoadingSymbols, setIsLoadingSymbols] = useState(false);
 
   const [enableHistoricalData] = useState(false);
@@ -113,6 +119,34 @@ function App() {
   // Multi-Chart State
   const [openCharts, setOpenCharts] = useState<ChartTab[]>([]);
   const [activeChartId, setActiveChartId] = useState<string | null>(null);
+
+  // Restore authentication state from localStorage on mount
+  useEffect(() => {
+    const token = localStorage.getItem('rtx_token');
+    const user = localStorage.getItem('rtx_user');
+
+    if (token && user) {
+      try {
+        const userData = JSON.parse(user);
+        const storedAccountId = userData.accountId || "1";
+        console.log('[App] Restoring auth state from localStorage:', { accountId: storedAccountId });
+
+        // Store accountId for future use
+        localStorage.setItem('rtx_account_id', storedAccountId);
+
+        // Update Zustand store (single source of truth)
+        useAppStore.getState().setAuthenticated(true, storedAccountId, token);
+      } catch (err) {
+        console.error('[App] Failed to restore auth state:', err);
+        // Clear corrupted data
+        localStorage.removeItem('rtx_token');
+        localStorage.removeItem('rtx_user');
+        localStorage.removeItem('rtx_account_id');
+      }
+    } else {
+      console.log('[App] No stored auth state found');
+    }
+  }, []);
 
   // Initialize default chart if empty
   useEffect(() => {
@@ -380,12 +414,31 @@ function App() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
+    let isMounted = true; // Track component mount state
+
     // Subscribe to wildcard channel to receive all message types
     const unsubscribe = subscribe('*', (message: any) => {
+      // Prevent state updates on unmounted component
+      if (!isMounted) {
+        return;
+      }
+
       try {
+        // Validate message structure
+        if (!message || typeof message !== 'object') {
+          console.warn('[WS] Invalid message received:', message);
+          return;
+        }
+
         const data = message;
 
         if (data.type === 'tick') {
+          // Validate tick data
+          if (!data.symbol || typeof data.bid !== 'number' || typeof data.ask !== 'number') {
+            console.warn('[WS] Invalid tick data:', data);
+            return;
+          }
+
           // Ensure spread is calculated if missing
           const spread = data.spread !== undefined && data.spread > 0
             ? data.spread
@@ -393,11 +446,13 @@ function App() {
 
           // PERFORMANCE FIX: Immediate update to store (no buffering)
           // 20x faster tick updates for MT5 parity
+          // SAFETY: Add null check for storeTicks access
           const storeTicks = useAppStore.getState().ticks;
+          const prevTick = storeTicks?.[data.symbol];
           const tick: Tick = {
             ...data,
             spread: spread,
-            prevBid: storeTicks[data.symbol]?.bid
+            prevBid: prevTick?.bid ?? undefined
           };
 
           // CRITICAL FIX: Update BOTH stores for complete data flow
@@ -419,14 +474,20 @@ function App() {
           // Check price alerts on every tick
           const currentPrices = useAppStore.getState().ticks;
           const priceMap: Record<string, { bid: number; ask: number; last?: number }> = {};
-          Object.keys(currentPrices).forEach(sym => {
-            const t = currentPrices[sym];
-            priceMap[sym] = {
-              bid: t.bid,
-              ask: t.ask,
-              last: t.last
-            };
-          });
+
+          // SAFETY: Add null check for ticks object
+          if (currentPrices && typeof currentPrices === 'object') {
+            Object.keys(currentPrices).forEach(sym => {
+              const t = currentPrices[sym];
+              if (t && typeof t.bid === 'number' && typeof t.ask === 'number') {
+                priceMap[sym] = {
+                  bid: t.bid,
+                  ask: t.ask,
+                  last: t.last
+                };
+              }
+            });
+          }
 
           const triggeredAlerts = checkAlerts(priceMap);
 
@@ -451,16 +512,109 @@ function App() {
         } else if (data.type === 'candle_update') {
           // Dispatch to market data store
           useMarketDataStore.getState().updateCandle(data);
+        } else if (data.type === 'notification') {
+          // Handle server-sent notifications (order fills, margin calls, position updates, etc.)
+          // Backend sends: { type: "notification", notification: { type, severity, title, message, data, ... } }
+          const notification = data.notification as any;
+          if (notification) {
+            // Map backend notification types to frontend notification categories
+            let notifType: 'trading' | 'account' | 'security' | 'system' = 'system';
+            let severity: 'critical' | 'error' | 'warning' | 'info' = 'info';
+
+            // Map backend notification type to frontend type
+            const backendType = notification.type || '';
+            if (backendType === 'order_filled' || backendType === 'position_closed' ||
+                backendType === 'stop_loss_triggered' || backendType === 'take_profit_triggered') {
+              notifType = 'trading';
+              severity = 'info';
+            } else if (backendType === 'margin_call' || backendType === 'margin_warning' ||
+                       backendType === 'margin_call_warning') {
+              notifType = 'account';
+              severity = 'critical';
+            } else if (backendType === 'login_alert' || backendType === 'security_alert') {
+              notifType = 'security';
+              severity = 'error';
+            }
+
+            // Override severity if backend provides it
+            if (notification.severity) {
+              const sev = notification.severity.toLowerCase();
+              if (sev === 'critical' || sev === 'error' || sev === 'warning' || sev === 'info') {
+                severity = sev;
+              }
+            }
+
+            addNotification({
+              type: notifType,
+              severity: severity,
+              title: notification.title || notification.subject || 'Notification',
+              message: notification.message || '',
+              data: notification.data,
+            });
+
+            // Play sound for critical notifications (margin calls, etc.)
+            if (severity === 'critical') {
+              try {
+                const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZUQ0PVKvn77BfGAg+ltvy0H0pBSl+zPLaizsIGGS56+OZUQ4OUKXi8LaHMwU2jdXzz38qBSl9y/Lai0YIDVmw6+6cUw8LTqPf87acPQU0itbyynspBCt7y+/aijsIGWO56+OaUA0OUKXi8LWHMwU2jdXzz38qBSl9y/Lai0YIDVmw6+6cUw8LTqPf87acPQU0itbyynspBCt7y+/aijsI');
+                audio.volume = 0.5;
+                audio.play().catch(() => {});
+              } catch { /* ignore audio errors */ }
+            }
+          }
+        } else if (data.type === 'alert') {
+          // Handle server-sent alerts (system alerts from alert engine)
+          // Backend sends: { type: "alert", alert: { id, severity, title, message, category, ... }, timestamp }
+          const alert = data.alert as any;
+          if (alert) {
+            let severity: 'critical' | 'error' | 'warning' | 'info' = 'warning';
+            if (alert.severity) {
+              const sev = alert.severity.toLowerCase();
+              if (sev === 'critical' || sev === 'error' || sev === 'warning' || sev === 'info') {
+                severity = sev;
+              }
+            }
+
+            addNotification({
+              type: 'system',
+              severity: severity,
+              title: alert.title || 'System Alert',
+              message: alert.message || '',
+              data: { alertId: alert.id, category: alert.category, source: alert.source },
+            });
+
+            // Play sound for critical system alerts
+            if (severity === 'critical' || severity === 'error') {
+              try {
+                const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZUQ0PVKvn77BfGAg+ltvy0H0pBSl+zPLaizsIGGS56+OZUQ4OUKXi8LaHMwU2jdXzz38qBSl9y/Lai0YIDVmw6+6cUw8LTqPf87acPQU0itbyynspBCt7y+/aijsIGWO56+OaUA0OUKXi8LWHMwU2jdXzz38qBSl9y/Lai0YIDVmw6+6cUw8LTqPf87acPQU0itbyynspBCt7y+/aijsI');
+                audio.volume = 0.4;
+                audio.play().catch(() => {});
+              } catch { /* ignore audio errors */ }
+            }
+          }
+        } else if (data.type === 'orderbook_update') {
+          // Handle orderbook updates
+          // Backend sends: { type: "orderbook_update", symbol, bids, asks, spread, midPrice, timestamp }
+          // Dispatch to market data store for components that need order book data
+          useMarketDataStore.getState().updateOrderBook({
+            symbol: data.symbol as string,
+            bids: data.bids as any[],
+            asks: data.asks as any[],
+            spread: data.spread as number,
+            midPrice: data.midPrice as number,
+            timestamp: data.timestamp as number,
+          });
         }
       } catch (e) {
-        console.error('[WS] Parse error:', e);
+        console.error('[WS] Message processing error:', e);
       }
     });
 
+    // Cleanup function
     return () => {
+      isMounted = false; // Mark component as unmounted
       unsubscribe();
     };
-  }, [isAuthenticated, subscribe]);
+  }, [isAuthenticated, subscribe, checkAlerts, addNotification]);
 
   // PERFORMANCE FIX: Removed RAF batching for immediate updates
   // Ticks now update Zustand store directly via subscription handler
@@ -618,6 +772,17 @@ function App() {
       }, index * 2000); // Stagger by 2 seconds
     });
   }, []); // Run only once
+
+  // Auto-fetch store data after mount (safe, non-blocking)
+  useEffect(() => {
+    // Delay slightly to let the UI render first
+    const timer = setTimeout(() => {
+      useNewsStore.getState().fetchNews?.().catch(() => {});
+      useSentimentStore.getState().fetchSentimentData?.().catch(() => {});
+      useSignalStore.getState().fetchSignals?.().catch(() => {});
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, []);
 
   // ============================================================================
   // ALL HOOKS MUST BE DECLARED BEFORE ANY EARLY RETURNS
@@ -779,7 +944,12 @@ function App() {
   // ============================================================================
 
   if (!isAuthenticated) {
-    return <Login onLogin={() => { setIsAuthenticated(true); setAccountId("1"); }} />;
+    return <Login onLogin={(accountId) => {
+      console.log('[App] Login successful, account:', accountId);
+      // Login.tsx already updated Zustand store (setAuthenticated, setAuthToken)
+      // Just store accountId in localStorage for next session
+      localStorage.setItem('rtx_account_id', accountId);
+    }} />;
   }
 
   // Consolidated to main view - no extra dashboard routes needed
@@ -919,7 +1089,7 @@ function App() {
 
           {/* 3. Bottom Terminal - Toolbox */}
           <Toolbox
-            accountId={accountId}
+            accountId={accountId || "1"}
             wsConnection={wsRef.current}
           />
 
@@ -949,8 +1119,8 @@ function App() {
                 marketWatch: { selectedSymbol },
                 orderPanel: { volume }
               }}
-              userId={accountId}
-              accountId={accountId}
+              userId={accountId || "1"}
+              accountId={accountId || "1"}
             />
           )}
 

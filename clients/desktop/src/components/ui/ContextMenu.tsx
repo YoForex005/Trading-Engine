@@ -173,7 +173,7 @@ const MenuItem: React.FC<MenuItemProps> = ({
   const itemRef = useRef<HTMLDivElement>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
-  const closeTimeoutRef = useRef<NodeJS.Timeout>();
+  const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const hasSubmenu = item.submenu && item.submenu.length > 0;
 
@@ -508,7 +508,7 @@ const Menu: React.FC<MenuProps> = ({ items, position, onClose, zIndex, isSubmenu
           return (
             <div
               key={itemId}
-              ref={el => itemRefs.current[index] = el}
+              ref={el => { itemRefs.current[index] = el; }}
             >
               <MenuItem
                 item={item}

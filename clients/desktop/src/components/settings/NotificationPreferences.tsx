@@ -25,14 +25,12 @@ import {
   type NotificationSound,
   type NotificationPriority,
   type HistoryRetention,
+  type NotificationsSettings,
 } from '../../store/useSettingsStore';
 import { useNotificationStore } from '../../store/useNotificationStore';
 
 interface NotificationCategory {
-  id: keyof Pick<
-    typeof useSettingsStore extends (...args: any) => infer R ? R : never,
-    'notifications'
-  >['notifications'];
+  id: keyof Omit<NotificationsSettings, 'doNotDisturb' | 'dndSchedule' | 'maxNotificationsPerMinute' | 'historyRetention' | 'enablePushNotifications' | 'enableSoundAlerts' | 'enableEmailAlerts'>;
   label: string;
   description: string;
   icon: React.ReactNode;
@@ -40,37 +38,37 @@ interface NotificationCategory {
 
 const CATEGORIES: NotificationCategory[] = [
   {
-    id: 'tradeExecution' as any,
+    id: 'tradeExecution',
     label: 'Trade Execution',
     description: 'Order filled, position opened/closed',
     icon: <TrendingUp size={16} />,
   },
   {
-    id: 'priceAlerts' as any,
+    id: 'priceAlerts',
     label: 'Price Alerts',
     description: 'Triggered alerts from Alert Manager',
     icon: <Bell size={16} />,
   },
   {
-    id: 'marginWarnings' as any,
+    id: 'marginWarnings',
     label: 'Margin Warnings',
     description: 'Margin call, stop-out approaching',
     icon: <AlertTriangle size={16} />,
   },
   {
-    id: 'system' as any,
+    id: 'system',
     label: 'System',
     description: 'Connection lost, reconnected, maintenance',
     icon: <Wifi size={16} />,
   },
   {
-    id: 'news' as any,
+    id: 'news',
     label: 'News',
     description: 'High-impact economic events',
     icon: <Newspaper size={16} />,
   },
   {
-    id: 'account' as any,
+    id: 'account',
     label: 'Account',
     description: 'Deposits, withdrawals, balance changes',
     icon: <User size={16} />,
@@ -315,7 +313,7 @@ export function NotificationPreferences() {
                         type="checkbox"
                         checked={categorySettings.enabled}
                         onChange={(e) =>
-                          updateCategorySettings(category.id as any, {
+                          updateCategorySettings(category.id, {
                             enabled: e.target.checked,
                           })
                         }
@@ -334,7 +332,7 @@ export function NotificationPreferences() {
                           type="checkbox"
                           checked={categorySettings.showPopup}
                           onChange={(e) =>
-                            updateCategorySettings(category.id as any, {
+                            updateCategorySettings(category.id, {
                               showPopup: e.target.checked,
                             })
                           }
@@ -349,7 +347,7 @@ export function NotificationPreferences() {
                           type="checkbox"
                           checked={categorySettings.playSound}
                           onChange={(e) =>
-                            updateCategorySettings(category.id as any, {
+                            updateCategorySettings(category.id, {
                               playSound: e.target.checked,
                             })
                           }
@@ -365,7 +363,7 @@ export function NotificationPreferences() {
                           <select
                             value={categorySettings.sound}
                             onChange={(e) =>
-                              updateCategorySettings(category.id as any, {
+                              updateCategorySettings(category.id, {
                                 sound: e.target.value as NotificationSound,
                               })
                             }
@@ -386,7 +384,7 @@ export function NotificationPreferences() {
                         <select
                           value={categorySettings.priority}
                           onChange={(e) =>
-                            updateCategorySettings(category.id as any, {
+                            updateCategorySettings(category.id, {
                               priority: e.target.value as NotificationPriority,
                             })
                           }

@@ -19,6 +19,10 @@ const STRATEGIES = [
 const TIMEFRAMES = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1', 'MN1'];
 
 // Simulated backtest engine
+// TODO: Backend needs a /api/backtest endpoint to run real backtests.
+// When available, this function should POST to /api/backtest with strategy
+// params and stream progress via WebSocket or SSE, replacing the
+// client-side simulation below.
 function runBacktest(
     strategy: Strategy,
     symbol: string,

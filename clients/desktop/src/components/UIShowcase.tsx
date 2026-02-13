@@ -7,7 +7,6 @@ import {
   LoadingSkeleton,
   FlashPrice,
   Tooltip,
-  ContextMenu,
   ToggleSwitch,
   Slider,
   Badge,
@@ -218,18 +217,9 @@ export function UIShowcase() {
               Hover for Tooltip
             </button>
           </Tooltip>
-          <ContextMenu
-            items={[
-              { label: 'Buy', onClick: () => alert('Buy'), icon: <TrendingUp size={16} /> },
-              { label: 'Sell', onClick: () => alert('Sell'), icon: <Activity size={16} /> },
-              { divider: true },
-              { label: 'Close All', onClick: () => alert('Close'), icon: <X size={16} /> },
-            ]}
-          >
-            <button className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors">
-              Right-Click for Menu
-            </button>
-          </ContextMenu>
+          <button className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors">
+            Context Menu Demo (See Market Watch for working example)
+          </button>
         </div>
       </section>
 

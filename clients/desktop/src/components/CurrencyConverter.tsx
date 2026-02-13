@@ -15,6 +15,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { useCurrencyStore } from '../store/useCurrencyStore';
+import { useAppStore } from '../store/useAppStore';
 
 const CURRENCIES = [
   'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'CAD', 'NZD',
@@ -33,7 +34,10 @@ interface ExchangeRate {
   history: number[]; // Last 24 hours
 }
 
-// Generate mock exchange rates
+// TODO: Backend API needed - No /api/currency/rates or /api/exchange-rates endpoint exists yet.
+// When a backend endpoint is added, replace generateExchangeRates() with an API call
+// and use the live WebSocket tick data (useAppStore ticks) for forex pair rates.
+// For now, rates are generated from hardcoded base rates.
 function generateExchangeRates(): Map<string, ExchangeRate> {
   const rates = new Map<string, ExchangeRate>();
 
@@ -106,8 +110,28 @@ export const CurrencyConverter: React.FC = () => {
   const [pipPair, setPipPair] = useState<string>('EURUSD');
   const [accountCurrency, setAccountCurrency] = useState<string>('USD');
 
-  // Generate exchange rates
-  const exchangeRates = useMemo(() => generateExchangeRates(), []);
+  // Use live tick data from WebSocket to enhance exchange rates for available forex pairs
+  const liveTicks = useAppStore((state) => state.ticks);
+
+  // Generate exchange rates, overriding with live tick data where available
+  const exchangeRates = useMemo(() => {
+    const rates = generateExchangeRates();
+    // Override rates for forex pairs that have live WebSocket data
+    Object.keys(liveTicks).forEach((symbol) => {
+      const tick = liveTicks[symbol];
+      if (tick && tick.bid > 0 && tick.ask > 0 && symbol.length === 6) {
+        const from = symbol.substring(0, 3);
+        const to = symbol.substring(3, 6);
+        const existing = rates.get(`${from}${to}`);
+        if (existing) {
+          existing.bid = tick.bid;
+          existing.ask = tick.ask;
+          rates.set(`${from}${to}`, existing);
+        }
+      }
+    });
+    return rates;
+  }, [liveTicks]);
 
   // Get current conversion rate
   const currentRate = useMemo(() => {

@@ -9,7 +9,8 @@
  * - React Context integration
  */
 
-import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import {
   keyboardShortcutManager,
   type ShortcutDefinition,

@@ -15,7 +15,7 @@ export interface HoverIntentOptions {
 export function useHoverIntent(options: HoverIntentOptions = {}) {
   const { delay = 150, sensitivity = 7 } = options;
   const [isHovering, setIsHovering] = useState(false);
-  const timeoutRef = useRef<NodeJS.Timeout>();
+  const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const positionRef = useRef({ x: 0, y: 0 });
   const initialPosRef = useRef({ x: 0, y: 0 });
 

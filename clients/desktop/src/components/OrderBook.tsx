@@ -264,6 +264,11 @@ const OrderBookRow = ({
   );
 };
 
+// NOTE: Backend has OrderBookHandler in backend/api/orderbook.go (GET /api/orderbook/:symbol)
+// but it is NOT yet registered in backend/cmd/server/main.go.
+// Once registered, the fetch above at buildApiUrl(`/api/orderbook?symbol=${symbol}&depth=${depth}`)
+// will work automatically. The handler expects path-based routing: /api/orderbook/{symbol}
+// so the fetch URL may need to change to: buildApiUrl(`/api/orderbook/${symbol}`)
 // Mock data generator for development/fallback
 const generateMockOrderBook = (
   symbol: string,

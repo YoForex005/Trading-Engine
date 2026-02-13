@@ -46,7 +46,8 @@ export type Command =
   | {
     type: 'SELECT_TOOL';
     payload: {
-      tool: 'cursor' | 'trendline' | 'hline' | 'vline' | 'text' | 'channel' | 'fibonacci' | 'shapes';
+      tool: 'cursor' | 'trendline' | 'hline' | 'vline' | 'text' | 'channel' | 'fibonacci' | 'shapes' | 'rectangle' | 'ellipse' | 'arrow' | 'pitchfork';
+      subtype?: string;
     };
   }
   // Timeframe Commands

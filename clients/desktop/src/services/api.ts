@@ -161,9 +161,14 @@ async function fetchWithTimeout(
 
     // Handle 401 Unauthorized - clear auth state and redirect to login
     if (response.status === 401) {
+      // Clear authentication data
       useAppStore.getState().clearAuth();
-      // Redirect to login page by triggering window navigation
-      if (typeof window !== 'undefined') {
+      localStorage.removeItem('rtx_token');
+      localStorage.removeItem('rtx_user');
+
+      // Prevent infinite redirect loop - only redirect if not already on login page
+      if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+        console.warn('[API] 401 Unauthorized - redirecting to login');
         window.location.href = '/';
       }
       throw new ApiError('Unauthorized - please log in again', 401, response);
@@ -402,6 +407,40 @@ export const ordersApi = {
     const response = await fetchWithTimeout(`${API_BASE_URL}/order/cancel`, {
       method: 'POST',
       body: JSON.stringify({ orderId }),
+    });
+
+    return handleResponse(response);
+  },
+
+  async placeBracketOrder(data: {
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    volume: number;
+    entryPrice: number;
+    stopLoss: number;
+    takeProfit: number;
+    entryType?: string;
+    timeInForce?: string;
+  }): Promise<any> {
+    const response = await fetchWithTimeout(`${API_BASE_URL}/api/orders/bracket`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+
+    return handleResponse(response);
+  },
+
+  async setTrailingStop(data: {
+    tradeId?: string;
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    type: string;
+    distance: number;
+    stepSize?: number;
+  }): Promise<any> {
+    const response = await fetchWithTimeout(`${API_BASE_URL}/position/trailing-stop`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
 
     return handleResponse(response);
@@ -834,6 +873,97 @@ export const workspaceApi = {
 };
 
 // ============================================
+// Symbol Specification API
+// ============================================
+
+export interface SymbolSpecification {
+  symbol: string;
+  description: string;
+  contractSize: number;
+  pipValue: number;
+  pipPosition: number;
+  minLot: number;
+  maxLot: number;
+  lotStep: number;
+  marginRate: number;
+  swapLong: number;
+  swapShort: number;
+  commission: number;
+  currency: string;
+  baseCurrency: string;
+  quoteCurrency: string;
+}
+
+export const symbolSpecApi = {
+  async getSpec(symbol: string): Promise<SymbolSpecification | null> {
+    try {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/symbols/${symbol}/spec`);
+      return handleResponse(response);
+    } catch {
+      return null;
+    }
+  },
+};
+
+// ============================================
+// MAM/PAMM API (Multi-Account Manager)
+// ============================================
+
+export interface MAMGroup {
+  id: string;
+  managerAccountId: string;
+  managerName: string;
+  strategyName: string;
+  allocationMethod: string;
+  managementFeePct: number;
+  performanceFeePct: number;
+  highWaterMark: boolean;
+  minInvestment: number;
+  maxDrawdownLimit: number;
+  maxLotSize: number;
+  allowedSymbols: string[];
+  totalAUM: number;
+  status: string;
+  createdAt: string;
+  investorCount: number;
+  monthlyReturn: number;
+  ytdReturn: number;
+}
+
+export interface MAMStats {
+  totalAUM: number;
+  activeManagers: number;
+  totalInvestors: number;
+  avgPerformance: number;
+  totalGroups: number;
+  pausedGroups: number;
+  closedGroups: number;
+}
+
+export const mamApi = {
+  async listGroups(): Promise<{ groups: MAMGroup[]; total: number }> {
+    const response = await fetchWithTimeout(`${API_BASE_URL}/admin/mam`);
+    return handleResponse(response);
+  },
+
+  async getStats(): Promise<MAMStats> {
+    const response = await fetchWithTimeout(`${API_BASE_URL}/admin/mam/stats`);
+    return handleResponse(response);
+  },
+
+  async getGroup(id: string): Promise<any> {
+    const response = await fetchWithTimeout(`${API_BASE_URL}/admin/mam/${id}`);
+    return handleResponse(response);
+  },
+
+  async getGroupInvestors(id: string): Promise<any[]> {
+    const response = await fetchWithTimeout(`${API_BASE_URL}/admin/mam/${id}/investors`);
+    const data = await handleResponse<any[]>(response);
+    return data || [];
+  },
+};
+
+// ============================================
 // Export All APIs
 // ============================================
 
@@ -850,6 +980,8 @@ export const api = {
   analytics: analyticsApi,
   alerts: alertsApi,
   workspace: workspaceApi,
+  symbolSpec: symbolSpecApi,
+  mam: mamApi,
 };
 
 export default api;

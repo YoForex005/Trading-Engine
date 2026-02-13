@@ -16,7 +16,10 @@ import {
     ChevronDown,
     LayoutTemplate,
     LayoutList,
-    User
+    User,
+    Square,
+    Circle,
+    ArrowUpRight
 } from 'lucide-react';
 import type { ChartType, Timeframe } from '../TradingChart';
 import { useToolbarState } from '../../hooks/useToolbarState';
@@ -39,6 +42,7 @@ interface TopToolbarProps {
 
 import { MenuBar } from './MenuBar';
 import { DrawingsDropdown } from './DrawingsDropdown';
+import { DrawingTemplatesDropdown } from './DrawingTemplatesDropdown';
 import { ChartTemplateManager } from '../ChartTemplateManager';
 import { indicatorManager } from '../../services/indicatorManager';
 import { drawingManager } from '../../services/drawingManager';
@@ -151,19 +155,17 @@ const HeaderBar = ({ symbol, timeframe, account, server }: { symbol: string, tim
                             const event = new Event('toggleAccountPanel');
                             window.dispatchEvent(event);
                         }}
-                        title="Account Management"
                     />
                     <div className="relative" data-notification-bell>
                         <Bell
                             size={13}
                             className="hover:text-zinc-300 cursor-pointer transition-colors"
                             onClick={toggleCenter}
-                            title="Notifications"
                         />
                         <NotificationBadge />
                     </div>
                     <NotificationCenter />
-                    <Settings size={13} className="hover:text-zinc-300 cursor-pointer transition-colors" title="Settings" />
+                    <Settings size={13} className="hover:text-zinc-300 cursor-pointer transition-colors" />
                 </div>
             </div>
         </div>
@@ -383,12 +385,49 @@ const MainToolbar = ({
                     onClick={() => dispatchCommand({ type: 'SELECT_TOOL', payload: { tool: 'text' } })}
                     title="Text (X)"
                 />
+                <ToolButton
+                    icon={<Square size={15} />}
+                    active={toolbarState.activeTool === 'rectangle'}
+                    onClick={() => dispatchCommand({ type: 'SELECT_TOOL', payload: { tool: 'rectangle' } })}
+                    title="Rectangle"
+                />
+                <ToolButton
+                    icon={<Circle size={15} />}
+                    active={toolbarState.activeTool === 'ellipse'}
+                    onClick={() => dispatchCommand({ type: 'SELECT_TOOL', payload: { tool: 'ellipse' } })}
+                    title="Ellipse"
+                />
+                <ToolButton
+                    icon={<ArrowUpRight size={15} />}
+                    active={toolbarState.activeTool === 'arrow'}
+                    onClick={() => dispatchCommand({ type: 'SELECT_TOOL', payload: { tool: 'arrow' } })}
+                    title="Arrow"
+                />
+                <ToolButton
+                    icon={
+                        <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path d="M9 2v14M9 2l-4 6M9 2l4 6M5 16l4-8l4 8" />
+                        </svg>
+                    }
+                    active={toolbarState.activeTool === 'pitchfork'}
+                    onClick={() => dispatchCommand({ type: 'SELECT_TOOL', payload: { tool: 'pitchfork' } })}
+                    title="Pitchfork"
+                />
                 <ShapesDropdown
                     activeTool={toolbarState.activeTool}
                     dispatchCommand={dispatchCommand}
                 />
                 <Divider />
                 <DrawingsDropdown />
+                <DrawingTemplatesDropdown symbol={symbol} accountId={1} />
+                <Divider />
+                <ToolButton
+                    icon={<Layers size={16} />}
+                    onClick={() => {
+                        window.dispatchEvent(new CustomEvent('toggle-drawing-list'));
+                    }}
+                    title="Drawing List (Show/Hide Drawings)"
+                />
             </ToolbarGroup>
 
             <div className="flex-1"></div>

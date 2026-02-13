@@ -1,10 +1,17 @@
 /**
  * Sentiment Analysis Store with Zustand
  * Manages market sentiment data and indicators
+ * Connected to backend: GET /admin/market-news/stats (for sentiment aggregates)
+ * and GET /admin/market-news/articles (for news with sentiment scores)
+ *
+ * NOTE: No dedicated /api/sentiment endpoint exists in the backend.
+ * Sentiment data is derived from market-news articles' sentiment scores
+ * and the stats endpoint. Mock data is used as fallback.
  */
 
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
+import { API_ENDPOINTS } from '../config/api';
 
 export type SentimentTrend = 'up' | 'down' | 'neutral';
 export type NewsSentiment = 'positive' | 'negative' | 'neutral';
@@ -44,10 +51,13 @@ interface SentimentState {
   autoRefresh: boolean;
   refreshInterval: number; // seconds
   lastUpdate: Date;
+  isLoading: boolean;
+  error: string | null;
 
   setAutoRefresh: (enabled: boolean) => void;
   setRefreshInterval: (seconds: number) => void;
   refreshData: () => void;
+  fetchSentimentData: () => Promise<void>;
 }
 
 // Mock data generators
@@ -148,6 +158,68 @@ function calculateOverallSentiment(symbolSentiments: SymbolSentiment[]): number 
   return Math.round(avgBullish * 10) / 10;
 }
 
+// Fetch sentiment-related data from backend
+// Uses /admin/market-news/stats for aggregate sentiment and /admin/market-news/articles for news items
+async function fetchSentimentFromAPI(): Promise<{
+  news: NewsItem[];
+  overallBullish: number;
+} | null> {
+  // Get auth token
+  let authToken: string | null = null;
+  try {
+    const { useAppStore } = await import('./useAppStore');
+    authToken = useAppStore.getState().authToken;
+  } catch {
+    // fallback
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+
+  // Fetch articles with sentiment data
+  const articlesRes = await fetch(API_ENDPOINTS.marketNews.articles, { headers });
+  if (!articlesRes.ok) {
+    throw new Error(`Failed to fetch articles: ${articlesRes.status}`);
+  }
+
+  const articlesData = await articlesRes.json();
+  const articles = Array.isArray(articlesData) ? articlesData : (articlesData.articles || articlesData.data || []);
+
+  // Transform articles into sentiment NewsItems
+  const news: NewsItem[] = articles.slice(0, 10).map((article: any, idx: number) => {
+    const sentiment = article.sentiment || { bullish: 0.5, bearish: 0.3, neutral: 0.2, overall: 'neutral' };
+    let newsSentiment: NewsSentiment = 'neutral';
+    if (sentiment.overall === 'bullish' || sentiment.bullish > 0.5) newsSentiment = 'positive';
+    else if (sentiment.overall === 'bearish' || sentiment.bearish > 0.5) newsSentiment = 'negative';
+
+    return {
+      id: `news-${article.id || Date.now()}-${idx}`,
+      headline: article.title || '',
+      source: article.source || 'Unknown',
+      timestamp: new Date(article.published_at || Date.now()),
+      sentiment: newsSentiment,
+      impactScore: Math.round((Math.max(sentiment.bullish, sentiment.bearish) || 0.5) * 100),
+    };
+  }).sort((a: NewsItem, b: NewsItem) => b.timestamp.getTime() - a.timestamp.getTime());
+
+  // Calculate overall bullish from articles
+  let totalBullish = 0;
+  let count = 0;
+  for (const article of articles) {
+    if (article.sentiment) {
+      totalBullish += article.sentiment.bullish || 0;
+      count++;
+    }
+  }
+  const overallBullish = count > 0 ? (totalBullish / count) * 100 : 50;
+
+  return { news, overallBullish };
+}
+
 export const useSentimentStore = create<SentimentState>()(
   devtools(
     (set, get) => {
@@ -162,20 +234,45 @@ export const useSentimentStore = create<SentimentState>()(
         autoRefresh: true,
         refreshInterval: 30,
         lastUpdate: new Date(),
+        isLoading: false,
+        error: null,
 
         setAutoRefresh: (enabled) => set({ autoRefresh: enabled }),
         setRefreshInterval: (seconds) => set({ refreshInterval: seconds }),
 
-        refreshData: () => {
-          const symbolSentiments = generateSymbolSentiments();
-          const overallSentiment = calculateOverallSentiment(symbolSentiments);
+        fetchSentimentData: async () => {
+          set({ isLoading: true, error: null });
+          try {
+            const result = await fetchSentimentFromAPI();
+            if (result && result.news.length > 0) {
+              set({
+                news: result.news,
+                overallSentiment: Math.round(result.overallBullish * 10) / 10,
+                lastUpdate: new Date(),
+                isLoading: false,
+              });
+            } else {
+              set({ isLoading: false });
+            }
+          } catch (err: any) {
+            console.warn('[SentimentStore] Failed to fetch from API, using mock data:', err.message);
+            set({ isLoading: false, error: err.message });
+          }
+        },
 
-          set({
-            overallSentiment,
-            symbolSentiments,
-            indicators: generateSentimentIndicators(),
-            news: generateNewsItems(),
-            lastUpdate: new Date(),
+        refreshData: () => {
+          // Try API first, fall back to mock data
+          get().fetchSentimentData().catch(() => {
+            const symbolSentiments = generateSymbolSentiments();
+            const overallSentiment = calculateOverallSentiment(symbolSentiments);
+
+            set({
+              overallSentiment,
+              symbolSentiments,
+              indicators: generateSentimentIndicators(),
+              news: generateNewsItems(),
+              lastUpdate: new Date(),
+            });
           });
         },
       };

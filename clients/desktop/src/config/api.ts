@@ -76,6 +76,7 @@ export const API_ENDPOINTS = {
     layouts: `${API_BASE_URL}/workspace/layouts`,
     drawings: `${API_BASE_URL}/workspace/drawings`,
     preferences: `${API_BASE_URL}/workspace/preferences`,
+    templates: `${API_BASE_URL}/workspace/templates`,
   },
 
   // Data Management
@@ -87,6 +88,31 @@ export const API_ENDPOINTS = {
   // Economic Calendar (placeholder for future real API integration)
   // Can be replaced with ForexFactory, Investing.com, or custom API
   economicCalendar: `${API_BASE_URL}/economic-calendar`,
+
+  // Market News / Economic Calendar (admin backend)
+  marketNews: {
+    articles: `${ADMIN_API_URL}/admin/market-news/articles`,
+    calendar: `${ADMIN_API_URL}/admin/market-news/calendar`,
+    sources: `${ADMIN_API_URL}/admin/market-news/sources`,
+    stats: `${ADMIN_API_URL}/admin/market-news/stats`,
+  },
+
+  // Trading Signals (admin backend)
+  signals: {
+    providers: `${ADMIN_API_URL}/admin/signals/providers`,
+    active: `${ADMIN_API_URL}/admin/signals/active`,
+    history: `${ADMIN_API_URL}/admin/signals/history`,
+    subscriptions: `${ADMIN_API_URL}/admin/signals/subscriptions`,
+    stats: `${ADMIN_API_URL}/admin/signals/stats`,
+    leaderboard: `${ADMIN_API_URL}/admin/signals/leaderboard`,
+  },
+
+  // Social / Copy Trading (admin backend)
+  socialTrading: {
+    providers: `${ADMIN_API_URL}/admin/social-trading/providers`,
+    copies: `${ADMIN_API_URL}/admin/social-trading/copies`,
+    stats: `${ADMIN_API_URL}/admin/social-trading/stats`,
+  },
 
   // Trades
   trades: {

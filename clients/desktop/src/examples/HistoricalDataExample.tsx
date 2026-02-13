@@ -19,7 +19,7 @@ export const SimpleChartExample: React.FC = () => {
         symbol="EURUSD"
         enableHistoricalData={true}
         chartType="candlestick"
-        timeframe="1h"
+        timeframe="H1"
       />
     </div>
   );
@@ -57,7 +57,7 @@ export const CustomDateRangeExample: React.FC = () => {
           enableHistoricalData={true}
           historicalDateRange={dateRange}
           chartType="line"
-          timeframe="15m"
+          timeframe="M15"
         />
       </div>
     </div>

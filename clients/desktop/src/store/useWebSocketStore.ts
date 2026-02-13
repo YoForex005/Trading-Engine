@@ -27,6 +27,10 @@ interface WebSocketStoreState {
   // Metrics
   metrics: ConnectionMetrics;
 
+  // Reconnect tracking
+  reconnectCount: number;
+  lastReconnectAt: number | null;
+
   // Actions
   setConnectionState: (state: ConnectionState) => void;
   updateMetrics: (metrics: Partial<ConnectionMetrics>) => void;
@@ -34,6 +38,7 @@ interface WebSocketStoreState {
   updateLastMessageTime: (time: number) => void;
   resetReconnectAttempts: () => void;
   incrementReconnectAttempts: () => void;
+  recordReconnect: () => void;
 }
 
 export const useWebSocketStore = create<WebSocketStoreState>((set) => ({
@@ -41,6 +46,8 @@ export const useWebSocketStore = create<WebSocketStoreState>((set) => ({
   connectionState: 'disconnected',
   isStale: false,
   lastMessageTime: null,
+  reconnectCount: 0,
+  lastReconnectAt: null,
 
   metrics: {
     messagesSent: 0,
@@ -76,5 +83,11 @@ export const useWebSocketStore = create<WebSocketStoreState>((set) => ({
         ...state.metrics,
         reconnectAttempts: state.metrics.reconnectAttempts + 1,
       },
+    })),
+
+  recordReconnect: () =>
+    set((state) => ({
+      reconnectCount: state.reconnectCount + 1,
+      lastReconnectAt: Date.now(),
     })),
 }));

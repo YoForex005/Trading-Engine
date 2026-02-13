@@ -129,7 +129,9 @@ export function Toolbox({ accountId, wsConnection }: ToolboxProps) {
     const account = useAppStore((state) => state.account);
 
     // Get alerts from alert store
-    const { alerts } = useAlertStore();
+    const alerts = useAlertStore((state) => state.alerts);
+    const removeAlert = useAlertStore((state) => state.removeAlert);
+    const updateAlert = useAlertStore((state) => state.updateAlert);
 
     // Fetch positions
     useEffect(() => {
@@ -186,22 +188,8 @@ export function Toolbox({ accountId, wsConnection }: ToolboxProps) {
         return () => clearInterval(interval);
     }, [accountId]);
 
-    // Fetch alerts
-    useEffect(() => {
-        const fetchAlerts = async () => {
-            try {
-                const res = await fetch(`${API_ENDPOINTS.alerts}?accountId=${accountId}`);
-                if (res.ok) {
-                    const data = await res.json();
-                    setAlerts(data || []);
-                }
-            } catch (err) {
-                console.error('[Toolbox] Failed to fetch alerts:', err);
-            }
-        };
-
-        fetchAlerts();
-    }, [accountId]);
+    // Fetch alerts - alerts are managed by useAlertStore
+    // No need to fetch from API as they're persisted in localStorage
 
     // WebSocket for real-time position updates
     useEffect(() => {
@@ -317,8 +305,8 @@ export function Toolbox({ accountId, wsConnection }: ToolboxProps) {
     // Tab counts
     const tradeBadge = positions.length > 0 ? ` (${positions.length})` : '';
     const ordersBadge = orders.length > 0 ? ` (${orders.length})` : '';
-    const alertsBadge = alerts.filter(a => a.status === 'ACTIVE').length > 0
-        ? ` (${alerts.filter(a => a.status === 'ACTIVE').length})`
+    const alertsBadge = alerts.filter(a => a.status === 'active').length > 0
+        ? ` (${alerts.filter(a => a.status === 'active').length})`
         : '';
 
     if (isCollapsed) {
@@ -404,7 +392,7 @@ export function Toolbox({ accountId, wsConnection }: ToolboxProps) {
                     <TradingSignals />
                 )}
                 {activeTab === 'RiskMap' && (
-                    <RiskHeatmap accountId={accountId} />
+                    <RiskHeatmap />
                 )}
                 {activeTab === 'Sentiment' && (
                     <SentimentAnalysis />

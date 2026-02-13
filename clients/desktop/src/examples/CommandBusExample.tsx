@@ -227,14 +227,14 @@ export function ContextMenuCommandExample() {
   const [selectedTool, setSelectedTool] = useState<string>('cursor');
 
   const tools = [
-    { id: 'cursor', label: 'Cursor' },
-    { id: 'trendline', label: 'Trendline' },
-    { id: 'hline', label: 'Horizontal Line' },
-    { id: 'vline', label: 'Vertical Line' },
-    { id: 'text', label: 'Text' },
-  ] as const;
+    { id: 'cursor' as const, label: 'Cursor' },
+    { id: 'trendline' as const, label: 'Trendline' },
+    { id: 'hline' as const, label: 'Horizontal Line' },
+    { id: 'vline' as const, label: 'Vertical Line' },
+    { id: 'text' as const, label: 'Text' },
+  ];
 
-  const handleSelectTool = (tool: (typeof tools)[0]['id']) => {
+  const handleSelectTool = (tool: 'cursor' | 'trendline' | 'hline' | 'vline' | 'text') => {
     setSelectedTool(tool);
     dispatch({
       type: 'SELECT_TOOL',

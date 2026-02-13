@@ -1,10 +1,15 @@
 /**
  * Signal Store with Zustand
  * Manages trading signals from signal providers
+ * Connected to backend:
+ *   GET /admin/signals/active   - active signals
+ *   GET /admin/signals/history  - historical/closed signals
+ *   GET /admin/signals/stats    - provider statistics
  */
 
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
+import { API_ENDPOINTS } from '../config/api';
 
 export type SignalDirection = 'BUY' | 'SELL';
 export type SignalStatus = 'new' | 'active' | 'closed';
@@ -53,6 +58,8 @@ interface SignalState {
   timeframeFilter: string;
   autoRefresh: boolean;
   refreshInterval: number; // seconds
+  isLoading: boolean;
+  error: string | null;
 
   setSelectedProvider: (provider: SignalProvider | 'All') => void;
   setSymbolGroupFilter: (group: SymbolGroup) => void;
@@ -63,6 +70,7 @@ interface SignalState {
   getFilteredSignals: () => Signal[];
   getProviderStats: (provider: SignalProvider) => ProviderStats;
   refreshSignals: () => void;
+  fetchSignals: () => Promise<void>;
 }
 
 // Mock data generators
@@ -237,10 +245,90 @@ function generateHistoricalSignals(): Signal[] {
   return signals.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 }
 
+// Determine symbol group from symbol name
+function getSymbolGroup(symbol: string): 'Forex' | 'Crypto' | 'Metals' {
+  const cryptoSymbols = ['BTCUSD', 'ETHUSD', 'XRPUSD', 'SOLUSD', 'DOGEUSD', 'ADAUSD'];
+  const metalSymbols = ['XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD'];
+  if (cryptoSymbols.some(c => symbol.toUpperCase().includes(c.replace('USD', '')))) return 'Crypto';
+  if (metalSymbols.some(m => symbol.toUpperCase().includes(m.replace('USD', '')))) return 'Metals';
+  return 'Forex';
+}
+
+// Transform backend signal to frontend Signal
+function transformBackendSignal(backendSignal: any, status: SignalStatus): Signal {
+  const symbol = backendSignal.symbol || '';
+  const direction = (backendSignal.direction || '').toUpperCase() === 'BUY' ? 'BUY' : 'SELL';
+
+  return {
+    id: `sig-${backendSignal.id}`,
+    provider: (backendSignal.providerName || 'Unknown') as SignalProvider,
+    symbol,
+    symbolGroup: getSymbolGroup(symbol),
+    direction: direction as SignalDirection,
+    entryPrice: backendSignal.entryPrice || 0,
+    stopLoss: backendSignal.stopLoss || 0,
+    takeProfit: backendSignal.takeProfit || 0,
+    confidence: backendSignal.confidence || 75,
+    status,
+    timestamp: new Date(backendSignal.createdAt || Date.now()),
+    analysis: backendSignal.analysis || '',
+    indicators: backendSignal.indicators || [],
+    suggestedLotSize: backendSignal.suggestedLotSize || 0.1,
+    timeframe: backendSignal.timeframe || 'H1',
+    currentPrice: backendSignal.currentPrice,
+    closePrice: backendSignal.closePrice,
+    closeTime: backendSignal.closedAt ? new Date(backendSignal.closedAt) : undefined,
+    pnl: backendSignal.pips,
+    duration: backendSignal.duration,
+  };
+}
+
+// Fetch signals from backend API
+async function fetchSignalsFromAPI(): Promise<{ active: Signal[]; history: Signal[] }> {
+  let authToken: string | null = null;
+  try {
+    const { useAppStore } = await import('./useAppStore');
+    authToken = useAppStore.getState().authToken;
+  } catch {
+    // fallback
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+
+  // Fetch active signals and history in parallel
+  const [activeRes, historyRes] = await Promise.all([
+    fetch(API_ENDPOINTS.signals.active, { headers }),
+    fetch(API_ENDPOINTS.signals.history, { headers }),
+  ]);
+
+  if (!activeRes.ok) {
+    throw new Error(`Failed to fetch active signals: ${activeRes.status}`);
+  }
+  if (!historyRes.ok) {
+    throw new Error(`Failed to fetch signal history: ${historyRes.status}`);
+  }
+
+  const activeData = await activeRes.json();
+  const historyData = await historyRes.json();
+
+  const activeSignals = Array.isArray(activeData) ? activeData : (activeData.signals || activeData.data || []);
+  const historySignals = Array.isArray(historyData) ? historyData : (historyData.signals || historyData.data || []);
+
+  return {
+    active: activeSignals.map((s: any) => transformBackendSignal(s, s.status === 'active' ? 'active' : 'new')),
+    history: historySignals.map((s: any) => transformBackendSignal(s, 'closed')),
+  };
+}
+
 export const useSignalStore = create<SignalState>()(
   devtools(
     (set, get) => ({
-      signals: generateMockSignals(),
+      signals: generateMockSignals(), // Initialize with mock data as fallback
       historicalSignals: generateHistoricalSignals(),
       selectedProvider: 'All',
       symbolGroupFilter: 'All',
@@ -248,6 +336,8 @@ export const useSignalStore = create<SignalState>()(
       timeframeFilter: 'All',
       autoRefresh: true,
       refreshInterval: 30,
+      isLoading: false,
+      error: null,
 
       setSelectedProvider: (provider) => set({ selectedProvider: provider }),
       setSymbolGroupFilter: (group) => set({ symbolGroupFilter: group }),
@@ -311,10 +401,32 @@ export const useSignalStore = create<SignalState>()(
         };
       },
 
+      fetchSignals: async () => {
+        set({ isLoading: true, error: null });
+        try {
+          const { active, history } = await fetchSignalsFromAPI();
+          if (active.length > 0 || history.length > 0) {
+            set({
+              signals: active.length > 0 ? active : get().signals,
+              historicalSignals: history.length > 0 ? history : get().historicalSignals,
+              isLoading: false,
+            });
+          } else {
+            set({ isLoading: false });
+          }
+        } catch (err: any) {
+          console.warn('[SignalStore] Failed to fetch from API, using mock data:', err.message);
+          set({ isLoading: false, error: err.message });
+        }
+      },
+
       refreshSignals: () => {
-        set({
-          signals: generateMockSignals(),
-          historicalSignals: generateHistoricalSignals(),
+        // Try API first, fall back to mock data
+        get().fetchSignals().catch(() => {
+          set({
+            signals: generateMockSignals(),
+            historicalSignals: generateHistoricalSignals(),
+          });
         });
       },
     }),

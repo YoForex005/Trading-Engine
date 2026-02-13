@@ -3,8 +3,10 @@
  * MT5-style trading performance analytics with metrics, charts, and detailed statistics
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, Target, Activity, DollarSign, AlertTriangle } from 'lucide-react';
+import { useAppStore } from '../store/useAppStore';
+import { API_BASE_URL } from '../config/api';
 
 interface Trade {
   id: number;
@@ -33,8 +35,44 @@ interface PerformanceMetrics {
 }
 
 export function PerformanceAnalytics() {
-  // Generate mock trade history
-  const trades = useMemo(() => generateMockTrades(), []);
+  const [trades, setTrades] = useState<Trade[]>([]);
+
+  // Fetch real trade history from /api/trades, fallback to mock data on error
+  useEffect(() => {
+    const fetchTrades = async () => {
+      try {
+        const accountId = useAppStore.getState().accountId;
+        const authToken = useAppStore.getState().authToken;
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/trades${accountId ? `?accountId=${accountId}` : ''}`,
+          { headers }
+        );
+        if (!response.ok) throw new Error('Failed to fetch trades');
+        const data = await response.json();
+        const apiTrades: Trade[] = (Array.isArray(data) ? data : data.trades || []).map((t: any, i: number) => ({
+          id: t.id || i + 1,
+          symbol: t.symbol || '',
+          type: t.type || t.side || 'BUY',
+          openTime: new Date(t.openTime || t.open_time || t.time),
+          closeTime: new Date(t.closeTime || t.close_time || t.time),
+          profit: t.profit ?? 0,
+          volume: t.volume ?? t.lots ?? 0,
+        }));
+        if (apiTrades.length > 0) {
+          setTrades(apiTrades.sort((a, b) => a.closeTime.getTime() - b.closeTime.getTime()));
+        } else {
+          setTrades(generateMockTrades());
+        }
+      } catch {
+        // Fallback to mock data when API is unavailable
+        setTrades(generateMockTrades());
+      }
+    };
+    fetchTrades();
+  }, []);
 
   // Calculate performance metrics
   const metrics = useMemo(() => calculateMetrics(trades), [trades]);

@@ -3,7 +3,7 @@
  * Advanced trade journaling system with calendar view, annotations, and analytics
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Calendar,
   ChevronLeft,
@@ -19,6 +19,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useTradeJournalStore, type SetupTag, type TradeAnnotation } from '../store/useTradeJournalStore';
+import { useAppStore } from '../store/useAppStore';
+import { API_BASE_URL } from '../config/api';
 
 interface Trade {
   id: number;
@@ -55,8 +57,52 @@ export function TradeJournalV2() {
   const { annotations, addAnnotation, getAnnotation, addJournalEntry, getEntriesByDate } =
     useTradeJournalStore();
 
-  // Generate 60 mock trades over 90 days
-  const trades = useMemo(() => generateMockTrades(), []);
+  // Fetch real trades from /api/trades, fallback to mock data
+  const [trades, setTrades] = useState<Trade[]>([]);
+  useEffect(() => {
+    const fetchTrades = async () => {
+      try {
+        const accountId = useAppStore.getState().accountId;
+        const authToken = useAppStore.getState().authToken;
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/trades${accountId ? `?accountId=${accountId}` : ''}`,
+          { headers }
+        );
+        if (!response.ok) throw new Error('Failed to fetch trades');
+        const data = await response.json();
+        const raw = Array.isArray(data) ? data : data.trades || [];
+        if (raw.length > 0) {
+          const mapped: Trade[] = raw.map((t: any, i: number) => {
+            const closeTime = t.closeTime || t.close_time || t.time || '';
+            const openTime = t.openTime || t.open_time || t.time || '';
+            return {
+              id: t.id || i + 1,
+              date: closeTime.substring(0, 10),
+              openTime,
+              closeTime,
+              symbol: t.symbol || '',
+              type: t.type || t.side || 'BUY',
+              volume: t.volume ?? t.lots ?? 0,
+              openPrice: t.openPrice ?? t.open_price ?? 0,
+              closePrice: t.closePrice ?? t.close_price ?? 0,
+              profit: t.profit ?? 0,
+              commission: t.commission ?? 0,
+              swap: t.swap ?? 0,
+            };
+          });
+          setTrades(mapped.sort((a, b) => new Date(b.closeTime).getTime() - new Date(a.closeTime).getTime()));
+          return;
+        }
+      } catch {
+        // Fallback below
+      }
+      setTrades(generateMockTrades());
+    };
+    fetchTrades();
+  }, []);
 
   // Filter trades
   const filteredTrades = useMemo(() => {

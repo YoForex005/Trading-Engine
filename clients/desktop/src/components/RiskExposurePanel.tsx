@@ -3,9 +3,11 @@
  * Real-time risk exposure visualization for trader's portfolio
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { AlertTriangle, TrendingUp, TrendingDown, DollarSign, Activity, Shield } from 'lucide-react';
 import { useRiskExposureStore } from '../store/useRiskExposureStore';
+import { useAppStore } from '../store/useAppStore';
+import { API_BASE_URL } from '../config/api';
 
 interface Position {
   id: number;
@@ -26,8 +28,52 @@ const LEVERAGE = 100;
 export function RiskExposurePanel() {
   const { showCorrelationWarnings, marginWarningThreshold } = useRiskExposureStore();
 
-  // Generate 15 mock open positions
-  const positions = useMemo(() => generateMockPositions(), []);
+  const [positions, setPositions] = useState<Position[]>(generateMockPositions());
+
+  // Fetch real positions from /api/positions, fallback to mock data on error
+  useEffect(() => {
+    const fetchPositions = async () => {
+      try {
+        const accountId = useAppStore.getState().accountId;
+        const authToken = useAppStore.getState().authToken;
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/positions${accountId ? `?accountId=${accountId}` : ''}`,
+          { headers }
+        );
+        if (!response.ok) throw new Error('Failed to fetch positions');
+        const data = await response.json();
+        const raw = Array.isArray(data) ? data : data.positions || [];
+        if (raw.length > 0) {
+          const symbolGroupMap: Record<string, 'Forex' | 'Metals' | 'Crypto' | 'Indices'> = {
+            XAUUSD: 'Metals', XAGUSD: 'Metals',
+            BTCUSD: 'Crypto', ETHUSD: 'Crypto',
+            SPX500: 'Indices', NAS100: 'Indices', US30: 'Indices',
+          };
+          const apiPositions: Position[] = raw.map((p: any, i: number) => {
+            const symbol = p.symbol || '';
+            return {
+              id: p.id || i + 1,
+              symbol,
+              type: p.type || p.side || 'BUY',
+              volume: p.volume ?? p.lots ?? 0,
+              openPrice: p.openPrice ?? p.open_price ?? 0,
+              currentPrice: p.currentPrice ?? p.current_price ?? p.openPrice ?? 0,
+              sl: p.sl ?? p.stopLoss ?? 0,
+              unrealizedPnL: p.unrealizedPnL ?? p.unrealized_pnl ?? p.profit ?? 0,
+              group: symbolGroupMap[symbol] || 'Forex',
+            };
+          });
+          setPositions(apiPositions);
+        }
+      } catch {
+        // Keep mock data as fallback
+      }
+    };
+    fetchPositions();
+  }, []);
 
   // Calculate portfolio metrics
   const portfolioMetrics = useMemo(() => {

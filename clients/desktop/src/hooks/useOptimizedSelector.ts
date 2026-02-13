@@ -40,7 +40,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
  * Only re-renders when selected value actually changes
  */
 export function useMemoizedSelector<T, U>(
-  useStore: (selector: (state: T) => U) => U,
+  useStore: (selector: (state: T) => U, equalityFn?: (a: U, b: U) => boolean) => U,
   selector: (state: T) => U,
   equalityFn: (a: U, b: U) => boolean = shallow
 ): U {
@@ -51,7 +51,7 @@ export function useMemoizedSelector<T, U>(
  * Optimized selector for primitive values
  */
 export function usePrimitiveSelector<T, U extends string | number | boolean>(
-  useStore: (selector: (state: T) => U) => U,
+  useStore: (selector: (state: T) => U, equalityFn?: (a: U, b: U) => boolean) => U,
   selector: (state: T) => U
 ): U {
   return useStore(selector);
@@ -61,7 +61,7 @@ export function usePrimitiveSelector<T, U extends string | number | boolean>(
  * Optimized selector for arrays
  */
 export function useArraySelector<T, U>(
-  useStore: (selector: (state: T) => U[]) => U[],
+  useStore: (selector: (state: T) => U[], equalityFn?: (a: U[], b: U[]) => boolean) => U[],
   selector: (state: T) => U[]
 ): U[] {
   return useStore(selector, (a, b) => {
@@ -74,7 +74,7 @@ export function useArraySelector<T, U>(
  * Optimized selector for objects with shallow comparison
  */
 export function useShallowSelector<T, U extends object>(
-  useStore: (selector: (state: T) => U) => U,
+  useStore: (selector: (state: T) => U, equalityFn?: (a: U, b: U) => boolean) => U,
   selector: (state: T) => U
 ): U {
   return useStore(selector, shallow);
@@ -84,7 +84,7 @@ export function useShallowSelector<T, U extends object>(
  * Optimized selector for objects with deep comparison
  */
 export function useDeepSelector<T, U>(
-  useStore: (selector: (state: T) => U) => U,
+  useStore: (selector: (state: T) => U, equalityFn?: (a: U, b: U) => boolean) => U,
   selector: (state: T) => U
 ): U {
   return useStore(selector, deepEqual);
@@ -94,12 +94,12 @@ export function useDeepSelector<T, U>(
  * Selector that only updates when specified dependencies change
  */
 export function useSelectWithDeps<T, U>(
-  useStore: (selector: (state: T) => U) => U,
+  useStore: (selector: (state: T) => U, equalityFn?: (a: U, b: U) => boolean) => U,
   selector: (state: T) => U,
   deps: unknown[]
 ): U {
   const prevDepsRef = useRef<unknown[]>(deps);
-  const prevValueRef = useRef<U>();
+  const prevValueRef = useRef<U | undefined>(undefined);
 
   const value = useStore(selector);
 
@@ -118,12 +118,12 @@ export function useSelectWithDeps<T, U>(
  * Throttled selector - only updates at specified interval
  */
 export function useThrottledSelector<T, U>(
-  useStore: (selector: (state: T) => U) => U,
+  useStore: (selector: (state: T) => U, equalityFn?: (a: U, b: U) => boolean) => U,
   selector: (state: T) => U,
   throttleMs = 100
 ): U {
   const lastUpdateRef = useRef<number>(0);
-  const valueRef = useRef<U>();
+  const valueRef = useRef<U | undefined>(undefined);
 
   const currentValue = useStore(selector);
 
@@ -140,12 +140,12 @@ export function useThrottledSelector<T, U>(
  * Debounced selector - only updates after value stops changing
  */
 export function useDebouncedSelector<T, U>(
-  useStore: (selector: (state: T) => U) => U,
+  useStore: (selector: (state: T) => U, equalityFn?: (a: U, b: U) => boolean) => U,
   selector: (state: T) => U,
   debounceMs = 300
 ): U {
-  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
-  const valueRef = useRef<U>();
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const valueRef = useRef<U | undefined>(undefined);
 
   const currentValue = useStore(selector);
 
@@ -172,7 +172,7 @@ export function useDebouncedSelector<T, U>(
  * Batched selector - accumulates updates and applies them in batches
  */
 export function useBatchedSelector<T, U>(
-  useStore: (selector: (state: T) => U[]) => U[],
+  useStore: (selector: (state: T) => U[], equalityFn?: (a: U[], b: U[]) => boolean) => U[],
   selector: (state: T) => U[],
   batchSize = 10
 ): U[] {
@@ -197,7 +197,7 @@ export function useBatchedSelector<T, U>(
  * Conditional selector - only evaluates selector when condition is met
  */
 export function useConditionalSelector<T, U>(
-  useStore: (selector: (state: T) => U) => U,
+  useStore: (selector: (state: T) => U, equalityFn?: (a: U, b: U) => boolean) => U,
   selector: (state: T) => U,
   condition: boolean,
   fallback: U

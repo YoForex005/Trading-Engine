@@ -6,7 +6,7 @@
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 import { API_ENDPOINTS } from '../config/api';
 
-export type DrawingType = 'trendline' | 'hline' | 'vline' | 'text' | 'channel' | 'fibonacci' | 'shapes';
+export type DrawingType = 'trendline' | 'hline' | 'vline' | 'text' | 'channel' | 'fibonacci' | 'shapes' | 'rectangle' | 'ellipse' | 'arrow' | 'pitchfork';
 
 export interface DrawingPoint {
   time: number;
@@ -24,6 +24,7 @@ export interface Drawing {
   lineStyle?: 'solid' | 'dashed' | 'dotted';
   selected?: boolean;
   locked?: boolean;
+  visible?: boolean; // Add visible property for show/hide functionality
 }
 
 export interface DrawingHistory {
@@ -87,7 +88,8 @@ export class DrawingManager {
       subtype,
       points: [],
       color,
-      lineWidth: 2
+      lineWidth: 2,
+      visible: true // Initialize as visible by default
     };
 
     return id;
@@ -128,13 +130,17 @@ export class DrawingManager {
       case 'hline':
       case 'vline':
       case 'shapes':
+      case 'text':
+      case 'arrow':
         return drawing.points.length >= 1;
       case 'trendline':
       case 'channel':
       case 'fibonacci':
+      case 'rectangle':
+      case 'ellipse':
         return drawing.points.length >= 2;
-      case 'text':
-        return drawing.points.length >= 1;
+      case 'pitchfork':
+        return drawing.points.length >= 3;
       default:
         return false;
     }
@@ -146,7 +152,7 @@ export class DrawingManager {
   finishDrawing(): Drawing | null {
     if (!this.activeDrawing) return null;
 
-    const completedDrawing = { ...this.activeDrawing, selected: true };
+    const completedDrawing = { ...this.activeDrawing, selected: true, visible: true };
     this.drawings.push(completedDrawing);
     this.activeDrawing = null;
 
@@ -185,6 +191,11 @@ export class DrawingManager {
       const index = this.drawings.indexOf(drawing);
       this.drawings.splice(index, 1);
       this.drawings.push(drawing);
+
+      // Dispatch selection event for properties panel
+      window.dispatchEvent(new CustomEvent('drawing:selected', {
+        detail: { drawingId: drawing.id, drawing }
+      }));
     }
     this.renderAllDrawings();
   }
@@ -340,6 +351,65 @@ export class DrawingManager {
   }
 
   /**
+   * Duplicate a drawing
+   */
+  duplicateDrawing(id: string): Drawing | null {
+    const drawing = this.drawings.find(d => d.id === id);
+    if (!drawing) return null;
+
+    // Create duplicated drawing with new ID and offset position
+    const duplicated: Drawing = {
+      ...drawing,
+      id: `drawing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      points: drawing.points.map(point => ({
+        time: point.time + 60, // Offset by 1 minute
+        price: point.price * 1.0001 // Offset slightly in price
+      })),
+      selected: true
+    };
+
+    // Deselect all other drawings
+    this.drawings.forEach(d => d.selected = false);
+
+    // Add duplicated drawing
+    this.drawings.push(duplicated);
+
+    // Render the new drawing
+    this.renderDrawing(duplicated);
+
+    // Save to backend
+    this.saveToBackend(duplicated);
+
+    // Dispatch event
+    window.dispatchEvent(new CustomEvent('drawing:duplicated', {
+      detail: { original: drawing, duplicate: duplicated }
+    }));
+
+    return duplicated;
+  }
+
+  /**
+   * Toggle drawing visibility
+   */
+  toggleDrawingVisibility(id: string): void {
+    const drawing = this.drawings.find(d => d.id === id);
+    if (!drawing) return;
+
+    drawing.visible = drawing.visible === false ? true : false;
+
+    // Save to backend
+    this.saveToBackend(drawing);
+
+    // Re-render all drawings
+    this.renderAllDrawings();
+
+    // Dispatch event
+    window.dispatchEvent(new CustomEvent('drawing:visibility-changed', {
+      detail: { id, visible: drawing.visible }
+    }));
+  }
+
+  /**
    * Clear all drawings
    */
   clearAllDrawings(): void {
@@ -376,49 +446,91 @@ export class DrawingManager {
    * Render a single drawing
    */
   private renderDrawing(drawing: Drawing): void {
-    if (!this.chart || !this.series) return;
+    if (!this.chart || !this.series) {
+      console.error('[drawingManager] Cannot render - chart or series is null');
+      return;
+    }
+
+    // Skip rendering if drawing is hidden
+    if (drawing.visible === false) {
+      console.log('[drawingManager] Skipping hidden drawing:', drawing.id);
+      return;
+    }
 
     const container = document.querySelector('.chart-drawing-overlay');
-    if (!container) return;
+    if (!container) {
+      console.error('[drawingManager] CRITICAL: .chart-drawing-overlay not found in DOM!');
+      return;
+    }
+
+    console.log('[drawingManager] Rendering drawing:', {
+      id: drawing.id,
+      type: drawing.type,
+      points: drawing.points.length,
+      container: !!container
+    });
 
     const element = this.createDrawingElement(drawing);
     if (element) {
+      console.log('[drawingManager] Element created:', {
+        id: drawing.id,
+        className: element.className,
+        position: element.style.position,
+        top: element.style.top,
+        left: element.style.left,
+        width: element.style.width,
+        height: element.style.height,
+        backgroundColor: element.style.backgroundColor,
+        border: element.style.border,
+        zIndex: element.style.zIndex || 'default (from CSS)'
+      });
+
       container.appendChild(element);
+      console.log('[drawingManager] Element appended to DOM. Total drawings in container:', container.children.length);
       this.overlayElements.set(drawing.id, element);
 
       // Add nodes for path-based drawings (Red Squares if selected)
       // Ensure points array exists before iterating
       if (Array.isArray(drawing.points)) {
         drawing.points.forEach((point, index) => {
-        const node = document.createElement('div');
-        node.className = `drawing-node drawing-node-${drawing.id} ${drawing.selected ? 'drawing-node-selected' : ''}`;
+          const node = document.createElement('div');
+          node.className = `drawing-node drawing-node-${drawing.id} ${drawing.selected ? 'drawing-node-selected' : ''}`;
 
-        // Selection state from MT5 image: red squares on endpoints
-        if (drawing.selected) {
-          node.style.display = 'block';
-        } else {
-          node.style.display = 'none';
-        }
-
-        const x = this.chart!.timeScale().timeToCoordinate(point.time as any);
-        const y = this.series!.priceToCoordinate(point.price);
-
-        if (x !== null && y !== null) {
-          node.style.left = `${x}px`;
-          node.style.top = `${y}px`;
-
+          // Selection state from MT5 image: red squares on endpoints
           if (drawing.selected) {
-            node.style.backgroundColor = '#ff0000'; // MT5 Red Square
-            node.style.border = '1px solid #ffffff';
-            node.style.width = '7px';
-            node.style.height = '7px';
-            node.style.borderRadius = '0'; // Square
+            node.style.display = 'block';
+          } else {
+            node.style.display = 'none';
           }
 
-          node.addEventListener('mousedown', (e) => this.handleMouseDown(e, drawing.id, index));
-          container.appendChild(node);
-        }
-      });
+          const x = this.chart!.timeScale().timeToCoordinate(point.time as any);
+          const y = this.series!.priceToCoordinate(point.price);
+
+          if (x !== null && y !== null) {
+            node.style.left = `${x}px`;
+            node.style.top = `${y}px`;
+
+            if (drawing.selected) {
+              node.style.backgroundColor = '#ff0000'; // MT5 Red Square
+              node.style.border = '1px solid #ffffff';
+              node.style.width = '7px';
+              node.style.height = '7px';
+              node.style.borderRadius = '0'; // Square
+            }
+
+            node.addEventListener('mousedown', (e) => this.handleMouseDown(e, drawing.id, index));
+            container.appendChild(node);
+          } else {
+            console.warn('[drawingManager] Null coordinates for drawing node:', {
+              drawingId: drawing.id,
+              pointIndex: index,
+              time: point.time,
+              price: point.price,
+              x,
+              y
+            });
+          }
+        });
       } // End of Array.isArray check
 
       // Add mouse down to the element itself for dragging entire drawing
@@ -439,7 +551,10 @@ export class DrawingManager {
    */
   private createDrawingElement(drawing: Drawing): HTMLElement | null {
     // Defensive: Ensure both chart and series exist
-    if (!this.chart || !this.series) return null;
+    if (!this.chart || !this.series) {
+      console.error('[drawingManager] Cannot create element - chart or series is null');
+      return null;
+    }
 
     const div = document.createElement('div');
     div.className = 'chart-drawing';
@@ -447,16 +562,24 @@ export class DrawingManager {
     div.style.position = 'absolute';
     div.style.pointerEvents = 'auto';
 
+    console.log('[drawingManager] Creating element for drawing type:', drawing.type);
+
     switch (drawing.type) {
       case 'hline':
         if (drawing.points.length > 0) {
           const y = this.series.priceToCoordinate(drawing.points[0].price);
+          console.log('[drawingManager] Horizontal line coordinates:', { price: drawing.points[0].price, y });
           if (y !== null) {
             div.style.left = '0';
             div.style.right = '0';
             div.style.top = `${y}px`;
             div.style.height = `${drawing.lineWidth || 2}px`;
             div.style.backgroundColor = drawing.color || '#3b82f6';
+            console.log('[drawingManager] Horizontal line styled:', {
+              top: div.style.top,
+              height: div.style.height,
+              backgroundColor: div.style.backgroundColor
+            });
             if (drawing.lineStyle === 'dashed') {
               div.style.backgroundColor = 'transparent';
               div.style.backgroundImage = `linear-gradient(to right, ${drawing.color || '#3b82f6'} 50%, transparent 50%)`;
@@ -467,6 +590,11 @@ export class DrawingManager {
               div.style.backgroundSize = '4px 100%';
             }
             div.style.cursor = drawing.locked ? 'default' : 'ns-resize';
+          } else {
+            console.warn('[drawingManager] Null Y coordinate for horizontal line:', {
+              drawingId: drawing.id,
+              price: drawing.points[0].price
+            });
           }
         }
         break;
@@ -481,6 +609,11 @@ export class DrawingManager {
             div.style.width = `${drawing.lineWidth || 2}px`;
             div.style.backgroundColor = drawing.color || '#3b82f6';
             div.style.cursor = 'ew-resize';
+          } else {
+            console.warn('[drawingManager] Null X coordinate for vertical line:', {
+              drawingId: drawing.id,
+              time: drawing.points[0].time
+            });
           }
         }
         break;
@@ -507,12 +640,55 @@ export class DrawingManager {
               div.style.left = `${x1}px`;
               div.style.top = `${y1}px`;
             } else if (drawing.type === 'fibonacci') {
-              div.style.left = `${Math.min(x1, x2)}px`;
-              div.style.top = `${Math.min(y1, y2)}px`;
-              div.style.width = `${Math.abs(x2 - x1)}px`;
-              div.style.height = `${Math.abs(y2 - y1)}px`;
-              div.style.border = `1px dashed ${drawing.color || '#3b82f6'}`;
-              div.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+              // Enhanced Fibonacci Retracement with levels
+              const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+              svg.style.position = 'absolute';
+              svg.style.left = `${Math.min(x1, x2)}px`;
+              svg.style.top = `${Math.min(y1, y2)}px`;
+              svg.style.width = `${Math.abs(x2 - x1)}px`;
+              svg.style.height = `${Math.abs(y2 - y1)}px`;
+              svg.style.pointerEvents = 'none';
+
+              // Fibonacci levels: 0%, 23.6%, 38.2%, 50%, 61.8%, 100%
+              const levels = [
+                { ratio: 0, label: '0.0%', color: drawing.color || '#3b82f6' },
+                { ratio: 0.236, label: '23.6%', color: drawing.color || '#3b82f6' },
+                { ratio: 0.382, label: '38.2%', color: drawing.color || '#3b82f6' },
+                { ratio: 0.5, label: '50.0%', color: drawing.color || '#3b82f6' },
+                { ratio: 0.618, label: '61.8%', color: drawing.color || '#3b82f6' },
+                { ratio: 1, label: '100.0%', color: drawing.color || '#3b82f6' }
+              ];
+
+              const height = Math.abs(y2 - y1);
+              const width = Math.abs(x2 - x1);
+
+              levels.forEach(level => {
+                const yPos = height * level.ratio;
+
+                // Horizontal line
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', '0');
+                line.setAttribute('y1', yPos.toString());
+                line.setAttribute('x2', width.toString());
+                line.setAttribute('y2', yPos.toString());
+                line.setAttribute('stroke', level.color);
+                line.setAttribute('stroke-width', (drawing.lineWidth || 1).toString());
+                line.setAttribute('stroke-dasharray', level.ratio === 0 || level.ratio === 1 ? '' : '4 2');
+                line.setAttribute('opacity', '0.8');
+                svg.appendChild(line);
+
+                // Label
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', (width - 5).toString());
+                text.setAttribute('y', (yPos - 3).toString());
+                text.setAttribute('fill', level.color);
+                text.setAttribute('font-size', '11px');
+                text.setAttribute('text-anchor', 'end');
+                text.textContent = level.label;
+                svg.appendChild(text);
+              });
+
+              div.appendChild(svg);
             } else {
               div.style.left = `${Math.min(x1, x2)}px`;
               div.style.top = `${Math.min(y1, y2)}px`;
@@ -520,6 +696,14 @@ export class DrawingManager {
               div.style.height = `${Math.abs(y2 - y1)}px`;
               div.style.border = `${drawing.lineWidth || 2}px solid ${drawing.color || '#3b82f6'}`;
             }
+          } else {
+            console.warn('[drawingManager] Null coordinates for trendline/channel/fibonacci:', {
+              drawingId: drawing.id,
+              type: drawing.type,
+              x1, x2, y1, y2,
+              point0: drawing.points[0],
+              point1: drawing.points[1]
+            });
           }
         }
         break;
@@ -540,6 +724,13 @@ export class DrawingManager {
             div.style.border = '1px solid #3f3f46';
             div.style.whiteSpace = 'nowrap';
             div.textContent = drawing.text;
+          } else {
+            console.warn('[drawingManager] Null coordinates for text annotation:', {
+              drawingId: drawing.id,
+              time: drawing.points[0].time,
+              price: drawing.points[0].price,
+              x, y
+            });
           }
         }
         break;
@@ -554,6 +745,155 @@ export class DrawingManager {
             div.style.color = drawing.color || '#3b82f6';
             div.style.transform = 'translate(-50%, -50%)';
             div.innerHTML = `<div style="font-size: 20px;">${this.getSymbolForSubtype(drawing.subtype)}</div>`;
+          } else {
+            console.warn('[drawingManager] Null coordinates for shape:', {
+              drawingId: drawing.id,
+              subtype: drawing.subtype,
+              time: drawing.points[0].time,
+              price: drawing.points[0].price,
+              x, y
+            });
+          }
+        }
+        break;
+
+      case 'rectangle':
+        if (drawing.points.length >= 2 && this.chart) {
+          const x1 = this.chart.timeScale().timeToCoordinate(drawing.points[0].time as any);
+          const x2 = this.chart.timeScale().timeToCoordinate(drawing.points[1].time as any);
+          const y1 = this.series.priceToCoordinate(drawing.points[0].price);
+          const y2 = this.series.priceToCoordinate(drawing.points[1].price);
+
+          if (x1 !== null && x2 !== null && y1 !== null && y2 !== null) {
+            div.style.left = `${Math.min(x1, x2)}px`;
+            div.style.top = `${Math.min(y1, y2)}px`;
+            div.style.width = `${Math.abs(x2 - x1)}px`;
+            div.style.height = `${Math.abs(y2 - y1)}px`;
+            div.style.border = `${drawing.lineWidth || 2}px ${drawing.lineStyle === 'dashed' ? 'dashed' : drawing.lineStyle === 'dotted' ? 'dotted' : 'solid'} ${drawing.color || '#3b82f6'}`;
+            div.style.backgroundColor = 'transparent';
+          } else {
+            console.warn('[drawingManager] Null coordinates for rectangle:', {
+              drawingId: drawing.id,
+              x1, x2, y1, y2,
+              point0: drawing.points[0],
+              point1: drawing.points[1]
+            });
+          }
+        }
+        break;
+
+      case 'ellipse':
+        if (drawing.points.length >= 2 && this.chart) {
+          const x1 = this.chart.timeScale().timeToCoordinate(drawing.points[0].time as any);
+          const x2 = this.chart.timeScale().timeToCoordinate(drawing.points[1].time as any);
+          const y1 = this.series.priceToCoordinate(drawing.points[0].price);
+          const y2 = this.series.priceToCoordinate(drawing.points[1].price);
+
+          if (x1 !== null && x2 !== null && y1 !== null && y2 !== null) {
+            div.style.left = `${Math.min(x1, x2)}px`;
+            div.style.top = `${Math.min(y1, y2)}px`;
+            div.style.width = `${Math.abs(x2 - x1)}px`;
+            div.style.height = `${Math.abs(y2 - y1)}px`;
+            div.style.border = `${drawing.lineWidth || 2}px ${drawing.lineStyle === 'dashed' ? 'dashed' : drawing.lineStyle === 'dotted' ? 'dotted' : 'solid'} ${drawing.color || '#3b82f6'}`;
+            div.style.borderRadius = '50%';
+            div.style.backgroundColor = 'transparent';
+          } else {
+            console.warn('[drawingManager] Null coordinates for ellipse:', {
+              drawingId: drawing.id,
+              x1, x2, y1, y2,
+              point0: drawing.points[0],
+              point1: drawing.points[1]
+            });
+          }
+        }
+        break;
+
+      case 'arrow':
+        if (drawing.points.length > 0 && this.chart) {
+          const x = this.chart.timeScale().timeToCoordinate(drawing.points[0].time as any);
+          const y = this.series.priceToCoordinate(drawing.points[0].price);
+          if (x !== null && y !== null) {
+            div.style.left = `${x}px`;
+            div.style.top = `${y}px`;
+            div.style.color = drawing.color || '#3b82f6';
+            div.style.transform = 'translate(-50%, -50%)';
+            div.style.fontSize = '24px';
+            div.style.fontWeight = 'bold';
+            div.innerHTML = drawing.subtype === 'up' ? '⬆' : drawing.subtype === 'down' ? '⬇' : '➜';
+          } else {
+            console.warn('[drawingManager] Null coordinates for arrow:', {
+              drawingId: drawing.id,
+              subtype: drawing.subtype,
+              time: drawing.points[0].time,
+              price: drawing.points[0].price,
+              x, y
+            });
+          }
+        }
+        break;
+
+      case 'pitchfork':
+        if (drawing.points.length >= 3 && this.chart) {
+          const x1 = this.chart.timeScale().timeToCoordinate(drawing.points[0].time as any);
+          const x2 = this.chart.timeScale().timeToCoordinate(drawing.points[1].time as any);
+          const x3 = this.chart.timeScale().timeToCoordinate(drawing.points[2].time as any);
+          const y1 = this.series.priceToCoordinate(drawing.points[0].price);
+          const y2 = this.series.priceToCoordinate(drawing.points[1].price);
+          const y3 = this.series.priceToCoordinate(drawing.points[2].price);
+
+          if (x1 !== null && x2 !== null && x3 !== null && y1 !== null && y2 !== null && y3 !== null) {
+            // Draw three lines from center point (p1) to the other two points (p2, p3)
+            // and a median line
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.style.position = 'absolute';
+            svg.style.left = '0';
+            svg.style.top = '0';
+            svg.style.width = '100%';
+            svg.style.height = '100%';
+            svg.style.pointerEvents = 'none';
+
+            // Upper line (p1 to p2)
+            const line1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line1.setAttribute('x1', x1.toString());
+            line1.setAttribute('y1', y1.toString());
+            line1.setAttribute('x2', x2.toString());
+            line1.setAttribute('y2', y2.toString());
+            line1.setAttribute('stroke', drawing.color || '#3b82f6');
+            line1.setAttribute('stroke-width', (drawing.lineWidth || 2).toString());
+
+            // Lower line (p1 to p3)
+            const line2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line2.setAttribute('x1', x1.toString());
+            line2.setAttribute('y1', y1.toString());
+            line2.setAttribute('x2', x3.toString());
+            line2.setAttribute('y2', y3.toString());
+            line2.setAttribute('stroke', drawing.color || '#3b82f6');
+            line2.setAttribute('stroke-width', (drawing.lineWidth || 2).toString());
+
+            // Median line
+            const medianX = (x2 + x3) / 2;
+            const medianY = (y2 + y3) / 2;
+            const line3 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line3.setAttribute('x1', x1.toString());
+            line3.setAttribute('y1', y1.toString());
+            line3.setAttribute('x2', medianX.toString());
+            line3.setAttribute('y2', medianY.toString());
+            line3.setAttribute('stroke', drawing.color || '#3b82f6');
+            line3.setAttribute('stroke-width', (drawing.lineWidth || 2).toString());
+            line3.setAttribute('stroke-dasharray', '4 4');
+
+            svg.appendChild(line1);
+            svg.appendChild(line2);
+            svg.appendChild(line3);
+            div.appendChild(svg);
+          } else {
+            console.warn('[drawingManager] Null coordinates for pitchfork:', {
+              drawingId: drawing.id,
+              x1, x2, x3, y1, y2, y3,
+              point0: drawing.points[0],
+              point1: drawing.points[1],
+              point2: drawing.points[2]
+            });
           }
         }
         break;

@@ -457,7 +457,10 @@ export function SymbolScreener() {
                 <tr
                   key={symbol.symbol}
                   className={`${i % 2 === 0 ? 'bg-[#1e1e1e]' : 'bg-[#232323]'} hover:bg-[#2d3436] transition-colors cursor-pointer group`}
-                  onClick={() => console.log('Open chart for', symbol.symbol)}
+                  onClick={() => {
+                    // Dispatch openChart event (same pattern used by MarketWatchPanel and NewsFeed)
+                    window.dispatchEvent(new CustomEvent('openChart', { detail: { symbol: symbol.symbol } }));
+                  }}
                   title="Click to open chart • Double-click to add to watchlist"
                 >
                   <td className="p-2 border-r border-zinc-800 font-bold text-zinc-100">

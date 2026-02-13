@@ -272,7 +272,7 @@ const AlertItem = ({ alert, onRemove }: { alert: Alert; onRemove: () => void }) 
               </>
             ) : (
               <>
-                <div className="text-sm font-medium text-white mb-0.5">{alert.title}</div>
+                <div className="text-sm font-medium text-white mb-0.5">{(alert as any).title || 'Alert'}</div>
                 <div className="text-xs text-zinc-400">{alert.message}</div>
               </>
             )}

@@ -16,6 +16,8 @@ import {
   Target,
   Award,
 } from 'lucide-react';
+import { buildApiUrl } from '../config/api';
+import { useAppStore } from '../store/useAppStore';
 
 interface Tick {
   time: string;
@@ -140,12 +142,84 @@ export function MarketReplay() {
   const [practiceOrders, setPracticeOrders] = useState<PracticeOrder[]>([]);
   const [orderVolume, setOrderVolume] = useState(0.1);
 
-  // Generate mock data
-  const allTicks = useMemo(() => {
-    const startDate = new Date();
-    startDate.setHours(startDate.getHours() - replayHours);
-    return generateMockTicks(symbol, startDate, replayHours);
+  const [allTicks, setAllTicks] = useState<Tick[]>([]);
+  const [dataSource, setDataSource] = useState<'api' | 'mock'>('mock');
+  const [ticksLoading, setTicksLoading] = useState(false);
+
+  // Fetch historical ticks from backend API: GET /api/history/ticks?symbol=XXX&date=YYYY-MM-DD
+  // Falls back to mock data if API is unavailable
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchTicks = async () => {
+      setTicksLoading(true);
+      try {
+        const authToken = useAppStore.getState().authToken;
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (authToken) {
+          headers['Authorization'] = `Bearer ${authToken}`;
+        }
+
+        // Calculate the date for the history query
+        const startDate = new Date();
+        startDate.setHours(startDate.getHours() - replayHours);
+        const dateStr = startDate.toISOString().split('T')[0]; // YYYY-MM-DD
+
+        const response = await fetch(
+          buildApiUrl(`/api/history/ticks?symbol=${symbol}&date=${dateStr}&limit=5000`),
+          { headers }
+        );
+
+        if (!cancelled && response.ok) {
+          const data = await response.json();
+          // The history API returns ticks in various formats; normalize them
+          const ticks: Tick[] = Array.isArray(data) ? data : (data.ticks || data.data || []);
+          if (ticks.length > 0) {
+            const normalized = ticks.map((t: any) => ({
+              time: t.time || t.timestamp || new Date(t.ts || t.t || 0).toISOString(),
+              bid: t.bid || t.b || 0,
+              ask: t.ask || t.a || 0,
+              timestamp: t.timestamp ? new Date(t.timestamp).getTime() : (t.ts || t.t || Date.now()),
+            }));
+            setAllTicks(normalized);
+            setDataSource('api');
+            setTicksLoading(false);
+            return;
+          }
+        }
+
+        // API returned no data, fall back to mock
+        if (!cancelled) {
+          const mockStart = new Date();
+          mockStart.setHours(mockStart.getHours() - replayHours);
+          setAllTicks(generateMockTicks(symbol, mockStart, replayHours));
+          setDataSource('mock');
+          setTicksLoading(false);
+        }
+      } catch (error) {
+        console.warn('[MarketReplay] Failed to fetch historical ticks, using mock data:', error);
+        if (!cancelled) {
+          const mockStart = new Date();
+          mockStart.setHours(mockStart.getHours() - replayHours);
+          setAllTicks(generateMockTicks(symbol, mockStart, replayHours));
+          setDataSource('mock');
+          setTicksLoading(false);
+        }
+      }
+    };
+
+    fetchTicks();
+    return () => { cancelled = true; };
   }, [symbol, replayHours]);
+
+  // Reset playback when ticks are loaded
+  useEffect(() => {
+    setCurrentTickIndex(0);
+    setIsPlaying(false);
+    setPracticeOrders([]);
+  }, [allTicks]);
 
   const visibleTicks = useMemo(
     () => allTicks.slice(0, currentTickIndex + 1),
@@ -158,7 +232,7 @@ export function MarketReplay() {
   );
 
   const currentTick = allTicks[currentTickIndex];
-  const progress = (currentTickIndex / (allTicks.length - 1)) * 100;
+  const progress = allTicks.length > 1 ? (currentTickIndex / (allTicks.length - 1)) * 100 : 0;
 
   // Playback loop
   useEffect(() => {
@@ -318,6 +392,8 @@ export function MarketReplay() {
         <div className="flex items-center gap-2">
           <Clock className="w-5 h-5 text-purple-400" />
           <h2 className="text-lg font-semibold text-white">Market Replay</h2>
+          {ticksLoading && <span className="text-xs text-zinc-500 ml-2">Loading ticks...</span>}
+          {!ticksLoading && <span className="text-xs text-zinc-600 ml-2">({dataSource === 'api' ? 'Live Data' : 'Simulated Data'})</span>}
         </div>
       </div>
 

@@ -42,7 +42,7 @@ export function useKeyboardShortcut(
     const fullShortcut: ShortcutDefinition = {
       ...shortcut,
       id: idRef.current,
-      enabled: shortcut.enabled !== false
+      enabled: shortcut.enabled === undefined ? true : shortcut.enabled
     };
 
     const unregister = keyboardShortcutManager.register(fullShortcut);
@@ -78,7 +78,7 @@ export function useKeyboardShortcuts(
       const fullShortcut: ShortcutDefinition = {
         ...shortcut,
         id: idsRef.current[index],
-        enabled: shortcut.enabled !== false
+        enabled: shortcut.enabled === undefined ? true : shortcut.enabled
       };
 
       return keyboardShortcutManager.register(fullShortcut);

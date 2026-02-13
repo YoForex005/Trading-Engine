@@ -12,6 +12,7 @@ export interface ContextMenuItemConfig {
   disabled?: boolean;
   divider?: boolean;
   action?: () => void;
+  onClick?: () => void;
   submenu?: ContextMenuItemConfig[];
   autoClose?: boolean;
 }

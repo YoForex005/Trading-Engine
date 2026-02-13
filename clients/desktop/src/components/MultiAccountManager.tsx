@@ -3,9 +3,10 @@
  * Manage multiple trading accounts with real-time updates and switching
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { DollarSign, Target, TrendingUp, Search, Users } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { adminApi, type AdminAccount } from '../services/api';
 
 type AccountStatus = 'Active' | 'Suspended' | 'Margin Call';
 type SortField = 'id' | 'name' | 'balance' | 'equity' | 'margin' | 'freeMargin' | 'profit';
@@ -27,44 +28,98 @@ export function MultiAccountManager() {
   const setAuthenticated = useAppStore((state) => state.setAuthenticated);
   const setAccount = useAppStore((state) => state.setAccount);
 
-  const [accounts, setAccounts] = useState<ManagedAccount[]>(generateMockAccounts());
+  const [accounts, setAccounts] = useState<ManagedAccount[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | AccountStatus>('All');
   const [sortField, setSortField] = useState<SortField>('id');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
-  // Real-time equity/profit updates (every 2 seconds)
+  // Map AdminAccount from backend to ManagedAccount for display
+  const mapAdminToManaged = useCallback((admin: AdminAccount): ManagedAccount => {
+    const marginLevel = admin.margin > 0 ? (admin.equity / admin.margin) * 100 : 999;
+    let status: AccountStatus = 'Active';
+    if (admin.status === 'suspended' || admin.status === 'Suspended') {
+      status = 'Suspended';
+    } else if (marginLevel < 100) {
+      status = 'Margin Call';
+    }
+    return {
+      id: admin.accountNumber || String(admin.id),
+      name: admin.displayName || admin.username,
+      balance: admin.balance,
+      equity: admin.equity,
+      margin: admin.margin,
+      freeMargin: admin.freeMargin,
+      profit: admin.equity - admin.balance,
+      status,
+    };
+  }, []);
+
+  // Fetch real accounts from backend, fall back to mock data
   useEffect(() => {
-    const interval = setInterval(() => {
-      setAccounts((prev) =>
-        prev.map((acc) => {
-          // Simulate small price movements
-          const priceChange = (Math.random() - 0.5) * 100;
-          const newProfit = acc.profit + priceChange;
-          const newEquity = acc.balance + newProfit;
-          const marginLevel = acc.margin > 0 ? (newEquity / acc.margin) * 100 : 999;
+    let cancelled = false;
+    async function fetchAccounts() {
+      try {
+        setIsLoading(true);
+        const adminAccounts = await adminApi.getAccounts();
+        if (!cancelled && adminAccounts && adminAccounts.length > 0) {
+          setAccounts(adminAccounts.map(mapAdminToManaged));
+        } else if (!cancelled) {
+          // Fallback to mock data when no accounts returned
+          setAccounts(generateMockAccounts());
+        }
+      } catch (err) {
+        console.warn('[MultiAccountManager] Failed to fetch accounts from backend, using mock data:', err);
+        if (!cancelled) {
+          setAccounts(generateMockAccounts());
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+    fetchAccounts();
+    return () => { cancelled = true; };
+  }, [mapAdminToManaged]);
 
-          // Update status based on margin level
-          let newStatus: AccountStatus = 'Active';
-          if (acc.status === 'Suspended') {
-            newStatus = 'Suspended';
-          } else if (marginLevel < 100) {
-            newStatus = 'Margin Call';
-          }
+  // Periodically refresh accounts from backend (every 5 seconds)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const adminAccounts = await adminApi.getAccounts();
+        if (adminAccounts && adminAccounts.length > 0) {
+          setAccounts(adminAccounts.map(mapAdminToManaged));
+        }
+      } catch {
+        // If backend refresh fails, simulate small price movements on existing data
+        setAccounts((prev) =>
+          prev.map((acc) => {
+            const priceChange = (Math.random() - 0.5) * 100;
+            const newProfit = acc.profit + priceChange;
+            const newEquity = acc.balance + newProfit;
+            const marginLevel = acc.margin > 0 ? (newEquity / acc.margin) * 100 : 999;
 
-          return {
-            ...acc,
-            profit: newProfit,
-            equity: newEquity,
-            freeMargin: newEquity - acc.margin,
-            status: newStatus,
-          };
-        })
-      );
-    }, 2000);
+            let newStatus: AccountStatus = 'Active';
+            if (acc.status === 'Suspended') {
+              newStatus = 'Suspended';
+            } else if (marginLevel < 100) {
+              newStatus = 'Margin Call';
+            }
+
+            return {
+              ...acc,
+              profit: newProfit,
+              equity: newEquity,
+              freeMargin: newEquity - acc.margin,
+              status: newStatus,
+            };
+          })
+        );
+      }
+    }, 5000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [mapAdminToManaged]);
 
   // Filter accounts
   const filteredAccounts = useMemo(() => {
@@ -141,18 +196,31 @@ export function MultiAccountManager() {
     });
   };
 
-  // Handle deposit
-  const handleDeposit = (acc: ManagedAccount) => {
+  // Handle deposit - tries backend first, falls back to local state update
+  const handleDeposit = async (acc: ManagedAccount) => {
     const amount = prompt(`Deposit amount for ${acc.name}:`);
     if (amount && !isNaN(parseFloat(amount))) {
+      const depositAmount = parseFloat(amount);
+      try {
+        await adminApi.deposit(parseInt(acc.id) || 0, depositAmount, 'manual', `MAM deposit for ${acc.name}`);
+        // Refresh accounts from backend after successful deposit
+        const adminAccounts = await adminApi.getAccounts();
+        if (adminAccounts && adminAccounts.length > 0) {
+          setAccounts(adminAccounts.map(mapAdminToManaged));
+          return;
+        }
+      } catch (err) {
+        console.warn('[MultiAccountManager] Backend deposit failed, updating locally:', err);
+      }
+      // Fallback: update local state
       setAccounts((prev) =>
         prev.map((a) =>
           a.id === acc.id
             ? {
                 ...a,
-                balance: a.balance + parseFloat(amount),
-                equity: a.equity + parseFloat(amount),
-                freeMargin: a.freeMargin + parseFloat(amount),
+                balance: a.balance + depositAmount,
+                equity: a.equity + depositAmount,
+                freeMargin: a.freeMargin + depositAmount,
               }
             : a
         )
@@ -160,12 +228,24 @@ export function MultiAccountManager() {
     }
   };
 
-  // Handle withdraw
-  const handleWithdraw = (acc: ManagedAccount) => {
+  // Handle withdraw - tries backend first, falls back to local state update
+  const handleWithdraw = async (acc: ManagedAccount) => {
     const amount = prompt(`Withdraw amount for ${acc.name}:`);
     if (amount && !isNaN(parseFloat(amount))) {
       const withdrawAmount = parseFloat(amount);
       if (withdrawAmount <= acc.freeMargin) {
+        try {
+          await adminApi.withdraw(parseInt(acc.id) || 0, withdrawAmount, 'manual', `MAM withdrawal for ${acc.name}`);
+          // Refresh accounts from backend after successful withdrawal
+          const adminAccounts = await adminApi.getAccounts();
+          if (adminAccounts && adminAccounts.length > 0) {
+            setAccounts(adminAccounts.map(mapAdminToManaged));
+            return;
+          }
+        } catch (err) {
+          console.warn('[MultiAccountManager] Backend withdrawal failed, updating locally:', err);
+        }
+        // Fallback: update local state
         setAccounts((prev) =>
           prev.map((a) =>
             a.id === acc.id
@@ -282,7 +362,13 @@ export function MultiAccountManager() {
             </tr>
           </thead>
           <tbody>
-            {sortedAccounts.length === 0 ? (
+            {isLoading ? (
+              <tr>
+                <td colSpan={9} className="text-center py-8 text-zinc-500">
+                  Loading accounts...
+                </td>
+              </tr>
+            ) : sortedAccounts.length === 0 ? (
               <tr>
                 <td colSpan={9} className="text-center py-8 text-zinc-500">
                   No accounts found

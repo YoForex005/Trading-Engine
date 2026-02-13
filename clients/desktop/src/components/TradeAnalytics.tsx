@@ -3,7 +3,7 @@
  * Advanced trade analytics panel with statistical analysis
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   TrendingUp,
   TrendingDown,
@@ -16,6 +16,8 @@ import {
   Award,
   AlertTriangle,
 } from 'lucide-react';
+import { useAppStore } from '../store/useAppStore';
+import { API_BASE_URL } from '../config/api';
 
 interface Trade {
   id: number;
@@ -95,7 +97,56 @@ function generateMockTrades(): Trade[] {
 }
 
 export function TradeAnalytics() {
-  const trades = useMemo(() => generateMockTrades(), []);
+  const [trades, setTrades] = useState<Trade[]>([]);
+
+  // Fetch real trade history from /api/trades, fallback to mock data on error
+  useEffect(() => {
+    const fetchTrades = async () => {
+      try {
+        const accountId = useAppStore.getState().accountId;
+        const authToken = useAppStore.getState().authToken;
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/trades${accountId ? `?accountId=${accountId}` : ''}`,
+          { headers }
+        );
+        if (!response.ok) throw new Error('Failed to fetch trades');
+        const data = await response.json();
+        const raw = Array.isArray(data) ? data : data.trades || [];
+        const apiTrades: Trade[] = raw.map((t: any, i: number) => {
+          const openTime = t.openTime || t.open_time || t.time || '';
+          const closeTime = t.closeTime || t.close_time || t.time || '';
+          const openMs = new Date(openTime).getTime();
+          const closeMs = new Date(closeTime).getTime();
+          return {
+            id: t.id || i + 1,
+            symbol: t.symbol || '',
+            type: t.type || t.side || 'BUY',
+            openTime,
+            closeTime,
+            openPrice: t.openPrice ?? t.open_price ?? 0,
+            closePrice: t.closePrice ?? t.close_price ?? 0,
+            volume: t.volume ?? t.lots ?? 0,
+            profit: t.profit ?? 0,
+            commission: t.commission ?? 0,
+            swap: t.swap ?? 0,
+            durationMinutes: isNaN(openMs) || isNaN(closeMs) ? 0 : Math.max(0, (closeMs - openMs) / 60000),
+          };
+        });
+        if (apiTrades.length > 0) {
+          setTrades(apiTrades.sort((a, b) => new Date(a.openTime).getTime() - new Date(b.openTime).getTime()));
+        } else {
+          setTrades(generateMockTrades());
+        }
+      } catch {
+        // Fallback to mock data when API is unavailable
+        setTrades(generateMockTrades());
+      }
+    };
+    fetchTrades();
+  }, []);
 
   // Calculate analytics
   const analytics = useMemo(() => {

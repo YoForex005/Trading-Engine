@@ -19,7 +19,7 @@ export function FlashPrice({
 }: FlashPriceProps) {
   const [isFlashing, setIsFlashing] = useState(false);
   const prevValueRef = useRef(value);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     if (prevValueRef.current !== value) {

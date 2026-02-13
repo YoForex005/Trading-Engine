@@ -337,20 +337,24 @@ export function usePerformanceMonitor() {
 /**
  * HOC for automatic render time tracking
  */
+import React from 'react';
+
 export function withPerformanceTracking<P extends object>(
   Component: React.ComponentType<P>,
   componentName: string
 ): React.ComponentType<P> {
-  return (props: P) => {
-    const startTime = performance.now();
+  const WrappedComponent = (props: P) => {
+    const startTime = React.useRef(performance.now());
 
-    const result = Component(props);
+    React.useEffect(() => {
+      const endTime = performance.now();
+      const renderTime = endTime - startTime.current;
+      getPerformanceMonitor().recordRender(componentName, renderTime);
+    });
 
-    const endTime = performance.now();
-    const renderTime = endTime - startTime;
-
-    getPerformanceMonitor().recordRender(componentName, renderTime);
-
-    return result;
+    return React.createElement(Component, props);
   };
+
+  WrappedComponent.displayName = `withPerformanceTracking(${componentName})`;
+  return WrappedComponent;
 }

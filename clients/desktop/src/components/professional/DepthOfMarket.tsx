@@ -325,6 +325,12 @@ const groupPriceLevels = (
   );
 };
 
+// NOTE: No backend endpoint exists for /api/market-depth yet.
+// The OrderBookService (backend/api/orderbook.go) provides similar data at /api/orderbook/:symbol
+// but is not registered in main.go. Once the orderbook endpoint is registered, this component
+// could be updated to use it by fetching from buildApiUrl(`/api/orderbook/${symbol}`) and
+// mapping OrderBookSnapshot fields (bids/asks with price, volume, cumulativeVolume, orderCount)
+// to the MarketDepth/MarketDepthEntry format used here.
 // Mock data generator
 const generateMockDepth = (symbol: string, depth: number): MarketDepth => {
   const basePrice = 1.0850; // Example price

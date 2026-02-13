@@ -125,7 +125,7 @@ func generateMockDemoAccounts() []DemoAccount {
 		name := names[i]
 		email := fmt.Sprintf("%s@example.com", strings.ToLower(strings.ReplaceAll(name, " ", ".")))
 
-		daysAgo := rand.Intn(180)
+		daysAgo := rand.Intn(180) + 1 // Ensure daysAgo is at least 1
 		createdAt := time.Now().Add(-time.Duration(daysAgo) * 24 * time.Hour)
 		expiresAt := createdAt.Add(30 * 24 * time.Hour)
 
@@ -150,6 +150,12 @@ func generateMockDemoAccounts() []DemoAccount {
 			winRate = 30 + rand.Float64()*50
 		}
 
+		// Calculate hours since creation, ensuring it's positive
+		hoursSinceCreation := daysAgo * 24
+		if hoursSinceCreation < 1 {
+			hoursSinceCreation = 1
+		}
+
 		account := DemoAccount{
 			ID:             accountID,
 			OwnerName:      name,
@@ -164,11 +170,15 @@ func generateMockDemoAccounts() []DemoAccount {
 			TotalTrades:    totalTrades,
 			TotalPnL:       totalPnL,
 			WinRate:        winRate,
-			LastActivityAt: createdAt.Add(time.Duration(rand.Intn(daysAgo*24)) * time.Hour),
+			LastActivityAt: createdAt.Add(time.Duration(rand.Intn(hoursSinceCreation)) * time.Hour),
 		}
 
 		if i < 12 && daysAgo > 7 && totalPnL > 0 && totalTrades > 20 {
-			conversionDays := 7 + rand.Intn(daysAgo-7)
+			daysRange := daysAgo - 7
+			if daysRange < 1 {
+				daysRange = 1
+			}
+			conversionDays := 7 + rand.Intn(daysRange)
 			convertedAt := createdAt.Add(time.Duration(conversionDays) * 24 * time.Hour)
 			account.ConvertedAt = &convertedAt
 			account.ConvertedToID = fmt.Sprintf("LIVE%d", 50000+i)

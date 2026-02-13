@@ -5,7 +5,8 @@
  */
 
 import React, { useState, useRef } from 'react';
-import { ChartExporter, ChartMetadata, ChartExportOptions } from '../services/chartExporter';
+import { ChartExporter } from '../services/chartExporter';
+import type { ChartMetadata, ChartExportOptions } from '../services/chartExporter';
 import { SavePictureDialog } from '../components/dialogs/SavePictureDialog';
 import { Download, Image, FileImage } from 'lucide-react';
 

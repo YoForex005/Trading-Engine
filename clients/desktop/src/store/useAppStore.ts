@@ -216,6 +216,11 @@ export const useAppStore = create<AppState>()(
       {
         name: 'trading-app-storage',
         partialize: (state) => ({
+          // Persist auth state
+          isAuthenticated: state.isAuthenticated,
+          accountId: state.accountId,
+          authToken: state.authToken,
+          // Persist UI preferences
           selectedSymbol: state.selectedSymbol,
           chartType: state.chartType,
           timeframe: state.timeframe,

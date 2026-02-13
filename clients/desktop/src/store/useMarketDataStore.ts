@@ -59,6 +59,7 @@ interface SymbolData {
   ohlcv1h: OHLCV[];
   tickBuffer: Tick[];
   lastAggregation: number;
+  orderBook: OrderBookSnapshot | null;
 }
 
 export interface CandleUpdate {
@@ -72,6 +73,20 @@ export interface CandleUpdate {
   time: number;
 }
 
+export interface OrderBookLevel {
+  price: number;
+  volume: number;
+}
+
+export interface OrderBookSnapshot {
+  symbol: string;
+  bids: OrderBookLevel[];
+  asks: OrderBookLevel[];
+  spread: number;
+  midPrice: number;
+  timestamp: number;
+}
+
 interface MarketDataState {
   // Symbol data organized by symbol for efficient access
   symbolData: Record<string, SymbolData>;
@@ -82,6 +97,7 @@ interface MarketDataState {
   // Actions
   updateTick: (symbol: string, tick: Tick) => void;
   updateCandle: (update: CandleUpdate) => void;
+  updateOrderBook: (snapshot: OrderBookSnapshot) => void;
   updateBulkTicks: (ticks: Tick[]) => void;
   subscribeSymbol: (symbol: string) => void;
   unsubscribeSymbol: (symbol: string) => void;
@@ -110,6 +126,7 @@ function createEmptySymbolData(): SymbolData {
     ohlcv1h: [],
     tickBuffer: [],
     lastAggregation: 0,
+    orderBook: null,
   };
 }
 
@@ -369,6 +386,22 @@ export const useMarketDataStore = create<MarketDataState>()(
           });
         },
 
+        updateOrderBook: (snapshot) => {
+          set((state) => {
+            const data = state.symbolData[snapshot.symbol] || createEmptySymbolData();
+
+            return {
+              symbolData: {
+                ...state.symbolData,
+                [snapshot.symbol]: {
+                  ...data,
+                  orderBook: snapshot,
+                },
+              },
+            };
+          });
+        },
+
         updateBulkTicks: (ticks) => {
           // Group ticks by symbol for efficient processing
           const ticksBySymbol = ticks.reduce((acc, tick) => {
@@ -520,3 +553,6 @@ export const useRecentOHLCV = (symbol: string, timeframe: '1m') =>
     if (timeframe === '1m' && data.ohlcv1m.length > 0) return data.ohlcv1m[data.ohlcv1m.length - 1];
     return null;
   });
+
+export const useOrderBook = (symbol: string) =>
+  useMarketDataStore((state) => state.symbolData[symbol]?.orderBook);

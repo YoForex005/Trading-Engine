@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { useTradeSettings } from '../store/useSettingsStore';
 import { useAppStore } from '../store/useAppStore';
-import { API_ENDPOINTS } from '../config/api';
+import { API_ENDPOINTS, API_BASE_URL } from '../config/api';
 
 interface OrderEntryProps {
   symbol: string;
@@ -60,6 +60,68 @@ export default function OrderEntry({ symbol, onClose, onOrderPlaced }: OrderEntr
   const [expiryDate, setExpiryDate] = useState('');
   const [expiryTime, setExpiryTime] = useState('23:59');
   const [comment, setComment] = useState('');
+
+  // Symbol specification from backend (contractSize, currency, leverage)
+  const [symbolSpec, setSymbolSpec] = useState<{
+    contractSize: number;
+    currency: string;
+    marginRate: number;
+  } | null>(null);
+  const [configLeverage, setConfigLeverage] = useState<number | null>(null);
+
+  // Fetch symbol spec from backend: GET /api/symbols/{symbol}/spec
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchSymbolSpec() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/symbols/${symbol}/spec`, {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('jwt_token')}`,
+          },
+        });
+        if (response.ok) {
+          const spec = await response.json();
+          if (!cancelled && spec) {
+            setSymbolSpec({
+              contractSize: spec.contractSize || 100000,
+              currency: spec.currency || 'USD',
+              marginRate: spec.marginRate || 0.01,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('[OrderEntry] Failed to fetch symbol spec, using defaults:', err);
+      }
+    }
+    fetchSymbolSpec();
+    return () => { cancelled = true; };
+  }, [symbol]);
+
+  // Fetch broker config for default leverage: GET /api/config
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchConfig() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/config`, {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('jwt_token')}`,
+          },
+        });
+        if (response.ok) {
+          const config = await response.json();
+          if (!cancelled && config?.defaultLeverage) {
+            setConfigLeverage(config.defaultLeverage);
+          }
+        }
+      } catch (err) {
+        console.warn('[OrderEntry] Failed to fetch config, using default leverage:', err);
+      }
+    }
+    fetchConfig();
+    return () => { cancelled = true; };
+  }, []);
 
   // UI state
   const [isPlacing, setIsPlacing] = useState(false);
@@ -133,15 +195,16 @@ export default function OrderEntry({ symbol, onClose, onOrderPlaced }: OrderEntr
     return tpValue;
   }, [takeProfit, tpMode, entryPrice, orderType, pipSize]);
 
-  // Risk calculator
+  // Risk calculator - uses real values from /api/symbols/{symbol}/spec and /api/config when available
   const riskCalc = useMemo(() => {
-    // Mock values - in production, fetch from account settings
-    const leverage = (account as any)?.leverage || 100;
-    const accountCurrency = 'USD';
-    const contractSize = 100000; // Standard lot
+    const leverage = configLeverage || (account as any)?.leverage || 100;
+    const accountCurrency = symbolSpec?.currency || 'USD';
+    const contractSize = symbolSpec?.contractSize || 100000;
 
     // Calculate margin required
-    const margin = (volume * contractSize * entryPrice) / leverage;
+    const margin = symbolSpec?.marginRate
+      ? volume * contractSize * entryPrice * symbolSpec.marginRate
+      : (volume * contractSize * entryPrice) / leverage;
 
     // Calculate pip value (USD per pip for 1 lot)
     const pipValue = (contractSize * pipSize) * volume;
@@ -166,7 +229,7 @@ export default function OrderEntry({ symbol, onClose, onOrderPlaced }: OrderEntr
       potentialLoss,
       potentialProfit,
     };
-  }, [volume, entryPrice, slPrice, tpPrice, pipSize, account]);
+  }, [volume, entryPrice, slPrice, tpPrice, pipSize, account, symbolSpec, configLeverage]);
 
   // Handle volume preset click
   const handleVolumePreset = (preset: number) => {

@@ -3,8 +3,10 @@
  * Comprehensive risk visualization with exposure analysis and concentration warnings
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { AlertTriangle, TrendingUp, TrendingDown, Shield } from 'lucide-react';
+import { useAppStore } from '../store/useAppStore';
+import { API_BASE_URL } from '../config/api';
 
 interface Position {
     id: number;
@@ -76,7 +78,43 @@ function getIntensityColor(value: number, maxValue: number, type: 'profit' | 'lo
 }
 
 export function RiskHeatmap() {
-    const [positions] = useState<Position[]>(generateMockPositions());
+    const [positions, setPositions] = useState<Position[]>(generateMockPositions());
+
+    // Fetch real positions from /api/positions, fallback to mock data on error
+    useEffect(() => {
+        const fetchPositions = async () => {
+            try {
+                const accountId = useAppStore.getState().accountId;
+                const authToken = useAppStore.getState().authToken;
+                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+                const response = await fetch(
+                    `${API_BASE_URL}/api/positions${accountId ? `?accountId=${accountId}` : ''}`,
+                    { headers }
+                );
+                if (!response.ok) throw new Error('Failed to fetch positions');
+                const data = await response.json();
+                const raw = Array.isArray(data) ? data : data.positions || [];
+                if (raw.length > 0) {
+                    const apiPositions: Position[] = raw.map((p: any, i: number) => ({
+                        id: p.id || i + 1,
+                        symbol: p.symbol || '',
+                        side: p.side || p.type || 'BUY',
+                        volume: p.volume ?? p.lots ?? 0,
+                        openPrice: p.openPrice ?? p.open_price ?? 0,
+                        currentPrice: p.currentPrice ?? p.current_price ?? p.openPrice ?? 0,
+                        unrealizedPnL: p.unrealizedPnL ?? p.unrealized_pnl ?? p.profit ?? 0,
+                        margin: p.margin ?? (p.volume ?? 0) * 1000,
+                    }));
+                    setPositions(apiPositions);
+                }
+            } catch {
+                // Keep mock data as fallback
+            }
+        };
+        fetchPositions();
+    }, []);
 
     // Calculate exposures
     const { totalExposure, netLongExposure, netShortExposure, largestExposure, currencyExposure, totalMargin, totalPnL } = useMemo(() => {

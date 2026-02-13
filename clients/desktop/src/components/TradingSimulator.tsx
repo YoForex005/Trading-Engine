@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTradingSimStore, type SimPositionType } from '../store/useTradingSimStore';
+import { useAppStore } from '../store/useAppStore';
 import { TrendingUp, TrendingDown, RotateCcw, Play, Pause } from 'lucide-react';
 
-// Mock symbols for trading
+// Symbols available for simulation
 const SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCHF', 'USDCAD', 'NZDUSD'];
 
-// Generate mock prices for symbols
+// Fallback base prices (used when no real market data is available via WebSocket)
 const basePrices: Record<string, number> = {
   EURUSD: 1.0850,
   GBPUSD: 1.2650,
@@ -45,22 +46,53 @@ export function TradingSimulator() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [isRunning, setIsRunning] = useState(true);
 
+  // Real market ticks from WebSocket (global app store)
+  const liveTicks = useAppStore((state) => state.ticks);
+  const hasLiveData = useRef(false);
+
   // Current market prices
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>(basePrices);
 
-  // Generate random price movements
+  // Seed initial prices from live ticks if available
+  useEffect(() => {
+    const seeded: Record<string, number> = { ...basePrices };
+    let foundAny = false;
+    SYMBOLS.forEach((sym) => {
+      const tick = liveTicks[sym];
+      if (tick && tick.bid > 0) {
+        seeded[sym] = (tick.bid + tick.ask) / 2;
+        foundAny = true;
+      }
+    });
+    if (foundAny) {
+      hasLiveData.current = true;
+      setCurrentPrices(seeded);
+    }
+  }, []); // Run once on mount
+
+  // Update prices from live ticks when available, otherwise simulate
   const updatePrices = useCallback(() => {
     if (!isRunning) return;
 
     setCurrentPrices((prev) => {
       const updated: Record<string, number> = {};
       Object.keys(prev).forEach((symbol) => {
-        const change = (Math.random() - 0.5) * 0.001 * simulationSpeed;
-        updated[symbol] = prev[symbol] + change;
+        const tick = liveTicks[symbol];
+        if (tick && tick.bid > 0) {
+          // Use real mid-price from WebSocket, with small simulated noise for realism
+          const midPrice = (tick.bid + tick.ask) / 2;
+          const noise = (Math.random() - 0.5) * 0.00005 * simulationSpeed;
+          updated[symbol] = midPrice + noise;
+          hasLiveData.current = true;
+        } else {
+          // Fallback: simulate random price movements
+          const change = (Math.random() - 0.5) * 0.001 * simulationSpeed;
+          updated[symbol] = prev[symbol] + change;
+        }
       });
       return updated;
     });
-  }, [isRunning, simulationSpeed]);
+  }, [isRunning, simulationSpeed, liveTicks]);
 
   // Update positions with new prices
   useEffect(() => {
@@ -227,6 +259,11 @@ export function TradingSimulator() {
       <div className="flex items-center justify-between px-4 py-2 bg-zinc-800 border-b border-zinc-700 flex-shrink-0">
         <div className="flex items-center gap-4">
           <h2 className="text-sm font-bold text-zinc-100">Trading Simulator</h2>
+          {hasLiveData.current && (
+            <span className="px-2 py-0.5 bg-green-600/20 text-green-400 rounded text-[10px] font-medium border border-green-600/30">
+              LIVE PRICES
+            </span>
+          )}
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsRunning(!isRunning)}

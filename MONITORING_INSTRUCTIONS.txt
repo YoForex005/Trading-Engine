@@ -1,0 +1,229 @@
+================================================================================
+REAL-TIME LOG MONITORING - TRADING ENGINE
+Quick Start & Complete Reference
+================================================================================
+
+PROJECT INFO
+============
+Location: C:\Users\Yofor\Desktop\Trading-Engine
+Status:   Main branch - recent fixes applied
+Modified: 50+ files - backend and frontend updates
+
+COMPONENTS TO MONITOR
+=====================
+1. Backend (Go)      - Port 8080
+2. Desktop Client    - Port 5173
+3. Admin Dashboard   - Port 5174
+4. Mobile Client     - Dev mode
+
+EXISTING MONITORING TOOLS (Ready to Use)
+========================================
+✓ MONITOR_LOGS.bat        - System status + log scan
+✓ monitor_resources.ps1   - 2-minute metrics test
+✓ QUICK_START.bat         - Interactive menu
+✓ MONITORING_OVERVIEW.txt - Detailed metrics
+✓ README_MONITORING.txt   - Setup guide
+
+INSTANT LOG MONITORING (PowerShell)
+===================================
+
+1. Monitor Backend Only:
+   Get-Content "C:\Users\Yofor\Desktop\Trading-Engine\backend.log" -Tail 50 -Wait
+
+2. Monitor Backend Errors Only:
+   Get-Content "C:\Users\Yofor\Desktop\Trading-Engine\backend.log" -Tail 100 -Wait | Select-String "ERROR|panic|FATAL"
+
+3. Check All Ports Active:
+   netstat -ano | findstr "5173\|5174\|8080"
+
+4. Get System Status:
+   .\MONITOR_LOGS.bat
+
+CRITICAL ERROR INDICATORS
+========================
+Backend:
+  - "panic:"              = CRASH (CRITICAL)
+  - "ERROR"               = Error condition
+  - "FATAL"               = Fatal error, will exit
+  - "failed to"           = Operation failed
+  - "address already in use" = Port conflict
+
+Frontend:
+  - "[vite] Internal Server Error" = Build failed
+  - "error TS"            = TypeScript error
+  - "CORS error"          = Can't reach backend
+  - "Cannot find module"  = Missing dependency
+
+SUCCESSFUL STARTUP SIGNS
+=======================
+Backend:
+  "listening on port 8080"
+  "accepting connections"
+  "connection established"
+
+Desktop:
+  "Local: http://localhost:5173"
+  "[vite] hmr client connected"
+  "✓ built in"
+
+Admin Dashboard:
+  Similar to Desktop
+  Port 5174 (typical)
+
+PARALLEL MONITORING SETUP
+========================
+Use 4 PowerShell Windows:
+
+Window 1: Monitor Backend Log
+  Get-Content backend.log -Tail 50 -Wait
+
+Window 2: Start Backend
+  cd C:\Users\Yofor\Desktop\Trading-Engine
+  .\server.exe
+
+Window 3: Start Desktop Client
+  cd clients\desktop
+  npm run dev
+
+Window 4: Start Admin Dashboard
+  cd clients\admin-dashboard
+  npm run dev
+
+STARTUP CHECKLIST
+================
+After starting all components:
+
+[ ] Backend shows "listening on port 8080"
+[ ] Desktop shows "Local: http://localhost:5173"
+[ ] Admin shows "Local: http://localhost:5174"
+[ ] No ERROR or panic messages in backend.log
+[ ] No TypeScript errors in frontend output
+[ ] All three ports active: netstat -ano | findstr "5173\|5174\|8080"
+[ ] Web browser can access all URLs
+[ ] No CORS errors in browser console
+
+INITIAL SETUP (If Needed)
+========================
+1. Create logs directory:
+   mkdir C:\Users\Yofor\Desktop\Trading-Engine\logs
+
+2. Install frontend dependencies:
+   cd clients\desktop && npm install
+   cd clients\admin-dashboard && npm install
+   cd clients\mobile && npm install
+
+3. Build backend (if needed):
+   cd C:\Users\Yofor\Desktop\Trading-Engine
+   go build -o server.exe ./cmd/server
+
+4. Start monitoring:
+   .\MONITOR_LOGS.bat
+
+COMMON ISSUES & FIXES
+====================
+
+Issue: Backend won't start
+  Fix 1: Check port: netstat -ano | findstr :8080
+  Fix 2: Kill other process: taskkill /PID [PID] /F
+  Fix 3: Check logs: tail -50 backend.log
+
+Issue: "address already in use"
+  Fix: netstat -ano | findstr :8080 && taskkill /PID [PID] /F
+
+Issue: Frontend CORS errors
+  Fix 1: Verify backend running: curl http://localhost:8080/health
+  Fix 2: Check API config: clients/desktop/src/config/api.ts
+  Fix 3: Verify backend CORS headers
+
+Issue: npm build fails
+  Fix 1: npm install && npm install
+  Fix 2: rm -Force node_modules && npm install
+  Fix 3: rm -Force .vite && npm run dev
+
+Issue: "Cannot find module"
+  Fix: npm install in the affected directory
+
+RESOURCE BASELINES
+=================
+Normal (Idle):
+  Backend CPU: 0-5%, Memory: 50-150MB
+  Frontend CPU: 0-3%, Memory: 200-400MB
+
+During Load:
+  Backend CPU: 10-50%, Memory: 100-500MB
+  Memory growth: <10MB/minute
+  Frontend CPU: 5-30%, Memory: 300-800MB
+
+RED FLAGS:
+  - CPU sustained >80%
+  - Memory growth >50MB/minute
+  - Any panic message
+  - Multiple ERRORs in short time
+
+NEXT STEPS
+==========
+1. Run: MONITOR_LOGS.bat
+2. Review system status
+3. Start all 4 components in separate windows
+4. Watch logs for errors
+5. Access all URLs in browser
+6. Verify connection from frontend to backend
+
+MONITOR WITH EXISTING SCRIPTS
+=============================
+Use QUICK_START.bat:
+  - Double-click to open menu
+  - Select Option 1 for full monitoring
+  - 2-minute test with metrics
+  - Automatic CSV results
+
+Or use monitor_resources.ps1:
+  - powershell -ExecutionPolicy Bypass -File monitor_resources.ps1
+  - Collects CPU, Memory, Threads
+  - Generates monitoring_results.csv
+
+REAL-TIME MONITORING FUNCTION
+=============================
+Add to PowerShell profile:
+
+function mon-backend { 
+  Get-Content "C:\Users\Yofor\Desktop\Trading-Engine\backend.log" -Tail 50 -Wait 
+}
+
+function mon-errors {
+  Get-Content "C:\Users\Yofor\Desktop\Trading-Engine\backend.log" -Tail 100 -Wait | Select-String "ERROR|panic|FATAL"
+}
+
+function check-ports {
+  netstat -ano | Select-String "5173|5174|8080"
+}
+
+Then use: mon-backend, mon-errors, check-ports
+
+KEY COMMANDS REFERENCE
+======================
+# Monitor backend
+Get-Content backend.log -Tail 50 -Wait
+
+# Filter errors
+Get-Content backend.log -Wait | Select-String ERROR
+
+# Check ports
+netstat -ano | findstr "5173\|5174\|8080"
+
+# Run system check
+.\MONITOR_LOGS.bat
+
+# Run full test
+.\QUICK_START.bat
+
+# Kill stuck process
+taskkill /PID [PID] /F
+
+# Rebuild frontend
+npm run dev --reset-cache
+
+================================================================================
+STATUS: All monitoring tools ready to use
+NEXT: Run MONITOR_LOGS.bat or use PowerShell commands above
+================================================================================

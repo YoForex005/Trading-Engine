@@ -3,8 +3,10 @@
  * Real-time order flow and volume analysis panel
  */
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useOrderFlowStore, type TimeframeType } from '../store/useOrderFlowStore';
+import { buildApiUrl } from '../config/api';
+import { useAppStore } from '../store/useAppStore';
 
 // Types
 interface Trade {
@@ -363,17 +365,74 @@ export const OrderFlowVisualizer: React.FC = () => {
   } = useOrderFlowStore();
 
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [trades, setTrades] = useState<Trade[]>(() => generateMockTrades(selectedSymbol, 200));
+  const [dataSource, setDataSource] = useState<'api' | 'mock'>('mock');
 
-  // Regenerate data when symbol/timeframe changes
-  const trades = useMemo(() => generateMockTrades(selectedSymbol, 200), [selectedSymbol, currentTime]);
+  // Fetch trades from real backend API: GET /admin/order-flow/live
+  const fetchLiveFlow = useCallback(async () => {
+    try {
+      const authToken = useAppStore.getState().authToken;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+
+      const response = await fetch(
+        buildApiUrl(`/admin/order-flow/live?symbol=${selectedSymbol}&limit=200`),
+        { headers }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.entries && Array.isArray(data.entries) && data.entries.length > 0) {
+          // Map backend OrderFlowEntry to component Trade type
+          const apiTrades: Trade[] = data.entries.map((entry: any, idx: number) => ({
+            id: entry.id || idx,
+            timestamp: new Date(entry.timestamp).getTime(),
+            symbol: entry.symbol || selectedSymbol,
+            side: (entry.side || '').toUpperCase() === 'BUY' ? 'BUY' as const : 'SELL' as const,
+            volume: entry.volume || 0,
+            price: entry.price || 0,
+            aggressor: entry.aggressor ?? false,
+          }));
+          setTrades(apiTrades.sort((a, b) => b.timestamp - a.timestamp));
+          setDataSource('api');
+          return;
+        }
+      }
+
+      // API returned no data or error, fall back to mock
+      if (dataSource !== 'api') {
+        setTrades(generateMockTrades(selectedSymbol, 200));
+        setDataSource('mock');
+      }
+    } catch (error) {
+      console.warn('[OrderFlow] Failed to fetch live flow, using mock data:', error);
+      if (dataSource !== 'api') {
+        setTrades(generateMockTrades(selectedSymbol, 200));
+        setDataSource('mock');
+      }
+    }
+  }, [selectedSymbol, dataSource]);
+
+  // Fetch on symbol change and set up polling
+  useEffect(() => {
+    fetchLiveFlow();
+    const interval = setInterval(fetchLiveFlow, 5000); // update every 5 seconds
+    return () => clearInterval(interval);
+  }, [fetchLiveFlow]);
+
+  // Regenerate dependent data
   const volumeLevels = useMemo(() => generateVolumeLevels(selectedSymbol, 20), [selectedSymbol]);
   const deltaBars = useMemo(() => generateDeltaBars(timeframe, 60), [timeframe, currentTime]);
 
-  // Real-time update simulation
+  // Update time for delta bars refresh
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentTime(Date.now());
-    }, 5000); // update every 5 seconds
+    }, 30000); // refresh delta bars every 30 seconds
     return () => clearInterval(interval);
   }, []);
 

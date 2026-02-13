@@ -401,7 +401,7 @@ const ContextMenu = ({
   position: ContextMenuPosition;
   items: ContextMenuItem[];
   onClose: () => void;
-  ref: React.RefObject<HTMLDivElement>;
+  ref: React.RefObject<HTMLDivElement | null>;
 }) => {
   return (
     <div
